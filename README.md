@@ -26,8 +26,9 @@ request, async cost telemetry, liveness/readiness with graceful drain, and a
 OpenAI-compatible `POST /v1/chat/completions` — buffered and SSE streaming —
 proxied to the mock provider through configurable model aliases, with
 API-key authentication, per-tenant cost attribution, and distributed
-per-tenant rate limiting (atomic Lua token buckets in Redis). Next up:
-token-based limits (TPM) and real Vertex adapters.
+per-tenant rate limiting — requests (RPM) and LLM tokens (TPM) with
+reservation/reconciliation — as atomic Lua token buckets in Redis. Next up:
+real Vertex adapters and the semantic cache.
 
 ## API
 
@@ -51,6 +52,14 @@ with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
 the gateway **fails open** within a 250ms budget — temporarily inexact
 limits beat an outage caused by the limiter itself. Unset `PUSAQ_REDIS_ADDR`
 disables limiting with a startup warning.
+
+**Token limits (TPM).** Alongside RPM, each tenant has an LLM-token bucket.
+After model resolution a request is charged its input estimate (chars/4)
+plus an output reservation (`max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`);
+when actual usage is known the difference is reconciled back atomically —
+on success, on error, and at stream end. Unknown usage keeps the charge.
+Every cost event records `tokens_charged` next to actual usage, so the
+estimate's error is measurable from the event stream.
 
 **Authentication.** Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the
@@ -82,7 +91,8 @@ Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 `PUSAQ_MOCK_URL` (`http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
 `PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
 disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
-(default = limit).
+(default = limit), `PUSAQ_TPM_LIMIT` (`100000` tokens/min), `PUSAQ_TPM_BURST`
+(default = limit), `PUSAQ_TPM_RESERVE_DEFAULT` (`512`).
 
 > Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
 > containers are healthy, the firewall is blocking host→container traffic on

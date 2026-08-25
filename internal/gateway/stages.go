@@ -123,6 +123,13 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 		return func(ctx context.Context, req *core.Request) (resp *core.Response, err error) {
 			start := time.Now()
 			defer func() {
+				finalized := false
+				finalize := func() {
+					if !finalized {
+						finalized = true
+						req.RunFinalizers()
+					}
+				}
 				event := core.CostEvent{
 					RequestID:      req.ID,
 					Timestamp:      req.ArrivedAt,
@@ -144,8 +151,8 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					event.ErrorCode = core.CodeInternal
 					resp, err = nil, core.NewError(core.CodeInternal, "internal error")
 				} else if err == nil && resp != nil && resp.Stream != nil {
-					// The stream outlives this call: hand emission to the
-					// finalizing wrapper and skip the deferred one.
+					// The stream outlives this call: hand emission (and
+					// finalizers) to the finalizing wrapper.
 					resp.Stream = &finalizingStream{
 						inner: resp.Stream,
 						req:   req,
@@ -157,6 +164,9 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					event.Outcome = core.OutcomeError
 					event.ErrorCode = core.AsError(err).Code
 				}
+				finalize()
+				event.Usage = req.Usage
+				event.TokensCharged = req.TokensCharged
 				emit(event)
 			}()
 			return next(ctx, req)
@@ -205,6 +215,7 @@ func (f *finalizingStream) Close() error {
 
 func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 	f.once.Do(func() {
+		f.req.RunFinalizers()
 		f.emit(core.CostEvent{
 			RequestID:      f.req.ID,
 			Timestamp:      f.req.ArrivedAt,
@@ -216,6 +227,7 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			RequestedModel: f.req.RequestedModel,
 			ServedModel:    f.req.ServedModel,
 			Usage:          f.req.Usage,
+			TokensCharged:  f.req.TokensCharged,
 		})
 	})
 }

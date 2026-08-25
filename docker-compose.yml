@@ -8,6 +8,8 @@ services:
       PUSAQ_MOCK_URL: http://mockprovider:9090
       PUSAQ_RPM_LIMIT: "60"
       PUSAQ_RPM_BURST: "5"
+      PUSAQ_TPM_LIMIT: "300"
+      PUSAQ_TPM_RESERVE_DEFAULT: "50"
       PUSAQ_DRAIN_DELAY: 0s
     ports:
       - "8080:8080"

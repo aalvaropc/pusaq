@@ -140,7 +140,7 @@ func TestStreamingEndToEndThroughServer(t *testing.T) {
 	var events []core.CostEvent
 	emit := func(e core.CostEvent) { events = append(events, e) }
 	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID())
-	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p})
+	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p}, CompletionsOptions{Logger: discardLogger()})
 	s := NewServer(discardLogger(), pipeline, completions)
 
 	rec := httptest.NewRecorder()
@@ -170,7 +170,7 @@ func TestStreamingEndToEndThroughServer(t *testing.T) {
 
 func TestStreamingUnknownModelStaysNormalizedError(t *testing.T) {
 	p := okProvider()
-	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p})
+	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p}, CompletionsOptions{Logger: discardLogger()})
 	_, err := h(context.Background(), &core.Request{
 		Payload: []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"x"}],"stream":true}`),
 	})

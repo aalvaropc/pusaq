@@ -55,6 +55,35 @@ end
 return { allowed, tostring(tokens), retry }
 `
 
+// adjustScript reconciles a bucket after actual consumption is known:
+// refill by elapsed time, then apply the delta (positive = refund, negative
+// = extra charge), capped at capacity. Refunds can never push a bucket past
+// full; extra charges may go negative, pushing the next refill window out.
+//
+// KEYS[1] = bucket key. ARGV: capacity(B), rate(r), now(ms), delta, ttl.
+const adjustScript = `
+local B     = tonumber(ARGV[1])
+local r     = tonumber(ARGV[2])
+local now   = tonumber(ARGV[3])
+local delta = tonumber(ARGV[4])
+local ttl   = tonumber(ARGV[5])
+
+local st     = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(st[1])
+local ts     = tonumber(st[2])
+if tokens == nil then
+  tokens, ts = B, now
+end
+
+local elapsed = math.max(0, now - ts) / 1000.0
+tokens = math.min(B, tokens + elapsed * r)
+tokens = math.min(B, tokens + delta)
+
+redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
+redis.call('EXPIRE', KEYS[1], ttl)
+return tostring(tokens)
+`
+
 // Limits parameterize one bucket dimension.
 type Limits struct {
 	// Burst is the bucket capacity B: the largest instantaneous burst.
@@ -91,6 +120,7 @@ type Limiter struct {
 	limits Limits
 	prefix string
 	script *redis.Script
+	adjust *redis.Script
 	// now is injected so tests freeze or advance time deterministically.
 	now func() time.Time
 }
@@ -105,6 +135,7 @@ func New(client redis.Scripter, prefix string, limits Limits) (*Limiter, error) 
 		limits: limits,
 		prefix: prefix,
 		script: redis.NewScript(script),
+		adjust: redis.NewScript(adjustScript),
 		now:    time.Now,
 	}, nil
 }
@@ -140,4 +171,23 @@ func (l *Limiter) Allow(ctx context.Context, tenant string, cost float64) (Decis
 		Remaining:  remaining,
 		RetryAfter: time.Duration(retryMS) * time.Millisecond,
 	}, nil
+}
+
+// Adjust reconciles a tenant's bucket once actual consumption is known:
+// positive delta refunds unused reservation (capped at capacity), negative
+// charges the shortfall. Atomic like Allow; an error means the store was
+// unreachable and the caller may accept the leaked charge (bounded by TTL).
+func (l *Limiter) Adjust(ctx context.Context, tenant string, delta float64) error {
+	key := fmt.Sprintf("rl:{%s}:%s", tenant, l.prefix)
+	err := l.adjust.Run(ctx, l.client, []string{key},
+		l.limits.Burst,
+		l.limits.Rate,
+		l.now().UnixMilli(),
+		delta,
+		int(l.limits.TTL.Seconds()),
+	).Err()
+	if err != nil {
+		return fmt.Errorf("rate limit adjust script: %w", err)
+	}
+	return nil
 }

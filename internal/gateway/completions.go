@@ -5,15 +5,36 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/provider"
+	"github.com/aalvaropc/pusaq/internal/ratelimit"
 )
 
 // ServedModelHeader reports the physical model that served the request
 // (constitution rule 7).
 const ServedModelHeader = "X-Pusaq-Model"
+
+// TokenLimiter is the TPM decision surface: charge on admission, reconcile
+// once actual consumption is known. Satisfied by *ratelimit.Limiter; nil
+// disables token limiting.
+type TokenLimiter interface {
+	Allow(ctx context.Context, tenant string, cost float64) (ratelimit.Decision, error)
+	Adjust(ctx context.Context, tenant string, delta float64) error
+}
+
+// estimateInputTokens approximates prompt tokens as ceil(chars/4) — crude,
+// but its error is measurable: tokens_charged and actual usage land side by
+// side on every cost event. A real tokenizer is a later, earned dependency.
+func estimateInputTokens(messages []provider.Message) int {
+	chars := 0
+	for _, m := range messages {
+		chars += len(m.Role) + len(m.Content)
+	}
+	return (chars + 3) / 4
+}
 
 // Route maps a model alias to a provider and its physical upstream model.
 // Routing tables are configuration: physical model names never appear in
@@ -64,11 +85,22 @@ func parseCompletionRequest(payload []byte) (completionRequest, error) {
 	return req, nil
 }
 
+// CompletionsOptions parameterize the completions flow.
+type CompletionsOptions struct {
+	// Tokens enables TPM limiting when non-nil.
+	Tokens TokenLimiter
+	// ReserveDefault is the output reservation when max_tokens is absent.
+	ReserveDefault int
+	Logger         *slog.Logger
+}
+
 // CompletionsHandler is the terminal handler for POST /v1/chat/completions:
-// validate → resolve the alias from the routing table → call the provider →
-// map the response. It records requested/served model and usage on the
-// envelope so the accounting stage picks them up.
-func CompletionsHandler(routes map[string]Route, providers map[string]provider.Provider) core.Handler {
+// validate → resolve the alias from the routing table → charge the token
+// budget (constitution rule 4: only after model resolution) → call the
+// provider → map the response. Reconciliation of the token charge is
+// registered as a finalizer, so it holds on success, error, panic, and at
+// stream end.
+func CompletionsHandler(routes map[string]Route, providers map[string]provider.Provider, opts CompletionsOptions) core.Handler {
 	return func(ctx context.Context, req *core.Request) (*core.Response, error) {
 		cr, err := parseCompletionRequest(req.Payload)
 		if err != nil {
@@ -86,6 +118,10 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		}
 		req.RequestedModel = cr.Model
 		req.ServedModel = route.Model
+
+		if err := chargeTokens(ctx, req, cr, opts); err != nil {
+			return nil, err
+		}
 
 		if cr.Stream {
 			return streamCompletion(ctx, p, req, cr, route)
@@ -121,6 +157,63 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		resp.SetHeader(ServedModelHeader, route.Model)
 		return resp, nil
 	}
+}
+
+// chargeTokens charges the tenant's token bucket with the request's input
+// estimate plus output reservation, and registers the exactly-once
+// reconciliation finalizer. A nil limiter disables TPM.
+func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, opts CompletionsOptions) error {
+	if opts.Tokens == nil {
+		return nil
+	}
+	reserve := opts.ReserveDefault
+	if cr.MaxTokens > 0 {
+		reserve = cr.MaxTokens
+	}
+	charged := estimateInputTokens(cr.Messages) + reserve
+
+	limCtx, cancel := context.WithTimeout(ctx, limiterBudget)
+	d, err := opts.Tokens.Allow(limCtx, req.Tenant, float64(charged))
+	cancel()
+	if err != nil {
+		opts.Logger.Warn("token limiter store unavailable, failing open",
+			slog.String("request_id", req.ID),
+			slog.String("tenant", req.Tenant),
+			slog.Any("error", err),
+		)
+		return nil
+	}
+	if !d.Allowed {
+		return &core.Error{
+			Code:       core.CodeRateLimited,
+			Message:    "token rate limit exceeded",
+			RetryAfter: d.RetryAfter,
+		}
+	}
+	req.TokensCharged = charged
+
+	req.OnFinalize(func() {
+		// Actual usage unknown → the full charge stands (refunding on
+		// unknown actuals would let clients zero charges by aborting).
+		if req.Usage == (core.Usage{}) {
+			return
+		}
+		actual := req.Usage.PromptTokens + req.Usage.CompletionTokens
+		delta := float64(charged - actual) // >0 refund, <0 extra charge
+		if delta == 0 {
+			return
+		}
+		adjCtx, cancel := context.WithTimeout(context.Background(), limiterBudget)
+		defer cancel()
+		if err := opts.Tokens.Adjust(adjCtx, req.Tenant, delta); err != nil {
+			opts.Logger.Warn("token reconciliation failed; charge stands until bucket TTL",
+				slog.String("request_id", req.ID),
+				slog.String("tenant", req.Tenant),
+				slog.Any("error", err),
+			)
+		}
+	})
+	return nil
 }
 
 // streamCompletion proxies a streaming completion: the provider's raw SSE

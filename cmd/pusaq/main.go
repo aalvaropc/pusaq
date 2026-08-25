@@ -49,26 +49,38 @@ func run(logger *slog.Logger) error {
 		gateway.RequestID(),
 		gateway.Auth(cfg.APIKeys),
 	}
+	completionsOpts := gateway.CompletionsOptions{
+		ReserveDefault: cfg.TPMReserveDefault,
+		Logger:         logger,
+	}
 	if cfg.RedisAddr != "" {
-		limiter, err := ratelimit.New(
-			// MaxRetries -1 disables internal retries: the rate-limit
-			// stage owns the time budget and fails open past it.
-			redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, MaxRetries: -1}),
-			"rpm",
-			ratelimit.Limits{
-				Burst: cfg.RPMBurst,
-				Rate:  cfg.RPMLimit / 60.0, // requests/minute → tokens/second
-				TTL:   config.DefaultBucketTTL,
-			},
-		)
+		// MaxRetries -1 disables internal retries: the limiter stages own
+		// the time budget and fail open past it.
+		client := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, MaxRetries: -1})
+		rpm, err := ratelimit.New(client, "rpm", ratelimit.Limits{
+			Burst: cfg.RPMBurst,
+			Rate:  cfg.RPMLimit / 60.0, // requests/minute → tokens/second
+			TTL:   config.DefaultBucketTTL,
+		})
 		if err != nil {
 			return err
 		}
-		stages = append(stages, gateway.RateLimit(limiter, logger))
+		tpm, err := ratelimit.New(client, "tpm", ratelimit.Limits{
+			Burst: cfg.TPMBurst,
+			Rate:  cfg.TPMLimit / 60.0, // tokens/minute → tokens/second
+			TTL:   config.DefaultBucketTTL,
+		})
+		if err != nil {
+			return err
+		}
+		stages = append(stages, gateway.RateLimit(rpm, logger))
+		completionsOpts.Tokens = tpm
 		logger.Info("rate limiting enabled",
 			slog.String("redis", cfg.RedisAddr),
 			slog.Float64("rpm_limit", cfg.RPMLimit),
 			slog.Float64("rpm_burst", cfg.RPMBurst),
+			slog.Float64("tpm_limit", cfg.TPMLimit),
+			slog.Float64("tpm_burst", cfg.TPMBurst),
 		)
 	} else {
 		logger.Warn("rate limiting disabled: no PUSAQ_REDIS_ADDR configured")
@@ -82,7 +94,7 @@ func run(logger *slog.Logger) error {
 	for alias, r := range cfg.Routes {
 		routes[alias] = gateway.Route{Provider: r.Provider, Model: r.Model}
 	}
-	completions := gateway.CompletionsHandler(routes, providers)
+	completions := gateway.CompletionsHandler(routes, providers, completionsOpts)
 
 	srv := gateway.NewServer(logger, pipeline, completions)
 

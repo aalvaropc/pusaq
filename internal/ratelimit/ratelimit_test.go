@@ -183,3 +183,57 @@ func TestLimitsValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestAdjustRefundCappedAtCapacity(t *testing.T) {
+	l, _, _ := newTestLimiter(t, limits())
+	ctx := context.Background()
+
+	// Charge 3 of 5, then refund 10 — the bucket must cap at 5, not 12.
+	if d, _ := l.Allow(ctx, "team-a", 3); !d.Allowed {
+		t.Fatal("charge denied")
+	}
+	if err := l.Adjust(ctx, "team-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	// Exactly capacity available: 5 pass, the 6th does not.
+	admitted := 0
+	for range 6 {
+		if d, _ := l.Allow(ctx, "team-a", 1); d.Allowed {
+			admitted++
+		}
+	}
+	if admitted != 5 {
+		t.Fatalf("admitted %d after over-refund, want exactly capacity 5", admitted)
+	}
+}
+
+func TestAdjustExtraChargeGoesNegative(t *testing.T) {
+	l, _, now := newTestLimiter(t, limits())
+	ctx := context.Background()
+
+	// Drain to 0, then charge 2 more (actual exceeded reservation).
+	if d, _ := l.Allow(ctx, "team-a", 5); !d.Allowed {
+		t.Fatal("initial charge denied")
+	}
+	if err := l.Adjust(ctx, "team-a", -2); err != nil {
+		t.Fatal(err)
+	}
+	// One second of refill (1 token) is not enough to cover the debt + cost.
+	*now = now.Add(time.Second)
+	if d, _ := l.Allow(ctx, "team-a", 1); d.Allowed {
+		t.Fatal("admitted while the bucket was in debt")
+	}
+	// Four more seconds clears the 2-token debt and accrues 3: cost 1 passes.
+	*now = now.Add(4 * time.Second)
+	if d, _ := l.Allow(ctx, "team-a", 1); !d.Allowed {
+		t.Fatal("denied after the debt window elapsed")
+	}
+}
+
+func TestAdjustOnStoreFailureSurfacesError(t *testing.T) {
+	l, mr, _ := newTestLimiter(t, limits())
+	mr.Close()
+	if err := l.Adjust(context.Background(), "team-a", 1); err == nil {
+		t.Fatal("want error when the store is down")
+	}
+}

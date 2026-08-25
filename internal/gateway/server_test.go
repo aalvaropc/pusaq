@@ -17,7 +17,7 @@ func newTestServer(t *testing.T) (*Server, *[]core.CostEvent) {
 	var events []core.CostEvent
 	emit := func(e core.CostEvent) { events = append(events, e) }
 	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID())
-	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()})
+	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()}, CompletionsOptions{Logger: discardLogger()})
 	return NewServer(discardLogger(), pipeline, completions), &events
 }
 
@@ -130,7 +130,7 @@ func TestPipelineErrorRenderedNormalizedWithRequestID(t *testing.T) {
 		}
 	})
 	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID(), failing)
-	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()})
+	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()}, CompletionsOptions{Logger: discardLogger()})
 	s := NewServer(discardLogger(), pipeline, completions)
 
 	rec := httptest.NewRecorder()
