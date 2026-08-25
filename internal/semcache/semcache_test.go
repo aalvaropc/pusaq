@@ -119,7 +119,11 @@ func (c *capture) byMsg(msg string) []map[string]any {
 
 func TestShadowHitAndMissRecords(t *testing.T) {
 	cap := &capture{}
-	s := NewShadow(embed.Local{}, NewIndex(100), cap.logger(), 0.9, 2, 16)
+	// One worker: evaluations run in offer order, so r2 deterministically
+	// finds r1 already inserted. With more workers, r2 can be evaluated
+	// before r1's insert lands (the production shadow accepts that
+	// occasional undercount; this test needs determinism).
+	s := NewShadow(embed.Local{}, NewIndex(100), cap.logger(), 0.9, 1, 16)
 
 	ns := Namespace("t1", "m1", "")
 	s.Offer(Sample{RequestID: "r1", Namespace: ns, Prompt: "how do I cancel my subscription", Fingerprint: "fp1"})
