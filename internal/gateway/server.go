@@ -4,7 +4,6 @@
 package gateway
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -26,16 +25,15 @@ type Server struct {
 	mux      *http.ServeMux
 }
 
-// NewServer builds the gateway with the given composed pipeline stage.
-// The server starts not-ready; call SetReady(true) once serving begins.
-func NewServer(logger *slog.Logger, pipeline core.Stage) *Server {
+// NewServer builds the gateway with the given composed pipeline stage and
+// the terminal handler for chat completions. The server starts not-ready;
+// call SetReady(true) once serving begins.
+func NewServer(logger *slog.Logger, pipeline core.Stage, completions core.Handler) *Server {
 	s := &Server{logger: logger, pipeline: pipeline, mux: http.NewServeMux()}
 
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
-	// Temporary smoke endpoint: proves a request traverses the pipeline and
-	// always emits a cost event. Removed when chat completions lands.
-	s.mux.Handle("POST /v1/echo", s.pipelineHandler("echo", echoHandler))
+	s.mux.Handle("POST /v1/chat/completions", s.pipelineHandler("chat.completions", completions))
 
 	return s
 }
@@ -86,6 +84,10 @@ func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler 
 		req := &core.Request{ArrivedAt: time.Now().UTC(), Op: op, Payload: body}
 		resp, err := h(r.Context(), req)
 		if err != nil {
+			// After model resolution, even errors report the attempted model.
+			if req.ServedModel != "" {
+				w.Header().Set(ServedModelHeader, req.ServedModel)
+			}
 			s.writeError(w, req.ID, core.AsError(err))
 			return
 		}
@@ -124,13 +126,4 @@ func (s *Server) writeError(w http.ResponseWriter, requestID string, e *core.Err
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		s.logger.Error("failed to encode error response", slog.Any("error", err))
 	}
-}
-
-// echoHandler is the terminal handler of the smoke endpoint: it returns the
-// request payload unchanged.
-func echoHandler(_ context.Context, req *core.Request) (*core.Response, error) {
-	return &core.Response{
-		Status: http.StatusOK,
-		Body:   req.Payload,
-	}, nil
 }

@@ -6,7 +6,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -16,7 +18,27 @@ const (
 	DefaultDrainDelay      = 1 * time.Second
 	DefaultShutdownGrace   = 10 * time.Second
 	DefaultTelemetryBuffer = 1024
+	DefaultMockURL         = "http://localhost:9090"
+	DefaultUpstreamTimeout = 30 * time.Second
 )
+
+// Route maps a model alias to a provider name and its physical upstream
+// model. Physical model names live here — in configuration — only.
+type Route struct {
+	Provider string
+	Model    string
+}
+
+// defaultRoutes maps the public aliases to the mock provider until real
+// adapters land. pusaq/auto currently resolves like pusaq/fast; the router
+// slice will make it a real decision.
+func defaultRoutes() map[string]Route {
+	return map[string]Route{
+		"pusaq/fast": {Provider: "mock", Model: "mock-model"},
+		"pusaq/best": {Provider: "mock", Model: "mock-model"},
+		"pusaq/auto": {Provider: "mock", Model: "mock-model"},
+	}
+}
 
 // Config holds the gateway's runtime settings.
 type Config struct {
@@ -32,6 +54,12 @@ type Config struct {
 	// TelemetryBuffer is the cost-event buffer capacity
 	// (PUSAQ_TELEMETRY_BUFFER); overflow drops events.
 	TelemetryBuffer int
+	// MockURL is the mock provider's base URL (PUSAQ_MOCK_URL).
+	MockURL string
+	// UpstreamTimeout bounds every provider call (PUSAQ_UPSTREAM_TIMEOUT).
+	UpstreamTimeout time.Duration
+	// Routes maps model aliases to providers and physical models.
+	Routes map[string]Route
 }
 
 // Load reads configuration through lookup (os.LookupEnv in production,
@@ -42,6 +70,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		DrainDelay:      DefaultDrainDelay,
 		ShutdownGrace:   DefaultShutdownGrace,
 		TelemetryBuffer: DefaultTelemetryBuffer,
+		MockURL:         DefaultMockURL,
+		UpstreamTimeout: DefaultUpstreamTimeout,
+		Routes:          defaultRoutes(),
 	}
 
 	if v, ok := lookup("PUSAQ_ADDR"); ok {
@@ -82,6 +113,25 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_TELEMETRY_BUFFER: must be positive, got %d", n)
 		}
 		cfg.TelemetryBuffer = n
+	}
+
+	if v, ok := lookup("PUSAQ_MOCK_URL"); ok {
+		u, err := url.Parse(v)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return Config{}, fmt.Errorf("PUSAQ_MOCK_URL: not an absolute URL: %q", v)
+		}
+		cfg.MockURL = strings.TrimRight(v, "/")
+	}
+
+	if v, ok := lookup("PUSAQ_UPSTREAM_TIMEOUT"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_UPSTREAM_TIMEOUT: %w", err)
+		}
+		if d <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_UPSTREAM_TIMEOUT: must be positive, got %s", d)
+		}
+		cfg.UpstreamTimeout = d
 	}
 
 	return cfg, nil

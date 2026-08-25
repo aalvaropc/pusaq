@@ -49,11 +49,14 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 			start := time.Now()
 			defer func() {
 				event := core.CostEvent{
-					RequestID: req.ID,
-					Timestamp: req.ArrivedAt,
-					Op:        req.Op,
-					Outcome:   core.OutcomeSuccess,
-					Latency:   time.Since(start),
+					RequestID:      req.ID,
+					Timestamp:      req.ArrivedAt,
+					Op:             req.Op,
+					Outcome:        core.OutcomeSuccess,
+					Latency:        time.Since(start),
+					RequestedModel: req.RequestedModel,
+					ServedModel:    req.ServedModel,
+					Usage:          req.Usage,
 				}
 				if r := recover(); r != nil {
 					logger.Error("panic recovered",

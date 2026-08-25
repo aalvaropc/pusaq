@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/aalvaropc/pusaq/internal/core"
+	"github.com/aalvaropc/pusaq/internal/provider"
 )
 
 func newTestServer(t *testing.T) (*Server, *[]core.CostEvent) {
@@ -16,7 +17,8 @@ func newTestServer(t *testing.T) (*Server, *[]core.CostEvent) {
 	var events []core.CostEvent
 	emit := func(e core.CostEvent) { events = append(events, e) }
 	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID())
-	return NewServer(discardLogger(), pipeline), &events
+	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()})
+	return NewServer(discardLogger(), pipeline, completions), &events
 }
 
 func TestHealthzAlwaysOK(t *testing.T) {
@@ -52,17 +54,17 @@ func TestReadyzFollowsReadinessFlag(t *testing.T) {
 	}
 }
 
-func TestEchoTraversesPipelineAndEmitsCostEvent(t *testing.T) {
+func TestCompletionsTraversesPipelineAndEmitsCostEvent(t *testing.T) {
 	s, events := newTestServer(t)
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/echo", strings.NewReader(`{"hello":"pusaq"}`)))
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(validPayload()))))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("echo = %d, want 200", rec.Code)
+		t.Fatalf("completions = %d, want 200", rec.Code)
 	}
-	if body := rec.Body.String(); body != `{"hello":"pusaq"}` {
-		t.Fatalf("echo body = %q", body)
+	if got := rec.Header().Get(ServedModelHeader); got != "mock-model" {
+		t.Fatalf("%s = %q, want mock-model", ServedModelHeader, got)
 	}
 	id := rec.Header().Get(RequestIDHeader)
 	if id == "" {
@@ -71,8 +73,18 @@ func TestEchoTraversesPipelineAndEmitsCostEvent(t *testing.T) {
 	if len(*events) != 1 {
 		t.Fatalf("emitted %d cost events, want 1", len(*events))
 	}
-	if (*events)[0].RequestID != id {
-		t.Fatalf("cost event ID %q != header ID %q", (*events)[0].RequestID, id)
+	e := (*events)[0]
+	if e.RequestID != id {
+		t.Fatalf("cost event ID %q != header ID %q", e.RequestID, id)
+	}
+	if e.RequestedModel != "pusaq/fast" || e.ServedModel != "mock-model" {
+		t.Fatalf("cost event models = %q/%q", e.RequestedModel, e.ServedModel)
+	}
+	if e.Usage.PromptTokens != 5 || e.Usage.CompletionTokens != 2 {
+		t.Fatalf("cost event usage = %+v", e.Usage)
+	}
+	if e.Op != "chat.completions" {
+		t.Fatalf("cost event op = %q", e.Op)
 	}
 }
 
@@ -90,7 +102,7 @@ func TestOversizedBodyRejectedNormalized(t *testing.T) {
 	big := strings.Repeat("a", maxBodyBytes+1)
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/echo", strings.NewReader(big)))
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(big)))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("oversized body = %d, want 400", rec.Code)
@@ -118,10 +130,11 @@ func TestPipelineErrorRenderedNormalizedWithRequestID(t *testing.T) {
 		}
 	})
 	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID(), failing)
-	s := NewServer(discardLogger(), pipeline)
+	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()})
+	s := NewServer(discardLogger(), pipeline, completions)
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/echo", strings.NewReader("{}")))
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}")))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)

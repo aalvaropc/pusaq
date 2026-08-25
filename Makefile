@@ -27,5 +27,8 @@ lint: ## Run golangci-lint and go vet
 tidy: ## Tidy module files
 	go mod tidy
 
-smoke: ## Send a smoke request through the pipeline (gateway must be running)
-	curl -sS -X POST localhost:8080/v1/echo -d '{"hello":"pusaq"}' -w '\nstatus: %{http_code}\n'
+smoke: ## Send a chat completion through the gateway (gateway + mock must be running)
+	curl -sS -X POST localhost:8080/v1/chat/completions \
+		-H 'Content-Type: application/json' \
+		-d '{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}]}' \
+		-w '\nstatus: %{http_code}\n'

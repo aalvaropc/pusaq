@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -22,17 +23,19 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, MockURL: "http://localhost:9090", UpstreamTimeout: 30 * time.Second},
 		},
 		{
 			name: "all overrides applied",
 			env: map[string]string{
-				"PUSAQ_ADDR":             ":9090",
+				"PUSAQ_ADDR":             ":9091",
 				"PUSAQ_DRAIN_DELAY":      "0s",
 				"PUSAQ_SHUTDOWN_GRACE":   "30s",
 				"PUSAQ_TELEMETRY_BUFFER": "256",
+				"PUSAQ_MOCK_URL":         "http://mock:9090/",
+				"PUSAQ_UPSTREAM_TIMEOUT": "5s",
 			},
-			want: Config{Addr: ":9090", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, MockURL: "http://mock:9090", UpstreamTimeout: 5 * time.Second},
 		},
 		{
 			name:    "empty addr rejected",
@@ -64,6 +67,16 @@ func TestLoad(t *testing.T) {
 			env:     map[string]string{"PUSAQ_TELEMETRY_BUFFER": "-1"},
 			wantErr: true,
 		},
+		{
+			name:    "relative mock URL rejected",
+			env:     map[string]string{"PUSAQ_MOCK_URL": "localhost:9090"},
+			wantErr: true,
+		},
+		{
+			name:    "non-positive upstream timeout rejected",
+			env:     map[string]string{"PUSAQ_UPSTREAM_TIMEOUT": "0s"},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -78,8 +91,18 @@ func TestLoad(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load() error: %v", err)
 			}
-			if got != tt.want {
+			gotRoutes := got.Routes
+			got.Routes = nil
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Load() = %+v, want %+v", got, tt.want)
+			}
+			if len(gotRoutes) != 3 {
+				t.Fatalf("Routes has %d aliases, want 3", len(gotRoutes))
+			}
+			for _, alias := range []string{"pusaq/fast", "pusaq/best", "pusaq/auto"} {
+				if _, ok := gotRoutes[alias]; !ok {
+					t.Fatalf("Routes missing alias %q", alias)
+				}
 			}
 		})
 	}
