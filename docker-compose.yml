@@ -1,0 +1,20 @@
+services:
+  # Redis anchors the local environment for the rate-limiting slice.
+  # redis:7 for Memorystore parity. No gateway code uses it yet.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mockprovider:
+    build:
+      context: .
+      target: mockprovider
+    command: ["--addr", ":9090", "--latency-p50", "200ms", "--latency-p99", "2s", "--error-rate", "0"]
+    ports:
+      - "9090:9090"
