@@ -20,9 +20,15 @@ type Request struct {
 	// ArrivedAt is the instant the gateway admitted the request.
 	ArrivedAt time.Time
 
-	// Op names the gateway operation being performed (e.g. "echo",
-	// later "chat.completions"). It labels cost events and routing decisions.
+	// Op names the gateway operation being performed
+	// (e.g. "chat.completions"). It labels cost events and routing.
 	Op string
+
+	// APIKey is the bearer token the transport extracted; consumed by the
+	// auth stage and never logged.
+	APIKey string
+	// Tenant is who this request is attributed to, set by the auth stage.
+	Tenant string
 
 	// Payload carries the operation-specific request body.
 	Payload []byte

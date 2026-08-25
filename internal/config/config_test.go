@@ -77,6 +77,21 @@ func TestLoad(t *testing.T) {
 			env:     map[string]string{"PUSAQ_UPSTREAM_TIMEOUT": "0s"},
 			wantErr: true,
 		},
+		{
+			name:    "malformed api key pair rejected",
+			env:     map[string]string{"PUSAQ_API_KEYS": "sk-abc"},
+			wantErr: true,
+		},
+		{
+			name:    "empty tenant rejected",
+			env:     map[string]string{"PUSAQ_API_KEYS": "sk-abc:"},
+			wantErr: true,
+		},
+		{
+			name:    "duplicate api key rejected",
+			env:     map[string]string{"PUSAQ_API_KEYS": "sk-abc:one,sk-abc:two"},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -105,5 +120,28 @@ func TestLoad(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoadAPIKeys(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{
+		"PUSAQ_API_KEYS": " sk-a:team-a , sk-b:team-b ",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	want := map[string]string{"sk-a": "team-a", "sk-b": "team-b"}
+	if !reflect.DeepEqual(got.APIKeys, want) {
+		t.Fatalf("APIKeys = %+v, want %+v", got.APIKeys, want)
+	}
+}
+
+func TestLoadNoAPIKeysMeansDevMode(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(got.APIKeys) != 0 {
+		t.Fatalf("APIKeys = %+v, want empty (dev mode)", got.APIKeys)
 	}
 }
