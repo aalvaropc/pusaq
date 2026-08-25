@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -138,8 +140,9 @@ func (s *Server) copyStream(w http.ResponseWriter, stream io.ReadCloser) {
 // errorBody is the single JSON error shape every gateway failure uses.
 type errorBody struct {
 	Error struct {
-		Code    core.Code `json:"code"`
-		Message string    `json:"message"`
+		Code         core.Code `json:"code"`
+		Message      string    `json:"message"`
+		RetryAfterMS int64     `json:"retry_after_ms,omitempty"`
 	} `json:"error"`
 }
 
@@ -151,6 +154,10 @@ func (s *Server) writeError(w http.ResponseWriter, requestID string, e *core.Err
 	w.Header().Set("Content-Type", "application/json")
 	if requestID != "" {
 		w.Header().Set(RequestIDHeader, requestID)
+	}
+	if e.RetryAfter > 0 {
+		body.Error.RetryAfterMS = e.RetryAfter.Milliseconds()
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(e.RetryAfter.Seconds()))))
 	}
 	w.WriteHeader(e.Status())
 	if err := json.NewEncoder(w).Encode(body); err != nil {

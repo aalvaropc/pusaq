@@ -1,6 +1,23 @@
 services:
-  # Redis anchors the local environment for the rate-limiting slice.
-  # redis:7 for Memorystore parity. No gateway code uses it yet.
+  pusaq:
+    build:
+      context: .
+      target: pusaq
+    environment:
+      PUSAQ_REDIS_ADDR: redis:6379
+      PUSAQ_MOCK_URL: http://mockprovider:9090
+      PUSAQ_RPM_LIMIT: "60"
+      PUSAQ_RPM_BURST: "5"
+      PUSAQ_DRAIN_DELAY: 0s
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      mockprovider:
+        condition: service_started
+
+  # redis:7 for Memorystore parity; backs the distributed rate limiter.
   redis:
     image: redis:7-alpine
     ports:

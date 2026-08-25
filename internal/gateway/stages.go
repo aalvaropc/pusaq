@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aalvaropc/pusaq/internal/core"
+	"github.com/aalvaropc/pusaq/internal/ratelimit"
 )
 
 // RequestIDHeader carries the request ID back to the client. The HTTP
@@ -62,6 +63,47 @@ func Auth(apiKeys map[string]string) core.Stage {
 				return nil, core.NewError(core.CodeUnauthorized, "unknown API key")
 			}
 			req.Tenant = tenant
+			return next(ctx, req)
+		}
+	}
+}
+
+// Admitter is the rate-limit decision surface the stage consumes; satisfied
+// by *ratelimit.Limiter. An error means the store was unreachable.
+type Admitter interface {
+	Allow(ctx context.Context, tenant string, cost float64) (ratelimit.Decision, error)
+}
+
+// limiterBudget bounds how long the hot path waits for the limiter's store.
+// Past it, the request fails open: a degraded limiter may be inexact but
+// must never become the latency bottleneck it exists to protect against.
+const limiterBudget = 250 * time.Millisecond
+
+// RateLimit rejects requests beyond the tenant's bucket with rate_limited
+// (429) and a computed retry. It runs after Auth (it keys by tenant) and
+// before any expensive work. Store failure fails OPEN with a logged warning:
+// temporarily inexact limits beat an outage caused by the limiter itself.
+func RateLimit(limiter Admitter, logger *slog.Logger) core.Stage {
+	return func(next core.Handler) core.Handler {
+		return func(ctx context.Context, req *core.Request) (*core.Response, error) {
+			limCtx, cancel := context.WithTimeout(ctx, limiterBudget)
+			d, err := limiter.Allow(limCtx, req.Tenant, 1)
+			cancel()
+			if err != nil {
+				logger.Warn("rate limiter store unavailable, failing open",
+					slog.String("request_id", req.ID),
+					slog.String("tenant", req.Tenant),
+					slog.Any("error", err),
+				)
+				return next(ctx, req)
+			}
+			if !d.Allowed {
+				return nil, &core.Error{
+					Code:       core.CodeRateLimited,
+					Message:    "request rate limit exceeded",
+					RetryAfter: d.RetryAfter,
+				}
+			}
 			return next(ctx, req)
 		}
 	}

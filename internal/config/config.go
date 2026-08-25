@@ -20,6 +20,8 @@ const (
 	DefaultTelemetryBuffer = 1024
 	DefaultMockURL         = "http://localhost:9090"
 	DefaultUpstreamTimeout = 30 * time.Second
+	DefaultRPMLimit        = 60.0
+	DefaultBucketTTL       = 10 * time.Minute
 )
 
 // Route maps a model alias to a provider name and its physical upstream
@@ -64,6 +66,16 @@ type Config struct {
 	// "key:tenant" comma-separated). Empty means dev mode: no
 	// authentication, every request attributed to the "dev" tenant.
 	APIKeys map[string]string
+	// RedisAddr enables distributed rate limiting when set
+	// (PUSAQ_REDIS_ADDR); unset means limiting is disabled, announced by
+	// a startup warning.
+	RedisAddr string
+	// RPMLimit is the sustained per-tenant request rate in requests per
+	// minute (PUSAQ_RPM_LIMIT).
+	RPMLimit float64
+	// RPMBurst is the per-tenant bucket capacity (PUSAQ_RPM_BURST,
+	// default: equal to RPMLimit).
+	RPMBurst float64
 }
 
 // Load reads configuration through lookup (os.LookupEnv in production,
@@ -136,6 +148,26 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_UPSTREAM_TIMEOUT: must be positive, got %s", d)
 		}
 		cfg.UpstreamTimeout = d
+	}
+
+	cfg.RPMLimit = DefaultRPMLimit
+	if v, ok := lookup("PUSAQ_REDIS_ADDR"); ok && v != "" {
+		cfg.RedisAddr = v
+	}
+	if v, ok := lookup("PUSAQ_RPM_LIMIT"); ok {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_RPM_LIMIT: must be a positive number, got %q", v)
+		}
+		cfg.RPMLimit = n
+	}
+	cfg.RPMBurst = cfg.RPMLimit
+	if v, ok := lookup("PUSAQ_RPM_BURST"); ok {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_RPM_BURST: must be a positive number, got %q", v)
+		}
+		cfg.RPMBurst = n
 	}
 
 	if v, ok := lookup("PUSAQ_API_KEYS"); ok && v != "" {

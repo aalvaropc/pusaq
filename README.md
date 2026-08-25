@@ -25,8 +25,9 @@ record about it. Models are addressed through aliases (`pusaq/fast`,
 request, async cost telemetry, liveness/readiness with graceful drain, and a
 OpenAI-compatible `POST /v1/chat/completions` — buffered and SSE streaming —
 proxied to the mock provider through configurable model aliases, with
-API-key authentication and per-tenant cost attribution. Next up: distributed
-rate limiting and real Vertex adapters.
+API-key authentication, per-tenant cost attribution, and distributed
+per-tenant rate limiting (atomic Lua token buckets in Redis). Next up:
+token-based limits (TPM) and real Vertex adapters.
 
 ## API
 
@@ -41,6 +42,16 @@ change). Responses carry `X-Pusaq-Model` (the physical model served) and
 `{"error":{"code":"...","message":"..."}}` — provider failures surface as
 `upstream_error` (502) without leaking upstream responses.
 
+**Rate limiting.** With `PUSAQ_REDIS_ADDR` set, each tenant gets a token
+bucket in Redis decided by one atomic Lua script shared by every replica —
+read-decide-decrement as a single operation, so the limit stays exact under
+concurrency (proven by test: exactly the bucket capacity admitted out of 200
+concurrent requests across two instances). Denials are 429 `rate_limited`
+with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
+the gateway **fails open** within a 250ms budget — temporarily inexact
+limits beat an outage caused by the limiter itself. Unset `PUSAQ_REDIS_ADDR`
+disables limiting with a startup warning.
+
 **Authentication.** Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the
 tenant. Missing/unknown keys get a normalized `unauthorized` (401). With no
@@ -53,7 +64,7 @@ attributed to the `dev` tenant, and a warning logged at startup.
 Requirements: Go 1.26+, Docker with Compose, golangci-lint.
 
 ```sh
-make up      # start local environment: Redis + mock provider
+make up      # start local environment: gateway + Redis + mock provider
 make run     # run the gateway on :8080
 make smoke   # POST /v1/chat/completions with pusaq/fast
 make test    # go test -race -cover ./...
@@ -69,7 +80,9 @@ readiness and turns 503 during the drain window on SIGTERM.
 Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 (`1s`), `PUSAQ_SHUTDOWN_GRACE` (`10s`), `PUSAQ_TELEMETRY_BUFFER` (`1024`),
 `PUSAQ_MOCK_URL` (`http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
-`PUSAQ_API_KEYS` (unset → dev mode).
+`PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
+disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
+(default = limit).
 
 > Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
 > containers are healthy, the firewall is blocking host→container traffic on
