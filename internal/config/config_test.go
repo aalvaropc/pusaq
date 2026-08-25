@@ -185,3 +185,46 @@ func TestLoadNoAPIKeysMeansDevMode(t *testing.T) {
 		t.Fatalf("APIKeys = %+v, want empty (dev mode)", got.APIKeys)
 	}
 }
+
+func TestUpstreamKeysAttached(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{
+		"PUSAQ_UPSTREAMS":           "gemini=http://g:1,mock=http://m:2",
+		"PUSAQ_UPSTREAM_KEY_GEMINI": "sk-gem",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.Upstreams[0].APIKey != "sk-gem" {
+		t.Fatalf("gemini key = %q, want attached", got.Upstreams[0].APIKey)
+	}
+	if got.Upstreams[1].APIKey != "" {
+		t.Fatal("mock upstream gained a key it was never given")
+	}
+}
+
+func TestRouteModelOverrides(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{
+		"PUSAQ_ROUTES": "pusaq/fast=gemini-2.5-flash, pusaq/best=gemini-2.5-pro",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.Routes["pusaq/fast"].Model != "gemini-2.5-flash" {
+		t.Fatalf("fast model = %q", got.Routes["pusaq/fast"].Model)
+	}
+	if got.Routes["pusaq/best"].Model != "gemini-2.5-pro" {
+		t.Fatalf("best model = %q", got.Routes["pusaq/best"].Model)
+	}
+	if got.Routes["pusaq/auto"].Model != "mock-model" {
+		t.Fatalf("auto model = %q, want untouched default", got.Routes["pusaq/auto"].Model)
+	}
+}
+
+func TestRouteOverrideUnknownAliasRejected(t *testing.T) {
+	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/turbo=x"})); err == nil {
+		t.Fatal("unknown alias accepted")
+	}
+	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/fast"})); err == nil {
+		t.Fatal("malformed pair accepted")
+	}
+}

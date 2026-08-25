@@ -202,3 +202,50 @@ func TestStreamCompleteNotKilledByOverallTimeout(t *testing.T) {
 		t.Fatalf("incomplete stream: %q", got)
 	}
 }
+
+func TestAPIKeySentAsBearerWhenConfigured(t *testing.T) {
+	var buffered, streamed string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept"), "event-stream") {
+			streamed = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+		buffered = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("gemini", upstream.URL, time.Second, discardLogger(), WithAPIKey("sk-gem"))
+	if _, err := p.Complete(context.Background(), chatReq()); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := p.StreamComplete(context.Background(), chatReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.ReadAll(stream)
+	_ = stream.Close()
+
+	if buffered != "Bearer sk-gem" || streamed != "Bearer sk-gem" {
+		t.Fatalf("auth headers = buffered %q / streamed %q", buffered, streamed)
+	}
+}
+
+func TestNoAPIKeyMeansNoAuthHeader(t *testing.T) {
+	var got string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("mock", upstream.URL, time.Second, discardLogger())
+	if _, err := p.Complete(context.Background(), chatReq()); err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("Authorization = %q, want none", got)
+	}
+}

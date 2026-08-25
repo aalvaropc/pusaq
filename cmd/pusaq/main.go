@@ -94,7 +94,11 @@ func run(logger *slog.Logger) error {
 	breakers := make(map[string]*breaker.Breaker, len(cfg.Upstreams))
 	var fallbacks []string
 	for i, up := range cfg.Upstreams {
-		providers[up.Name] = provider.NewHTTP(up.Name, up.URL, cfg.UpstreamTimeout, logger)
+		var opts []provider.Option
+		if up.APIKey != "" {
+			opts = append(opts, provider.WithAPIKey(up.APIKey))
+		}
+		providers[up.Name] = provider.NewHTTP(up.Name, up.URL, cfg.UpstreamTimeout, logger, opts...)
 		breakers[up.Name] = breaker.New(breaker.Config{})
 		if i > 0 {
 			fallbacks = append(fallbacks, up.Name)

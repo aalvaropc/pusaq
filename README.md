@@ -28,8 +28,9 @@ proxied to the mock provider through configurable model aliases, with
 API-key authentication, per-tenant cost attribution, and distributed
 per-tenant rate limiting — requests (RPM) and LLM tokens (TPM) with
 reservation/reconciliation — as atomic Lua token buckets in Redis, plus
-circuit breakers and fallback across equivalent upstreams. Next up: real
-Vertex adapters and the semantic cache.
+circuit breakers and fallback across equivalent upstreams — and any
+OpenAI-compatible model behind it, Gemini included, as pure configuration.
+Next up: the semantic cache.
 
 ## API
 
@@ -117,6 +118,23 @@ disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
   verification → archive.
 - [`CLAUDE.md`](CLAUDE.md) — the project constitution: non-negotiable design
   rules.
+
+## Serving a real model (Gemini)
+
+Google exposes Gemini on an OpenAI-compatible endpoint, so a real model is
+a config entry — no code:
+
+```sh
+export PUSAQ_UPSTREAMS="gemini=https://generativelanguage.googleapis.com/v1beta/openai,mock=http://localhost:9090"
+export PUSAQ_UPSTREAM_KEY_GEMINI="<your Gemini API key>"
+export PUSAQ_ROUTES="pusaq/fast=gemini-2.5-flash,pusaq/best=gemini-2.5-pro,pusaq/auto=gemini-2.5-flash"
+make run
+```
+
+Requests to `pusaq/fast` now hit Gemini through the whole pipeline —
+limits, breakers, accounting — with the mock as the fallback backend.
+Upstream keys come from `PUSAQ_UPSTREAM_KEY_<NAME>` (uppercased upstream
+name) and are never logged.
 
 ## Stack
 
