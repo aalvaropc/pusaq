@@ -25,12 +25,12 @@ When the telemetry buffer is full, the gateway SHALL drop new cost events rather
 
 ### Requirement: Cost events carry the accounting fields
 
-Every cost event SHALL include at least: request ID, timestamp, operation, outcome (success, error code, or panic), and total latency. For requests that resolve a model, the event SHALL additionally include the requested model (alias) and the served model, and — when the provider reports usage — prompt and completion token counts. The schema SHALL remain extensible so later changes can add tenant and price fields without breaking consumers.
+Every cost event SHALL include at least: request ID, timestamp, operation, tenant, outcome (success, error code, or panic), and total latency. For requests that resolve a model, the event SHALL additionally include the requested model (alias) and the served model, and — when the provider reports usage — prompt and completion token counts. The schema SHALL remain extensible so later changes can add price fields without breaking consumers.
 
 #### Scenario: Minimum fields present
 
 - **WHEN** any cost event is emitted
-- **THEN** it contains request ID, timestamp, operation, outcome, and latency
+- **THEN** it contains request ID, timestamp, operation, tenant, outcome, and latency
 
 #### Scenario: Completion events carry model and usage
 
