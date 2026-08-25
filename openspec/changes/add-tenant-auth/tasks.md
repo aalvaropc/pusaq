@@ -13,7 +13,7 @@
 
 ## 3. Wiring and delivery
 
-- [x] 3.1 `cmd/pusaq`: wire Auth into the chain (Accounting → RequestID → Auth), startup warning in dev mode; compose ships example keys; README documents auth + dev mode.
+- [x] 3.1 `cmd/pusaq`: wire Auth into the chain (Accounting → RequestID → Auth), startup warning in dev mode; README documents auth + dev mode. (Compose keys not applicable: the gateway runs natively, not as a compose service.)
 - [x] 3.2 Full suite `-race` green; lint + vet clean.
 - [x] 3.3 E2E with real binaries: no keys → dev-mode warning + `tenant:"dev"` on events; with keys → 401 without header (normalized, with cost event), 200 with header, tenant on the success event.
 - [x] 3.4 Conventional commit(s) on `feat/tenant-auth`, push, PR based on `feat/sse-streaming`; CI green.
