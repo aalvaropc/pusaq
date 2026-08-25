@@ -23,14 +23,16 @@ record about it. Models are addressed through aliases (`pusaq/fast`,
 **Foundation + chat completions in place** (changes `add-project-foundation`,
 `add-chat-completions`): middleware pipeline with a guaranteed cost event per
 request, async cost telemetry, liveness/readiness with graceful drain, and a
-non-streaming OpenAI-compatible `POST /v1/chat/completions` proxied to the
-mock provider through configurable model aliases. Next up: SSE streaming and
-real Vertex adapters.
+OpenAI-compatible `POST /v1/chat/completions` — buffered and SSE streaming —
+proxied to the mock provider through configurable model aliases. Next up:
+tenants/auth and real Vertex adapters.
 
 ## API
 
 `POST /v1/chat/completions` — OpenAI request subset (`model`, `messages`,
-`max_tokens`), non-streaming. The `model` field takes an alias: `pusaq/fast`,
+`max_tokens`, `stream`). With `"stream": true` the response is Server-Sent
+Events: `chat.completion.chunk` deltas passed through from the provider,
+a final usage chunk, then `data: [DONE]`. The `model` field takes an alias: `pusaq/fast`,
 `pusaq/best`, or `pusaq/auto` (aliases resolve to physical models in
 configuration; `pusaq/auto` becomes a real routing decision in a later
 change). Responses carry `X-Pusaq-Model` (the physical model served) and

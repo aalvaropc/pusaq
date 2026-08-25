@@ -7,6 +7,7 @@ package provider
 
 import (
 	"context"
+	"io"
 
 	"github.com/aalvaropc/pusaq/internal/core"
 )
@@ -23,6 +24,7 @@ type ChatRequest struct {
 	Model     string    `json:"model"`
 	Messages  []Message `json:"messages"`
 	MaxTokens int       `json:"max_tokens,omitempty"`
+	Stream    bool      `json:"stream,omitempty"`
 }
 
 // Choice is one completion alternative.
@@ -48,4 +50,8 @@ type Provider interface {
 	Name() string
 	// Complete performs a non-streaming chat completion.
 	Complete(ctx context.Context, req ChatRequest) (ChatResponse, error)
+	// StreamComplete performs a streaming completion and returns the raw
+	// SSE byte stream (OpenAI chunk shape, terminated by "data: [DONE]").
+	// The caller owns the stream and must close it.
+	StreamComplete(ctx context.Context, req ChatRequest) (io.ReadCloser, error)
 }

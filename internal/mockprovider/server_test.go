@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,5 +118,62 @@ func TestZeroLatencyConfigSleepsZero(t *testing.T) {
 
 	if len(slept) != 1 || slept[0] != 0 {
 		t.Fatalf("slept = %v, want exactly one zero-duration sleep", slept)
+	}
+}
+
+func TestStreamingCompletionFraming(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sleep = func(time.Duration) {}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"mock-model","messages":[{"role":"user","content":"x"}],"stream":true}`))
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	body := rec.Body.String()
+	if !strings.HasSuffix(body, "data: [DONE]\n\n") {
+		t.Fatalf("stream not terminated by [DONE]: %q", body[len(body)-40:])
+	}
+
+	var chunks, usageChunks int
+	for _, line := range strings.Split(body, "\n") {
+		payload, ok := strings.CutPrefix(line, "data: ")
+		if !ok || payload == "[DONE]" {
+			continue
+		}
+		var chunk struct {
+			Object string `json:"object"`
+			Usage  *struct {
+				TotalTokens int `json:"total_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			t.Fatalf("chunk is not JSON: %q: %v", payload, err)
+		}
+		if chunk.Object != "chat.completion.chunk" {
+			t.Fatalf("chunk object = %q", chunk.Object)
+		}
+		chunks++
+		if chunk.Usage != nil {
+			usageChunks++
+			if chunk.Usage.TotalTokens == 0 {
+				t.Fatal("usage chunk missing token counts")
+			}
+		}
+	}
+	if chunks < 3 {
+		t.Fatalf("only %d chunks streamed", chunks)
+	}
+	if usageChunks != 1 {
+		t.Fatalf("%d usage chunks, want exactly 1", usageChunks)
 	}
 }

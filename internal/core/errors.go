@@ -21,6 +21,10 @@ const (
 	// CodeUpstream marks a provider failure or timeout. The provider's raw
 	// response is never forwarded to the client.
 	CodeUpstream Code = "upstream_error"
+	// CodeStreamInterrupted marks a streamed response the client abandoned
+	// before completion. Accounting-only: nothing is written to a gone
+	// client.
+	CodeStreamInterrupted Code = "stream_interrupted"
 )
 
 // statusByCode maps each code to the HTTP status the transport layer renders.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,5 +112,93 @@ func TestCompleteMalformedUpstreamBodyIsUpstreamError(t *testing.T) {
 	var norm *core.Error
 	if !errors.As(err, &norm) || norm.Code != core.CodeUpstream {
 		t.Fatalf("err = %v, want %s on malformed body", err, core.CodeUpstream)
+	}
+}
+
+func TestStreamCompleteReturnsRawSSE(t *testing.T) {
+	const sse = "data: {\"object\":\"chat.completion.chunk\"}\n\ndata: [DONE]\n\n"
+	var sawStreamTrue bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		sawStreamTrue = strings.Contains(string(body), `"stream":true`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, sse)
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("mock", upstream.URL, time.Second, discardLogger())
+	stream, err := p.StreamComplete(context.Background(), chatReq())
+	if err != nil {
+		t.Fatalf("StreamComplete() error: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("reading stream: %v", err)
+	}
+	if string(got) != sse {
+		t.Fatalf("stream = %q, want raw SSE passthrough", got)
+	}
+	if !sawStreamTrue {
+		t.Fatal("upstream request did not set stream:true")
+	}
+}
+
+func TestStreamComplete500IsUpstreamError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("mock", upstream.URL, time.Second, discardLogger())
+	_, err := p.StreamComplete(context.Background(), chatReq())
+	var norm *core.Error
+	if !errors.As(err, &norm) || norm.Code != core.CodeUpstream {
+		t.Fatalf("err = %v, want %s", err, core.CodeUpstream)
+	}
+}
+
+func TestStreamCompleteHeaderTimeoutBounded(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select { // never sends headers
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("mock", upstream.URL, 50*time.Millisecond, discardLogger())
+	_, err := p.StreamComplete(context.Background(), chatReq())
+	var norm *core.Error
+	if !errors.As(err, &norm) || norm.Code != core.CodeUpstream {
+		t.Fatalf("err = %v, want %s on header timeout", err, core.CodeUpstream)
+	}
+}
+
+func TestStreamCompleteNotKilledByOverallTimeout(t *testing.T) {
+	// Headers arrive instantly; the body takes longer than the timeout.
+	// The stream client must not cut it (only time-to-first-byte is bounded).
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		time.Sleep(150 * time.Millisecond) // longer than the 50ms timeout
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("mock", upstream.URL, 50*time.Millisecond, discardLogger())
+	stream, err := p.StreamComplete(context.Background(), chatReq())
+	if err != nil {
+		t.Fatalf("StreamComplete() error: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("stream cut mid-body: %v", err)
+	}
+	if !strings.Contains(string(got), "[DONE]") {
+		t.Fatalf("incomplete stream: %q", got)
 	}
 }

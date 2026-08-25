@@ -101,8 +101,34 @@ func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler 
 			header.Set("Content-Type", "application/json")
 		}
 		w.WriteHeader(resp.Status)
+
+		if resp.Stream != nil {
+			s.copyStream(w, resp.Stream)
+			return
+		}
 		_, _ = w.Write(resp.Body)
 	})
+}
+
+// copyStream forwards a streamed response with a flush per read so chunks
+// reach the client as they arrive, and closes the stream — which finalizes
+// the request's cost event (see finalizingStream).
+func (s *Server) copyStream(w http.ResponseWriter, stream io.ReadCloser) {
+	defer func() { _ = stream.Close() }()
+	rc := http.NewResponseController(w)
+	buf := make([]byte, 4096)
+	for {
+		n, err := stream.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return // client went away; Close marks the interruption
+			}
+			_ = rc.Flush()
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // errorBody is the single JSON error shape every gateway failure uses.

@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/aalvaropc/pusaq/internal/core"
@@ -27,6 +29,7 @@ type completionRequest struct {
 	Model     string             `json:"model"`
 	Messages  []provider.Message `json:"messages"`
 	MaxTokens int                `json:"max_tokens"`
+	Stream    bool               `json:"stream"`
 }
 
 // completionResponse is the OpenAI response subset Pusaq returns.
@@ -84,6 +87,10 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		req.RequestedModel = cr.Model
 		req.ServedModel = route.Model
 
+		if cr.Stream {
+			return streamCompletion(ctx, p, req, cr, route)
+		}
+
 		upstream, err := p.Complete(ctx, provider.ChatRequest{
 			Model:     route.Model,
 			Messages:  cr.Messages,
@@ -113,5 +120,75 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		resp.SetHeader("Content-Type", "application/json")
 		resp.SetHeader(ServedModelHeader, route.Model)
 		return resp, nil
+	}
+}
+
+// streamCompletion proxies a streaming completion: the provider's raw SSE
+// stream passes through untouched while a scanner watches for the usage
+// chunk and records it on the envelope for accounting.
+func streamCompletion(ctx context.Context, p provider.Provider, req *core.Request, cr completionRequest, route Route) (*core.Response, error) {
+	upstream, err := p.StreamComplete(ctx, provider.ChatRequest{
+		Model:     route.Model,
+		Messages:  cr.Messages,
+		MaxTokens: cr.MaxTokens,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &core.Response{
+		Status: http.StatusOK,
+		Stream: &usageScanningStream{inner: upstream, req: req},
+	}
+	resp.SetHeader("Content-Type", "text/event-stream")
+	resp.SetHeader("Cache-Control", "no-cache")
+	resp.SetHeader(ServedModelHeader, route.Model)
+	return resp, nil
+}
+
+// usageScanningStream forwards SSE bytes untouched while watching complete
+// "data:" lines for a usage object; found usage lands on the envelope.
+// Pusaq never rewrites provider chunks — passthrough fidelity first.
+type usageScanningStream struct {
+	inner io.ReadCloser
+	req   *core.Request
+	buf   []byte
+}
+
+func (u *usageScanningStream) Read(p []byte) (int, error) {
+	n, err := u.inner.Read(p)
+	if n > 0 {
+		u.scan(p[:n])
+	}
+	return n, err
+}
+
+func (u *usageScanningStream) Close() error { return u.inner.Close() }
+
+// scan accumulates bytes and inspects each complete line for a usage chunk.
+func (u *usageScanningStream) scan(b []byte) {
+	u.buf = append(u.buf, b...)
+	for {
+		i := bytes.IndexByte(u.buf, '\n')
+		if i < 0 {
+			return
+		}
+		line := bytes.TrimSpace(u.buf[:i])
+		u.buf = u.buf[i+1:]
+
+		payload, ok := bytes.CutPrefix(line, []byte("data:"))
+		if !ok {
+			continue
+		}
+		payload = bytes.TrimSpace(payload)
+		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+		var chunk struct {
+			Usage *core.Usage `json:"usage"`
+		}
+		if err := json.Unmarshal(payload, &chunk); err == nil && chunk.Usage != nil {
+			u.req.Usage = *chunk.Usage
+		}
 	}
 }
