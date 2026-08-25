@@ -5,11 +5,13 @@
 package mockprovider
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -105,7 +107,7 @@ func (s *Server) sampleLatency() time.Duration {
 	return s.opts.LatencyP50 + time.Duration(s.random()*float64(spread))
 }
 
-func (s *Server) handleCompletion(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 	s.sleep(s.sampleLatency())
 
 	if s.random() < s.opts.ErrorRate {
@@ -115,7 +117,84 @@ func (s *Server) handleCompletion(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
+	var req struct {
+		Stream bool `json:"stream"`
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	_ = json.Unmarshal(body, &req) // malformed body → buffered response
+
+	if req.Stream {
+		s.streamCompletion(w)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, cannedResponse)
+}
+
+// cannedContent is what the streaming mode splits into word chunks.
+const cannedContent = "This is a canned response from the Pusaq mock provider."
+
+// streamCompletion emits the canned content as OpenAI chat.completion.chunk
+// events, a final chunk carrying usage, then "data: [DONE]".
+func (s *Server) streamCompletion(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	rc := http.NewResponseController(w)
+
+	writeEvent := func(payload string) {
+		_, _ = io.WriteString(w, "data: "+payload+"\n\n")
+		_ = rc.Flush()
+	}
+
+	chunk := func(delta, finish string) string {
+		b, _ := json.Marshal(map[string]any{
+			"id":     "mock-cmpl-1",
+			"object": "chat.completion.chunk",
+			"model":  "mock-model",
+			"choices": []map[string]any{{
+				"index":         0,
+				"delta":         map[string]string{"content": delta},
+				"finish_reason": nilIfEmpty(finish),
+			}},
+		})
+		return string(b)
+	}
+
+	words := strings.Fields(cannedContent)
+	for i, word := range words {
+		delta := word
+		if i < len(words)-1 {
+			delta += " "
+		}
+		finish := ""
+		if i == len(words)-1 {
+			finish = "stop"
+		}
+		writeEvent(chunk(delta, finish))
+		s.sleep(interChunkDelay)
+	}
+
+	usage, _ := json.Marshal(map[string]any{
+		"id":      "mock-cmpl-1",
+		"object":  "chat.completion.chunk",
+		"model":   "mock-model",
+		"choices": []any{},
+		"usage":   map[string]int{"prompt_tokens": 12, "completion_tokens": 11, "total_tokens": 23},
+	})
+	writeEvent(string(usage))
+	writeEvent("[DONE]")
+}
+
+// interChunkDelay spaces streamed chunks so streaming is observable.
+const interChunkDelay = 10 * time.Millisecond
+
+// nilIfEmpty renders OpenAI's null finish_reason for non-final chunks.
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

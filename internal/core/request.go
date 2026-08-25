@@ -4,7 +4,10 @@
 // concerns.
 package core
 
-import "time"
+import (
+	"io"
+	"time"
+)
 
 // Request is the transport-agnostic envelope that traverses the pipeline.
 // It starts minimal on purpose: fields for tenant, model, and tokens arrive
@@ -48,7 +51,14 @@ type Response struct {
 	Header map[string]string
 
 	// Body is the operation-specific response body, already serialized.
+	// Ignored when Stream is non-nil.
 	Body []byte
+
+	// Stream, when non-nil, is a response delivered incrementally (SSE).
+	// The transport layer copies it to the client with per-read flushes
+	// and closes it; the accounting stage finalizes the cost event when
+	// the stream ends.
+	Stream io.ReadCloser
 }
 
 // SetHeader records a response header, allocating the map on first use.

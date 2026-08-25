@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/aalvaropc/pusaq/internal/core"
@@ -43,6 +46,9 @@ func RequestID() core.Stage {
 // recovered into a normalized internal error; the process never dies for a
 // request. Because stages share the *Request, the deferred emission sees the
 // ID assigned by the inner RequestID stage.
+//
+// A response carrying a Stream outlives the pipeline call: its event is
+// finalized when the stream ends instead — see finalizingStream.
 func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 	return func(next core.Handler) core.Handler {
 		return func(ctx context.Context, req *core.Request) (resp *core.Response, err error) {
@@ -67,6 +73,16 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					event.Outcome = core.OutcomePanic
 					event.ErrorCode = core.CodeInternal
 					resp, err = nil, core.NewError(core.CodeInternal, "internal error")
+				} else if err == nil && resp != nil && resp.Stream != nil {
+					// The stream outlives this call: hand emission to the
+					// finalizing wrapper and skip the deferred one.
+					resp.Stream = &finalizingStream{
+						inner: resp.Stream,
+						req:   req,
+						start: start,
+						emit:  emit,
+					}
+					return
 				} else if err != nil {
 					event.Outcome = core.OutcomeError
 					event.ErrorCode = core.AsError(err).Code
@@ -76,4 +92,59 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 			return next(ctx, req)
 		}
 	}
+}
+
+// finalizingStream passes the response stream through and emits the request's
+// cost event exactly once when the stream ends: EOF (success), read error
+// (upstream_error), or Close before EOF (stream_interrupted — the client
+// left). Latency covers the full stream; usage is whatever the envelope
+// accumulated while the stream was scanned.
+type finalizingStream struct {
+	inner io.ReadCloser
+	req   *core.Request
+	start time.Time
+	emit  func(core.CostEvent)
+	once  sync.Once
+	done  bool
+}
+
+func (f *finalizingStream) Read(p []byte) (int, error) {
+	n, err := f.inner.Read(p)
+	switch {
+	case err == nil:
+	case errors.Is(err, io.EOF):
+		f.done = true
+		f.finalize(core.OutcomeSuccess, "")
+	case errors.Is(err, context.Canceled):
+		// The client left: its request context canceled the upstream read.
+		f.done = true
+		f.finalize(core.OutcomeError, core.CodeStreamInterrupted)
+	default:
+		f.done = true
+		f.finalize(core.OutcomeError, core.CodeUpstream)
+	}
+	return n, err
+}
+
+func (f *finalizingStream) Close() error {
+	if !f.done {
+		f.finalize(core.OutcomeError, core.CodeStreamInterrupted)
+	}
+	return f.inner.Close()
+}
+
+func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
+	f.once.Do(func() {
+		f.emit(core.CostEvent{
+			RequestID:      f.req.ID,
+			Timestamp:      f.req.ArrivedAt,
+			Op:             f.req.Op,
+			Outcome:        outcome,
+			ErrorCode:      code,
+			Latency:        time.Since(f.start),
+			RequestedModel: f.req.RequestedModel,
+			ServedModel:    f.req.ServedModel,
+			Usage:          f.req.Usage,
+		})
+	})
 }

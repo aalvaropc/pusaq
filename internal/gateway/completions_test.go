@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/aalvaropc/pusaq/internal/core"
@@ -16,6 +18,7 @@ type fakeProvider struct {
 	name string
 	got  provider.ChatRequest
 	resp provider.ChatResponse
+	sse  string // raw SSE body served by StreamComplete
 	err  error
 }
 
@@ -24,6 +27,14 @@ func (f *fakeProvider) Name() string { return f.name }
 func (f *fakeProvider) Complete(_ context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
 	f.got = req
 	return f.resp, f.err
+}
+
+func (f *fakeProvider) StreamComplete(_ context.Context, req provider.ChatRequest) (io.ReadCloser, error) {
+	f.got = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return io.NopCloser(strings.NewReader(f.sse)), nil
 }
 
 func testRoutes() map[string]Route {
