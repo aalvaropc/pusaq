@@ -23,7 +23,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, MockURL: "http://localhost:9090", UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512},
 		},
 		{
 			name: "all overrides applied",
@@ -41,7 +41,7 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_TPM_BURST":           "2000",
 				"PUSAQ_TPM_RESERVE_DEFAULT": "256",
 			},
-			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, MockURL: "http://mock:9090", UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256},
 		},
 		{
 			name:    "empty addr rejected",
@@ -74,8 +74,18 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "relative mock URL rejected",
-			env:     map[string]string{"PUSAQ_MOCK_URL": "localhost:9090"},
+			name:    "relative upstream URL rejected",
+			env:     map[string]string{"PUSAQ_UPSTREAMS": "mock=localhost:9090"},
+			wantErr: true,
+		},
+		{
+			name:    "malformed upstream pair rejected",
+			env:     map[string]string{"PUSAQ_UPSTREAMS": "http://x:1"},
+			wantErr: true,
+		},
+		{
+			name:    "duplicate upstream name rejected",
+			env:     map[string]string{"PUSAQ_UPSTREAMS": "a=http://x:1,a=http://y:2"},
 			wantErr: true,
 		},
 		{
@@ -133,9 +143,13 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("Load() error: %v", err)
 			}
 			gotRoutes := got.Routes
-			got.Routes = nil
+			gotUpstreams := got.Upstreams
+			got.Routes, got.Upstreams = nil, nil
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Load() = %+v, want %+v", got, tt.want)
+			}
+			if len(gotUpstreams) == 0 {
+				t.Fatal("Upstreams empty")
 			}
 			if len(gotRoutes) != 3 {
 				t.Fatalf("Routes has %d aliases, want 3", len(gotRoutes))

@@ -27,8 +27,9 @@ OpenAI-compatible `POST /v1/chat/completions` — buffered and SSE streaming —
 proxied to the mock provider through configurable model aliases, with
 API-key authentication, per-tenant cost attribution, and distributed
 per-tenant rate limiting — requests (RPM) and LLM tokens (TPM) with
-reservation/reconciliation — as atomic Lua token buckets in Redis. Next up:
-real Vertex adapters and the semantic cache.
+reservation/reconciliation — as atomic Lua token buckets in Redis, plus
+circuit breakers and fallback across equivalent upstreams. Next up: real
+Vertex adapters and the semantic cache.
 
 ## API
 
@@ -61,6 +62,15 @@ on success, on error, and at stream end. Unknown usage keeps the charge.
 Every cost event records `tokens_charged` next to actual usage, so the
 estimate's error is measurable from the event stream.
 
+**Resilience.** Each upstream backend is guarded by a circuit breaker
+(closed / open / half-open: opens on a >50% failure rate over a 20-sample
+window with a 10-sample minimum; 10s cooldown; 3 half-open probes). On an
+upstream error or an open breaker, the route's fallback backends are tried
+in order — at most once each, same model contract; streams fall back only
+before the first byte. Failover is observable per request: every cost event
+records `served_provider` and `attempts`. Backends come from
+`PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
+
 **Authentication.** Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the
 tenant. Missing/unknown keys get a normalized `unauthorized` (401). With no
@@ -88,7 +98,7 @@ readiness and turns 503 during the drain window on SIGTERM.
 
 Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 (`1s`), `PUSAQ_SHUTDOWN_GRACE` (`10s`), `PUSAQ_TELEMETRY_BUFFER` (`1024`),
-`PUSAQ_MOCK_URL` (`http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
+`PUSAQ_UPSTREAMS` (`mock=http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
 `PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
 disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
 (default = limit), `PUSAQ_TPM_LIMIT` (`100000` tokens/min), `PUSAQ_TPM_BURST`

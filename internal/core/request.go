@@ -38,6 +38,10 @@ type Request struct {
 	RequestedModel string
 	// ServedModel is the physical upstream model that handled the request.
 	ServedModel string
+	// ServedProvider is the upstream backend that actually answered
+	// (after any fallback); Attempts counts backend attempts made.
+	ServedProvider string
+	Attempts       int
 	// Usage accumulates provider-reported token counts for accounting.
 	Usage Usage
 	// TokensCharged is what the token limiter charged on admission
