@@ -87,6 +87,15 @@ $0 — measures the machinery, not paraphrase quality) or
 `openai:<upstream>` + `PUSAQ_EMBED_MODEL` for real embeddings. Published
 numbers must say which embedder produced them.
 
+**Calibrating τ.** The threshold is never a judgment call: `make calibrate`
+sweeps a labeled pair dataset (equivalent vs trap pairs) with the same
+embedder implementations the gateway runs, writes the precision/recall
+curve, and prints `τ* = min{τ : precision ≥ 0.99}` — or fails loudly when
+the embedder cannot separate the traps (which the local embedder, being
+lexical, often cannot: that failure is the harness working). The seed
+dataset (60 pairs) proves the harness; a production τ needs the
+experiments-phase corpus (≥200+200 pairs) and a real embedder.
+
 **Authentication.** Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the
 tenant. Missing/unknown keys get a normalized `unauthorized` (401). With no
