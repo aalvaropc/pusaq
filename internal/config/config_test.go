@@ -23,7 +23,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, MockURL: "http://localhost:9090", UpstreamTimeout: 30 * time.Second},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, MockURL: "http://localhost:9090", UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60},
 		},
 		{
 			name: "all overrides applied",
@@ -34,8 +34,11 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_TELEMETRY_BUFFER": "256",
 				"PUSAQ_MOCK_URL":         "http://mock:9090/",
 				"PUSAQ_UPSTREAM_TIMEOUT": "5s",
+				"PUSAQ_REDIS_ADDR":       "redis:6379",
+				"PUSAQ_RPM_LIMIT":        "120",
+				"PUSAQ_RPM_BURST":        "30",
 			},
-			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, MockURL: "http://mock:9090", UpstreamTimeout: 5 * time.Second},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, MockURL: "http://mock:9090", UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30},
 		},
 		{
 			name:    "empty addr rejected",
@@ -75,6 +78,16 @@ func TestLoad(t *testing.T) {
 		{
 			name:    "non-positive upstream timeout rejected",
 			env:     map[string]string{"PUSAQ_UPSTREAM_TIMEOUT": "0s"},
+			wantErr: true,
+		},
+		{
+			name:    "non-positive rpm limit rejected",
+			env:     map[string]string{"PUSAQ_RPM_LIMIT": "0"},
+			wantErr: true,
+		},
+		{
+			name:    "malformed rpm burst rejected",
+			env:     map[string]string{"PUSAQ_RPM_BURST": "lots"},
 			wantErr: true,
 		},
 		{

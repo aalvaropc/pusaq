@@ -17,7 +17,10 @@ import (
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/gateway"
 	"github.com/aalvaropc/pusaq/internal/provider"
+	"github.com/aalvaropc/pusaq/internal/ratelimit"
 	"github.com/aalvaropc/pusaq/internal/telemetry"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -40,11 +43,37 @@ func run(logger *slog.Logger) error {
 	if len(cfg.APIKeys) == 0 {
 		logger.Warn("authentication disabled: no PUSAQ_API_KEYS configured, all requests attributed to the dev tenant")
 	}
-	pipeline := core.Chain(
+
+	stages := []core.Stage{
 		gateway.Accounting(emitter.Emit, logger),
 		gateway.RequestID(),
 		gateway.Auth(cfg.APIKeys),
-	)
+	}
+	if cfg.RedisAddr != "" {
+		limiter, err := ratelimit.New(
+			// MaxRetries -1 disables internal retries: the rate-limit
+			// stage owns the time budget and fails open past it.
+			redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, MaxRetries: -1}),
+			"rpm",
+			ratelimit.Limits{
+				Burst: cfg.RPMBurst,
+				Rate:  cfg.RPMLimit / 60.0, // requests/minute → tokens/second
+				TTL:   config.DefaultBucketTTL,
+			},
+		)
+		if err != nil {
+			return err
+		}
+		stages = append(stages, gateway.RateLimit(limiter, logger))
+		logger.Info("rate limiting enabled",
+			slog.String("redis", cfg.RedisAddr),
+			slog.Float64("rpm_limit", cfg.RPMLimit),
+			slog.Float64("rpm_burst", cfg.RPMBurst),
+		)
+	} else {
+		logger.Warn("rate limiting disabled: no PUSAQ_REDIS_ADDR configured")
+	}
+	pipeline := core.Chain(stages...)
 
 	providers := map[string]provider.Provider{
 		"mock": provider.NewHTTP("mock", cfg.MockURL, cfg.UpstreamTimeout, logger),

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // Code is a stable, machine-readable error code. Codes are part of the public
@@ -15,6 +16,9 @@ const (
 	CodeInvalidRequest Code = "invalid_request"
 	// CodeUnauthorized marks a request with a missing or unknown API key.
 	CodeUnauthorized Code = "unauthorized"
+	// CodeRateLimited marks a request rejected by a rate limit; the error
+	// carries RetryAfter so clients know when to come back.
+	CodeRateLimited Code = "rate_limited"
 	// CodeNotFound marks a missing route or resource.
 	CodeNotFound Code = "not_found"
 	// CodeInternal marks an unexpected gateway failure. It is the fallback
@@ -33,6 +37,7 @@ const (
 var statusByCode = map[Code]int{
 	CodeInvalidRequest: http.StatusBadRequest,
 	CodeUnauthorized:   http.StatusUnauthorized,
+	CodeRateLimited:    http.StatusTooManyRequests,
 	CodeNotFound:       http.StatusNotFound,
 	CodeInternal:       http.StatusInternalServerError,
 	CodeUpstream:       http.StatusBadGateway,
@@ -44,6 +49,9 @@ var statusByCode = map[Code]int{
 type Error struct {
 	Code    Code
 	Message string
+	// RetryAfter, when positive, tells the client when to retry; rendered
+	// as retry_after_ms in the body and a Retry-After header.
+	RetryAfter time.Duration
 	// Err is the wrapped cause, for logs only — never rendered to clients.
 	Err error
 }
