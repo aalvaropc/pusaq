@@ -23,6 +23,14 @@ const (
 	DefaultTPMLimit        = 100000.0
 	DefaultTPMReserve      = 512
 	DefaultBucketTTL       = 10 * time.Minute
+	DefaultCacheTau        = 0.95
+	DefaultCacheMaxEntries = 10000
+)
+
+// Cache modes.
+const (
+	CacheOff    = "off"
+	CacheShadow = "shadow"
 )
 
 // Route maps a model alias to a provider name and its physical upstream
@@ -115,6 +123,19 @@ type Config struct {
 	// TPMReserveDefault is the output reservation charged when a request
 	// does not set max_tokens (PUSAQ_TPM_RESERVE_DEFAULT).
 	TPMReserveDefault int
+	// CacheMode is the semantic cache mode: off (default) or shadow
+	// (PUSAQ_CACHE_MODE). Shadow never serves; it only measures.
+	CacheMode string
+	// CacheTau labels shadow records hit/miss (PUSAQ_CACHE_TAU); sweeps
+	// of other thresholds happen offline from the records.
+	CacheTau float64
+	// CacheMaxEntries caps the shadow index (PUSAQ_CACHE_MAX_ENTRIES).
+	CacheMaxEntries int
+	// EmbedderKind is "local" or "openai:<upstream>" naming a configured
+	// upstream (PUSAQ_EMBEDDER); EmbedModel names the embedding model for
+	// the openai kind (PUSAQ_EMBED_MODEL).
+	EmbedderKind string
+	EmbedModel   string
 }
 
 // Load reads configuration through lookup (os.LookupEnv in production,
@@ -243,6 +264,55 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_TPM_RESERVE_DEFAULT: must be a positive integer, got %q", v)
 		}
 		cfg.TPMReserveDefault = n
+	}
+
+	cfg.CacheMode = CacheOff
+	if v, ok := lookup("PUSAQ_CACHE_MODE"); ok && v != "" {
+		if v != CacheOff && v != CacheShadow {
+			return Config{}, fmt.Errorf("PUSAQ_CACHE_MODE: must be %q or %q, got %q", CacheOff, CacheShadow, v)
+		}
+		cfg.CacheMode = v
+	}
+	cfg.CacheTau = DefaultCacheTau
+	if v, ok := lookup("PUSAQ_CACHE_TAU"); ok {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n <= 0 || n > 1 {
+			return Config{}, fmt.Errorf("PUSAQ_CACHE_TAU: must be in (0,1], got %q", v)
+		}
+		cfg.CacheTau = n
+	}
+	cfg.CacheMaxEntries = DefaultCacheMaxEntries
+	if v, ok := lookup("PUSAQ_CACHE_MAX_ENTRIES"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_CACHE_MAX_ENTRIES: must be a positive integer, got %q", v)
+		}
+		cfg.CacheMaxEntries = n
+	}
+	cfg.EmbedderKind = "local"
+	if v, ok := lookup("PUSAQ_EMBEDDER"); ok && v != "" {
+		if v != "local" {
+			name, found := strings.CutPrefix(v, "openai:")
+			if !found || name == "" {
+				return Config{}, fmt.Errorf("PUSAQ_EMBEDDER: must be \"local\" or \"openai:<upstream>\", got %q", v)
+			}
+			exists := false
+			for _, up := range cfg.Upstreams {
+				if up.Name == name {
+					exists = true
+				}
+			}
+			if !exists {
+				return Config{}, fmt.Errorf("PUSAQ_EMBEDDER: upstream %q is not configured", name)
+			}
+		}
+		cfg.EmbedderKind = v
+	}
+	if v, ok := lookup("PUSAQ_EMBED_MODEL"); ok {
+		cfg.EmbedModel = v
+	}
+	if strings.HasPrefix(cfg.EmbedderKind, "openai:") && cfg.EmbedModel == "" {
+		return Config{}, fmt.Errorf("PUSAQ_EMBED_MODEL: required when PUSAQ_EMBEDDER is %q", cfg.EmbedderKind)
 	}
 
 	if v, ok := lookup("PUSAQ_API_KEYS"); ok && v != "" {

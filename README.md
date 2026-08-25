@@ -29,8 +29,10 @@ API-key authentication, per-tenant cost attribution, and distributed
 per-tenant rate limiting — requests (RPM) and LLM tokens (TPM) with
 reservation/reconciliation — as atomic Lua token buckets in Redis, plus
 circuit breakers and fallback across equivalent upstreams — and any
-OpenAI-compatible model behind it, Gemini included, as pure configuration.
-Next up: the semantic cache.
+OpenAI-compatible model behind it, Gemini included, as pure configuration —
+plus the semantic cache in shadow mode: measuring hit-rates, similarity
+distributions, and candidate false positives against real traffic before a
+single cached answer is ever served.
 
 ## API
 
@@ -71,6 +73,19 @@ in order — at most once each, same model contract; streams fall back only
 before the first byte. Failover is observable per request: every cost event
 records `served_provider` and `attempts`. Backends come from
 `PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
+
+**Semantic cache (shadow mode).** `PUSAQ_CACHE_MODE=shadow` turns on the
+measurement instrument: eligible completions (single-turn) are evaluated
+asynchronously — embed, nearest-neighbor within an exhaustive namespace
+(tenant | served model | system prompt), record, insert — without ever
+serving a cached answer and without touching request latency (bounded
+workers; saturation drops are counted). Every `cache_shadow` record carries
+`best_similarity` plus both response fingerprints, so precision/recall for
+any τ is computable offline from the log stream alone; `PUSAQ_CACHE_TAU`
+(default 0.95) only labels records. Embedders: `local` (deterministic,
+$0 — measures the machinery, not paraphrase quality) or
+`openai:<upstream>` + `PUSAQ_EMBED_MODEL` for real embeddings. Published
+numbers must say which embedder produced them.
 
 **Authentication.** Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the

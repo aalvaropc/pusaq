@@ -10,15 +10,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/aalvaropc/pusaq/internal/breaker"
 	"github.com/aalvaropc/pusaq/internal/config"
 	"github.com/aalvaropc/pusaq/internal/core"
+	"github.com/aalvaropc/pusaq/internal/embed"
 	"github.com/aalvaropc/pusaq/internal/gateway"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
+	"github.com/aalvaropc/pusaq/internal/semcache"
 	"github.com/aalvaropc/pusaq/internal/telemetry"
 
 	"github.com/redis/go-redis/v9"
@@ -53,6 +56,26 @@ func run(logger *slog.Logger) error {
 	completionsOpts := gateway.CompletionsOptions{
 		ReserveDefault: cfg.TPMReserveDefault,
 		Logger:         logger,
+	}
+
+	var shadow *semcache.Shadow
+	if cfg.CacheMode == config.CacheShadow {
+		var embedder embed.Embedder = embed.Local{}
+		if name, ok := strings.CutPrefix(cfg.EmbedderKind, "openai:"); ok {
+			for _, up := range cfg.Upstreams {
+				if up.Name == name {
+					embedder = embed.NewHTTP(name, up.URL, cfg.EmbedModel, up.APIKey, cfg.UpstreamTimeout)
+				}
+			}
+		}
+		shadow = semcache.NewShadow(embedder, semcache.NewIndex(cfg.CacheMaxEntries),
+			logger, cfg.CacheTau, 8, 256)
+		completionsOpts.Shadow = shadow
+		logger.Info("semantic cache in shadow mode: measuring, never serving",
+			slog.String("embedder", embedder.Name()),
+			slog.Float64("tau", cfg.CacheTau),
+			slog.Int("max_entries", cfg.CacheMaxEntries),
+		)
 	}
 	if cfg.RedisAddr != "" {
 		// MaxRetries -1 disables internal retries: the limiter stages own
@@ -153,6 +176,13 @@ func run(logger *slog.Logger) error {
 		logger.Error("shutdown error", slog.Any("error", err))
 	}
 
+	if shadow != nil {
+		shadow.Close()
+		logger.Info("shadow cache stopped",
+			slog.Uint64("shadow_dropped", shadow.Dropped()),
+			slog.Uint64("shadow_skipped", shadow.Skipped()),
+		)
+	}
 	emitter.Close()
 	logger.Info("gateway stopped", slog.Uint64("telemetry_dropped", emitter.Dropped()))
 	return nil
