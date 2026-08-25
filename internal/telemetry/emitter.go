@@ -44,6 +44,9 @@ func (s SlogSink) Write(event core.CostEvent) {
 			slog.Int("completion_tokens", event.Usage.CompletionTokens),
 		)
 	}
+	if event.TokensCharged > 0 {
+		attrs = append(attrs, slog.Int("tokens_charged", event.TokensCharged))
+	}
 	s.Logger.LogAttrs(context.Background(), slog.LevelInfo, "cost_event", attrs...)
 }
 

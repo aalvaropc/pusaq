@@ -23,22 +23,25 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, MockURL: "http://localhost:9090", UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, MockURL: "http://localhost:9090", UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512},
 		},
 		{
 			name: "all overrides applied",
 			env: map[string]string{
-				"PUSAQ_ADDR":             ":9091",
-				"PUSAQ_DRAIN_DELAY":      "0s",
-				"PUSAQ_SHUTDOWN_GRACE":   "30s",
-				"PUSAQ_TELEMETRY_BUFFER": "256",
-				"PUSAQ_MOCK_URL":         "http://mock:9090/",
-				"PUSAQ_UPSTREAM_TIMEOUT": "5s",
-				"PUSAQ_REDIS_ADDR":       "redis:6379",
-				"PUSAQ_RPM_LIMIT":        "120",
-				"PUSAQ_RPM_BURST":        "30",
+				"PUSAQ_ADDR":                ":9091",
+				"PUSAQ_DRAIN_DELAY":         "0s",
+				"PUSAQ_SHUTDOWN_GRACE":      "30s",
+				"PUSAQ_TELEMETRY_BUFFER":    "256",
+				"PUSAQ_MOCK_URL":            "http://mock:9090/",
+				"PUSAQ_UPSTREAM_TIMEOUT":    "5s",
+				"PUSAQ_REDIS_ADDR":          "redis:6379",
+				"PUSAQ_RPM_LIMIT":           "120",
+				"PUSAQ_RPM_BURST":           "30",
+				"PUSAQ_TPM_LIMIT":           "6000",
+				"PUSAQ_TPM_BURST":           "2000",
+				"PUSAQ_TPM_RESERVE_DEFAULT": "256",
 			},
-			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, MockURL: "http://mock:9090", UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, MockURL: "http://mock:9090", UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256},
 		},
 		{
 			name:    "empty addr rejected",
@@ -88,6 +91,16 @@ func TestLoad(t *testing.T) {
 		{
 			name:    "malformed rpm burst rejected",
 			env:     map[string]string{"PUSAQ_RPM_BURST": "lots"},
+			wantErr: true,
+		},
+		{
+			name:    "non-positive tpm limit rejected",
+			env:     map[string]string{"PUSAQ_TPM_LIMIT": "-5"},
+			wantErr: true,
+		},
+		{
+			name:    "malformed tpm reserve rejected",
+			env:     map[string]string{"PUSAQ_TPM_RESERVE_DEFAULT": "many"},
 			wantErr: true,
 		},
 		{

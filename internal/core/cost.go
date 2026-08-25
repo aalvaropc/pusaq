@@ -32,4 +32,7 @@ type CostEvent struct {
 	RequestedModel string `json:"requested_model,omitempty"`
 	ServedModel    string `json:"served_model,omitempty"`
 	Usage          Usage  `json:"usage,omitzero"`
+	// TokensCharged is the admission charge (input estimate + output
+	// reservation) so reservation error is measurable against Usage.
+	TokensCharged int `json:"tokens_charged,omitempty"`
 }

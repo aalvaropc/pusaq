@@ -21,6 +21,8 @@ const (
 	DefaultMockURL         = "http://localhost:9090"
 	DefaultUpstreamTimeout = 30 * time.Second
 	DefaultRPMLimit        = 60.0
+	DefaultTPMLimit        = 100000.0
+	DefaultTPMReserve      = 512
 	DefaultBucketTTL       = 10 * time.Minute
 )
 
@@ -76,6 +78,15 @@ type Config struct {
 	// RPMBurst is the per-tenant bucket capacity (PUSAQ_RPM_BURST,
 	// default: equal to RPMLimit).
 	RPMBurst float64
+	// TPMLimit is the sustained per-tenant LLM-token rate in tokens per
+	// minute (PUSAQ_TPM_LIMIT).
+	TPMLimit float64
+	// TPMBurst is the per-tenant token-bucket capacity (PUSAQ_TPM_BURST,
+	// default: equal to TPMLimit).
+	TPMBurst float64
+	// TPMReserveDefault is the output reservation charged when a request
+	// does not set max_tokens (PUSAQ_TPM_RESERVE_DEFAULT).
+	TPMReserveDefault int
 }
 
 // Load reads configuration through lookup (os.LookupEnv in production,
@@ -168,6 +179,31 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_RPM_BURST: must be a positive number, got %q", v)
 		}
 		cfg.RPMBurst = n
+	}
+
+	cfg.TPMLimit = DefaultTPMLimit
+	if v, ok := lookup("PUSAQ_TPM_LIMIT"); ok {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_TPM_LIMIT: must be a positive number, got %q", v)
+		}
+		cfg.TPMLimit = n
+	}
+	cfg.TPMBurst = cfg.TPMLimit
+	if v, ok := lookup("PUSAQ_TPM_BURST"); ok {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: must be a positive number, got %q", v)
+		}
+		cfg.TPMBurst = n
+	}
+	cfg.TPMReserveDefault = DefaultTPMReserve
+	if v, ok := lookup("PUSAQ_TPM_RESERVE_DEFAULT"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_TPM_RESERVE_DEFAULT: must be a positive integer, got %q", v)
+		}
+		cfg.TPMReserveDefault = n
 	}
 
 	if v, ok := lookup("PUSAQ_API_KEYS"); ok && v != "" {

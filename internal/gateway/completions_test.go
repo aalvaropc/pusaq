@@ -64,7 +64,7 @@ func validPayload() []byte {
 
 func TestCompletionsRoundTrip(t *testing.T) {
 	p := okProvider()
-	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p})
+	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p}, CompletionsOptions{Logger: discardLogger()})
 
 	req := &core.Request{Op: "chat.completions", Payload: validPayload()}
 	resp, err := h(context.Background(), req)
@@ -109,7 +109,7 @@ func TestCompletionsValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := okProvider()
-			h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p})
+			h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p}, CompletionsOptions{Logger: discardLogger()})
 			_, err := h(context.Background(), &core.Request{Payload: []byte(tt.payload)})
 			var norm *core.Error
 			if !errors.As(err, &norm) || norm.Code != core.CodeInvalidRequest {
@@ -124,7 +124,7 @@ func TestCompletionsValidation(t *testing.T) {
 
 func TestCompletionsUnknownModelRejected(t *testing.T) {
 	p := okProvider()
-	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p})
+	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p}, CompletionsOptions{Logger: discardLogger()})
 	_, err := h(context.Background(), &core.Request{
 		Payload: []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"x"}]}`),
 	})
@@ -140,7 +140,7 @@ func TestCompletionsUnknownModelRejected(t *testing.T) {
 func TestCompletionsUpstreamErrorPropagates(t *testing.T) {
 	p := okProvider()
 	p.err = core.NewError(core.CodeUpstream, "upstream provider returned status 500")
-	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p})
+	h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p}, CompletionsOptions{Logger: discardLogger()})
 
 	req := &core.Request{Payload: validPayload()}
 	_, err := h(context.Background(), req)

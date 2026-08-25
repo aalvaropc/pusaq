@@ -40,6 +40,30 @@ type Request struct {
 	ServedModel string
 	// Usage accumulates provider-reported token counts for accounting.
 	Usage Usage
+	// TokensCharged is what the token limiter charged on admission
+	// (input estimate + output reservation); zero when TPM is disabled.
+	TokensCharged int
+
+	// finalizers run exactly once when the request is finalized by the
+	// accounting stage — buffered return, stream end, or panic — before
+	// the cost event is emitted. Registered via OnFinalize.
+	finalizers []func()
+}
+
+// OnFinalize registers fn to run exactly once when the request finalizes
+// (before its cost event is emitted), whatever the outcome. Used for
+// obligations that must hold on every path, like token reconciliation.
+func (r *Request) OnFinalize(fn func()) {
+	r.finalizers = append(r.finalizers, fn)
+}
+
+// RunFinalizers executes registered finalizers in order. Called by the
+// accounting stage only.
+func (r *Request) RunFinalizers() {
+	for _, fn := range r.finalizers {
+		fn()
+	}
+	r.finalizers = nil
 }
 
 // Usage is the provider-reported token consumption of a request.
