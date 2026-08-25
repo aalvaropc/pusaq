@@ -22,6 +22,7 @@ type CostEvent struct {
 	RequestID string        `json:"request_id"`
 	Timestamp time.Time     `json:"timestamp"`
 	Op        string        `json:"op"`
+	Tenant    string        `json:"tenant,omitempty"`
 	Outcome   Outcome       `json:"outcome"`
 	ErrorCode Code          `json:"error_code,omitempty"`
 	Latency   time.Duration `json:"latency_ms"`

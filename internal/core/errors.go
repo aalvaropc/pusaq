@@ -13,6 +13,8 @@ type Code string
 const (
 	// CodeInvalidRequest marks a malformed or unprocessable client request.
 	CodeInvalidRequest Code = "invalid_request"
+	// CodeUnauthorized marks a request with a missing or unknown API key.
+	CodeUnauthorized Code = "unauthorized"
 	// CodeNotFound marks a missing route or resource.
 	CodeNotFound Code = "not_found"
 	// CodeInternal marks an unexpected gateway failure. It is the fallback
@@ -30,6 +32,7 @@ const (
 // statusByCode maps each code to the HTTP status the transport layer renders.
 var statusByCode = map[Code]int{
 	CodeInvalidRequest: http.StatusBadRequest,
+	CodeUnauthorized:   http.StatusUnauthorized,
 	CodeNotFound:       http.StatusNotFound,
 	CodeInternal:       http.StatusInternalServerError,
 	CodeUpstream:       http.StatusBadGateway,

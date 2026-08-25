@@ -60,6 +60,10 @@ type Config struct {
 	UpstreamTimeout time.Duration
 	// Routes maps model aliases to providers and physical models.
 	Routes map[string]Route
+	// APIKeys maps API keys to tenant names (PUSAQ_API_KEYS,
+	// "key:tenant" comma-separated). Empty means dev mode: no
+	// authentication, every request attributed to the "dev" tenant.
+	APIKeys map[string]string
 }
 
 // Load reads configuration through lookup (os.LookupEnv in production,
@@ -134,5 +138,38 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		cfg.UpstreamTimeout = d
 	}
 
+	if v, ok := lookup("PUSAQ_API_KEYS"); ok && v != "" {
+		keys, err := parseAPIKeys(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_API_KEYS: %w", err)
+		}
+		cfg.APIKeys = keys
+	}
+
 	return cfg, nil
+}
+
+// parseAPIKeys parses "key:tenant" comma-separated pairs, failing fast on
+// malformed pairs, empty parts, and duplicate keys — config bugs surface at
+// startup, not at request time.
+func parseAPIKeys(v string) (map[string]string, error) {
+	keys := make(map[string]string)
+	for pair := range strings.SplitSeq(v, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		key, tenant, ok := strings.Cut(pair, ":")
+		if !ok || key == "" || tenant == "" {
+			return nil, fmt.Errorf("malformed pair %q, want key:tenant", pair)
+		}
+		if _, dup := keys[key]; dup {
+			return nil, fmt.Errorf("duplicate API key in pair %q", pair)
+		}
+		keys[key] = tenant
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no valid key:tenant pairs")
+	}
+	return keys, nil
 }

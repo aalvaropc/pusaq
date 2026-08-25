@@ -37,9 +37,13 @@ func run(logger *slog.Logger) error {
 
 	emitter := telemetry.NewEmitter(telemetry.SlogSink{Logger: logger}, cfg.TelemetryBuffer)
 
+	if len(cfg.APIKeys) == 0 {
+		logger.Warn("authentication disabled: no PUSAQ_API_KEYS configured, all requests attributed to the dev tenant")
+	}
 	pipeline := core.Chain(
 		gateway.Accounting(emitter.Emit, logger),
 		gateway.RequestID(),
+		gateway.Auth(cfg.APIKeys),
 	)
 
 	providers := map[string]provider.Provider{

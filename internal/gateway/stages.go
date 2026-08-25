@@ -40,6 +40,33 @@ func RequestID() core.Stage {
 	}
 }
 
+// DevTenant is the tenant every request is attributed to when no API keys
+// are configured (dev mode — explicit, never silent: main logs a warning).
+const DevTenant = "dev"
+
+// Auth resolves the request's tenant from its API key. With keys configured,
+// a missing or unknown key is rejected with unauthorized (401) before any
+// downstream stage runs; with no keys, every request belongs to DevTenant.
+func Auth(apiKeys map[string]string) core.Stage {
+	return func(next core.Handler) core.Handler {
+		return func(ctx context.Context, req *core.Request) (*core.Response, error) {
+			if len(apiKeys) == 0 {
+				req.Tenant = DevTenant
+				return next(ctx, req)
+			}
+			if req.APIKey == "" {
+				return nil, core.NewError(core.CodeUnauthorized, "missing API key")
+			}
+			tenant, ok := apiKeys[req.APIKey]
+			if !ok {
+				return nil, core.NewError(core.CodeUnauthorized, "unknown API key")
+			}
+			req.Tenant = tenant
+			return next(ctx, req)
+		}
+	}
+}
+
 // Accounting is the outermost stage of every pipeline. It owns the request's
 // cost event and guarantees the constitution's invariant: exactly one event
 // per admitted request — on success, on error, and on panic. A panic is
@@ -58,6 +85,7 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					RequestID:      req.ID,
 					Timestamp:      req.ArrivedAt,
 					Op:             req.Op,
+					Tenant:         req.Tenant,
 					Outcome:        core.OutcomeSuccess,
 					Latency:        time.Since(start),
 					RequestedModel: req.RequestedModel,
@@ -139,6 +167,7 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			RequestID:      f.req.ID,
 			Timestamp:      f.req.ArrivedAt,
 			Op:             f.req.Op,
+			Tenant:         f.req.Tenant,
 			Outcome:        outcome,
 			ErrorCode:      code,
 			Latency:        time.Since(f.start),

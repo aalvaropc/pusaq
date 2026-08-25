@@ -24,8 +24,9 @@ record about it. Models are addressed through aliases (`pusaq/fast`,
 `add-chat-completions`): middleware pipeline with a guaranteed cost event per
 request, async cost telemetry, liveness/readiness with graceful drain, and a
 OpenAI-compatible `POST /v1/chat/completions` — buffered and SSE streaming —
-proxied to the mock provider through configurable model aliases. Next up:
-tenants/auth and real Vertex adapters.
+proxied to the mock provider through configurable model aliases, with
+API-key authentication and per-tenant cost attribution. Next up: distributed
+rate limiting and real Vertex adapters.
 
 ## API
 
@@ -39,6 +40,13 @@ change). Responses carry `X-Pusaq-Model` (the physical model served) and
 `X-Pusaq-Request-Id`. All errors share one JSON shape:
 `{"error":{"code":"...","message":"..."}}` — provider failures surface as
 `upstream_error` (502) without leaking upstream responses.
+
+**Authentication.** Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
+clients send `Authorization: Bearer <key>`, and every cost event carries the
+tenant. Missing/unknown keys get a normalized `unauthorized` (401). With no
+keys configured the gateway runs in **dev mode** — no auth, everything
+attributed to the `dev` tenant, and a warning logged at startup.
+`/healthz` and `/readyz` never require credentials.
 
 ## Development
 
@@ -60,7 +68,8 @@ readiness and turns 503 during the drain window on SIGTERM.
 
 Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 (`1s`), `PUSAQ_SHUTDOWN_GRACE` (`10s`), `PUSAQ_TELEMETRY_BUFFER` (`1024`),
-`PUSAQ_MOCK_URL` (`http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`).
+`PUSAQ_MOCK_URL` (`http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
+`PUSAQ_API_KEYS` (unset → dev mode).
 
 > Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
 > containers are healthy, the firewall is blocking host→container traffic on

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -82,6 +83,9 @@ func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler 
 		}
 
 		req := &core.Request{ArrivedAt: time.Now().UTC(), Op: op, Payload: body}
+		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			req.APIKey = strings.TrimSpace(token)
+		}
 		resp, err := h(r.Context(), req)
 		if err != nil {
 			// After model resolution, even errors report the attempted model.

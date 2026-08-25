@@ -31,6 +31,7 @@ func (s SlogSink) Write(event core.CostEvent) {
 		slog.String("request_id", event.RequestID),
 		slog.Time("timestamp", event.Timestamp),
 		slog.String("op", event.Op),
+		slog.String("tenant", event.Tenant),
 		slog.String("outcome", string(event.Outcome)),
 		slog.String("error_code", string(event.ErrorCode)),
 		slog.Int64("latency_ms", event.Latency.Milliseconds()),
