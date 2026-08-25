@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aalvaropc/pusaq/internal/breaker"
 	"github.com/aalvaropc/pusaq/internal/config"
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/gateway"
@@ -87,13 +88,24 @@ func run(logger *slog.Logger) error {
 	}
 	pipeline := core.Chain(stages...)
 
-	providers := map[string]provider.Provider{
-		"mock": provider.NewHTTP("mock", cfg.MockURL, cfg.UpstreamTimeout, logger),
+	// Backends in priority order: the first upstream is the primary for
+	// every alias, the rest are its fallback chain. Each gets a breaker.
+	providers := make(map[string]provider.Provider, len(cfg.Upstreams))
+	breakers := make(map[string]*breaker.Breaker, len(cfg.Upstreams))
+	var fallbacks []string
+	for i, up := range cfg.Upstreams {
+		providers[up.Name] = provider.NewHTTP(up.Name, up.URL, cfg.UpstreamTimeout, logger)
+		breakers[up.Name] = breaker.New(breaker.Config{})
+		if i > 0 {
+			fallbacks = append(fallbacks, up.Name)
+		}
 	}
+	primary := cfg.Upstreams[0].Name
 	routes := make(map[string]gateway.Route, len(cfg.Routes))
 	for alias, r := range cfg.Routes {
-		routes[alias] = gateway.Route{Provider: r.Provider, Model: r.Model}
+		routes[alias] = gateway.Route{Provider: primary, Model: r.Model, Fallbacks: fallbacks}
 	}
+	completionsOpts.Breakers = func(backend string) *breaker.Breaker { return breakers[backend] }
 	completions := gateway.CompletionsHandler(routes, providers, completionsOpts)
 
 	srv := gateway.NewServer(logger, pipeline, completions)

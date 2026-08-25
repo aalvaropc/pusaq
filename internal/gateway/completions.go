@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/aalvaropc/pusaq/internal/breaker"
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
@@ -36,13 +37,26 @@ func estimateInputTokens(messages []provider.Message) int {
 	return (chars + 3) / 4
 }
 
-// Route maps a model alias to a provider and its physical upstream model.
-// Routing tables are configuration: physical model names never appear in
-// code (constitution rule 1).
+// Route maps a model alias to a provider and its physical upstream model,
+// with ordered fallback backends serving the equivalent model. Routing
+// tables are configuration: physical model names never appear in code
+// (constitution rule 1).
 type Route struct {
 	Provider string
 	Model    string
+	// Fallbacks are tried in order, at most once each, when the primary
+	// fails with an upstream error or its breaker is open.
+	Fallbacks []string
 }
+
+// backends returns the primary followed by the fallbacks.
+func (r Route) backends() []string {
+	return append([]string{r.Provider}, r.Fallbacks...)
+}
+
+// BreakerFor returns the circuit breaker guarding a backend; nil disables
+// breaking for it. Satisfied by a map lookup in the composition root.
+type BreakerFor func(backend string) *breaker.Breaker
 
 // completionRequest is the accepted OpenAI request subset. Unknown fields
 // are ignored for SDK compatibility.
@@ -91,7 +105,17 @@ type CompletionsOptions struct {
 	Tokens TokenLimiter
 	// ReserveDefault is the output reservation when max_tokens is absent.
 	ReserveDefault int
-	Logger         *slog.Logger
+	// Breakers guards upstream backends; nil disables circuit breaking.
+	Breakers BreakerFor
+	Logger   *slog.Logger
+}
+
+// breakerFor resolves the breaker for a backend, tolerating a nil registry.
+func (o CompletionsOptions) breakerFor(backend string) *breaker.Breaker {
+	if o.Breakers == nil {
+		return nil
+	}
+	return o.Breakers(backend)
 }
 
 // CompletionsHandler is the terminal handler for POST /v1/chat/completions:
@@ -111,27 +135,20 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		if !ok {
 			return nil, core.Errorf(core.CodeInvalidRequest, "unknown model %q", cr.Model)
 		}
-		p, ok := providers[route.Provider]
-		if !ok {
-			// A route naming an unregistered provider is a config bug.
-			return nil, core.Errorf(core.CodeInternal, "no provider registered for route")
-		}
 		req.RequestedModel = cr.Model
 		req.ServedModel = route.Model
 
+		// TPM is charged once, before any backend attempt: the model
+		// contract is identical across the fallback chain.
 		if err := chargeTokens(ctx, req, cr, opts); err != nil {
 			return nil, err
 		}
 
 		if cr.Stream {
-			return streamCompletion(ctx, p, req, cr, route)
+			return streamCompletion(ctx, providers, req, cr, route, opts)
 		}
 
-		upstream, err := p.Complete(ctx, provider.ChatRequest{
-			Model:     route.Model,
-			Messages:  cr.Messages,
-			MaxTokens: cr.MaxTokens,
-		})
+		upstream, err := completeWithFallback(ctx, providers, req, cr, route, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -216,17 +233,95 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 	return nil
 }
 
-// streamCompletion proxies a streaming completion: the provider's raw SSE
-// stream passes through untouched while a scanner watches for the usage
-// chunk and records it on the envelope for accounting.
-func streamCompletion(ctx context.Context, p provider.Provider, req *core.Request, cr completionRequest, route Route) (*core.Response, error) {
-	upstream, err := p.StreamComplete(ctx, provider.ChatRequest{
+// completeWithFallback walks the route's backend chain: skip open breakers
+// without paying an attempt, feed every outcome back to the breaker, serve
+// from the first success. Non-upstream errors stop the chain — they are not
+// the backend's fault.
+func completeWithFallback(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, route Route, opts CompletionsOptions) (provider.ChatResponse, error) {
+	chatReq := provider.ChatRequest{
 		Model:     route.Model,
 		Messages:  cr.Messages,
 		MaxTokens: cr.MaxTokens,
-	})
-	if err != nil {
-		return nil, err
+	}
+	var lastErr error
+	for _, backend := range route.backends() {
+		p, ok := providers[backend]
+		if !ok {
+			return provider.ChatResponse{}, core.Errorf(core.CodeInternal, "no provider registered for route")
+		}
+		br := opts.breakerFor(backend)
+		if br != nil && !br.Allow() {
+			opts.Logger.Warn("backend breaker open, skipping",
+				slog.String("request_id", req.ID), slog.String("backend", backend))
+			continue
+		}
+		req.Attempts++
+		resp, err := p.Complete(ctx, chatReq)
+		if br != nil {
+			br.Record(err == nil || core.AsError(err).Code != core.CodeUpstream)
+		}
+		if err == nil {
+			req.ServedProvider = backend
+			return resp, nil
+		}
+		if core.AsError(err).Code != core.CodeUpstream {
+			return provider.ChatResponse{}, err
+		}
+		lastErr = err
+		opts.Logger.Warn("backend failed, trying next",
+			slog.String("request_id", req.ID), slog.String("backend", backend), slog.Any("error", err))
+	}
+	if lastErr != nil {
+		return provider.ChatResponse{}, lastErr
+	}
+	return provider.ChatResponse{}, core.NewError(core.CodeUpstream, "all upstream backends unavailable")
+}
+
+// streamCompletion proxies a streaming completion with pre-first-byte
+// fallback: backend failures before a stream exists walk the chain; once a
+// stream has begun, mid-stream failures end it with the usual accounting —
+// a started stream is never silently restarted.
+func streamCompletion(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, route Route, opts CompletionsOptions) (*core.Response, error) {
+	chatReq := provider.ChatRequest{
+		Model:     route.Model,
+		Messages:  cr.Messages,
+		MaxTokens: cr.MaxTokens,
+	}
+	var upstream io.ReadCloser
+	var lastErr error
+	for _, backend := range route.backends() {
+		p, ok := providers[backend]
+		if !ok {
+			return nil, core.Errorf(core.CodeInternal, "no provider registered for route")
+		}
+		br := opts.breakerFor(backend)
+		if br != nil && !br.Allow() {
+			opts.Logger.Warn("backend breaker open, skipping",
+				slog.String("request_id", req.ID), slog.String("backend", backend))
+			continue
+		}
+		req.Attempts++
+		stream, err := p.StreamComplete(ctx, chatReq)
+		if br != nil {
+			br.Record(err == nil || core.AsError(err).Code != core.CodeUpstream)
+		}
+		if err == nil {
+			req.ServedProvider = backend
+			upstream = stream
+			break
+		}
+		if core.AsError(err).Code != core.CodeUpstream {
+			return nil, err
+		}
+		lastErr = err
+		opts.Logger.Warn("backend failed, trying next",
+			slog.String("request_id", req.ID), slog.String("backend", backend), slog.Any("error", err))
+	}
+	if upstream == nil {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, core.NewError(core.CodeUpstream, "all upstream backends unavailable")
 	}
 
 	resp := &core.Response{

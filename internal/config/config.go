@@ -18,7 +18,6 @@ const (
 	DefaultDrainDelay      = 1 * time.Second
 	DefaultShutdownGrace   = 10 * time.Second
 	DefaultTelemetryBuffer = 1024
-	DefaultMockURL         = "http://localhost:9090"
 	DefaultUpstreamTimeout = 30 * time.Second
 	DefaultRPMLimit        = 60.0
 	DefaultTPMLimit        = 100000.0
@@ -33,7 +32,17 @@ type Route struct {
 	Model    string
 }
 
-// defaultRoutes maps the public aliases to the mock provider until real
+// Upstream names one OpenAI-compatible backend.
+type Upstream struct {
+	Name string
+	URL  string
+}
+
+func defaultUpstreams() []Upstream {
+	return []Upstream{{Name: "mock", URL: "http://localhost:9090"}}
+}
+
+// defaultRoutes maps the public aliases to the mock model until real
 // adapters land. pusaq/auto currently resolves like pusaq/fast; the router
 // slice will make it a real decision.
 func defaultRoutes() map[string]Route {
@@ -58,8 +67,10 @@ type Config struct {
 	// TelemetryBuffer is the cost-event buffer capacity
 	// (PUSAQ_TELEMETRY_BUFFER); overflow drops events.
 	TelemetryBuffer int
-	// MockURL is the mock provider's base URL (PUSAQ_MOCK_URL).
-	MockURL string
+	// Upstreams are the OpenAI-compatible backends in priority order:
+	// the first is the primary for all aliases, the rest are fallbacks
+	// (PUSAQ_UPSTREAMS, "name=url" comma-separated).
+	Upstreams []Upstream
 	// UpstreamTimeout bounds every provider call (PUSAQ_UPSTREAM_TIMEOUT).
 	UpstreamTimeout time.Duration
 	// Routes maps model aliases to providers and physical models.
@@ -97,7 +108,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		DrainDelay:      DefaultDrainDelay,
 		ShutdownGrace:   DefaultShutdownGrace,
 		TelemetryBuffer: DefaultTelemetryBuffer,
-		MockURL:         DefaultMockURL,
+		Upstreams:       defaultUpstreams(),
 		UpstreamTimeout: DefaultUpstreamTimeout,
 		Routes:          defaultRoutes(),
 	}
@@ -142,12 +153,12 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		cfg.TelemetryBuffer = n
 	}
 
-	if v, ok := lookup("PUSAQ_MOCK_URL"); ok {
-		u, err := url.Parse(v)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return Config{}, fmt.Errorf("PUSAQ_MOCK_URL: not an absolute URL: %q", v)
+	if v, ok := lookup("PUSAQ_UPSTREAMS"); ok && v != "" {
+		ups, err := parseUpstreams(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_UPSTREAMS: %w", err)
 		}
-		cfg.MockURL = strings.TrimRight(v, "/")
+		cfg.Upstreams = ups
 	}
 
 	if v, ok := lookup("PUSAQ_UPSTREAM_TIMEOUT"); ok {
@@ -215,6 +226,36 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseUpstreams parses "name=url" comma-separated backends in priority
+// order, failing fast on malformed pairs, invalid URLs, and duplicates.
+func parseUpstreams(v string) ([]Upstream, error) {
+	var ups []Upstream
+	seen := make(map[string]bool)
+	for pair := range strings.SplitSeq(v, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		name, rawURL, ok := strings.Cut(pair, "=")
+		if !ok || name == "" || rawURL == "" {
+			return nil, fmt.Errorf("malformed pair %q, want name=url", pair)
+		}
+		u, err := url.Parse(rawURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return nil, fmt.Errorf("upstream %q: not an absolute URL: %q", name, rawURL)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("duplicate upstream name %q", name)
+		}
+		seen[name] = true
+		ups = append(ups, Upstream{Name: name, URL: strings.TrimRight(rawURL, "/")})
+	}
+	if len(ups) == 0 {
+		return nil, fmt.Errorf("no valid name=url pairs")
+	}
+	return ups, nil
 }
 
 // parseAPIKeys parses "key:tenant" comma-separated pairs, failing fast on

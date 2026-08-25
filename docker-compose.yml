@@ -5,9 +5,9 @@ services:
       target: pusaq
     environment:
       PUSAQ_REDIS_ADDR: redis:6379
-      PUSAQ_MOCK_URL: http://mockprovider:9090
+      PUSAQ_UPSTREAMS: mock=http://mockprovider:9090,backup=http://mockbackup:9090
       PUSAQ_RPM_LIMIT: "60"
-      PUSAQ_RPM_BURST: "5"
+      PUSAQ_RPM_BURST: "50"
       PUSAQ_TPM_LIMIT: "300"
       PUSAQ_TPM_RESERVE_DEFAULT: "50"
       PUSAQ_DRAIN_DELAY: 0s
@@ -37,3 +37,10 @@ services:
     command: ["--addr", ":9090", "--latency-p50", "200ms", "--latency-p99", "2s", "--error-rate", "0"]
     ports:
       - "9090:9090"
+
+  # Fallback backend: an equivalent upstream the breaker fails over to.
+  mockbackup:
+    build:
+      context: .
+      target: mockprovider
+    command: ["--addr", ":9090", "--latency-p50", "100ms", "--latency-p99", "1s", "--error-rate", "0"]

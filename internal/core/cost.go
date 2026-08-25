@@ -31,6 +31,10 @@ type CostEvent struct {
 	// models (empty otherwise); Usage carries provider-reported tokens.
 	RequestedModel string `json:"requested_model,omitempty"`
 	ServedModel    string `json:"served_model,omitempty"`
+	// ServedProvider names the backend that answered (after fallback);
+	// Attempts counts backend attempts, so failover is observable.
+	ServedProvider string `json:"served_provider,omitempty"`
+	Attempts       int    `json:"attempts,omitempty"`
 	Usage          Usage  `json:"usage,omitzero"`
 	// TokensCharged is the admission charge (input estimate + output
 	// reservation) so reservation error is measurable against Usage.

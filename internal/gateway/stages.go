@@ -167,6 +167,8 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 				finalize()
 				event.Usage = req.Usage
 				event.TokensCharged = req.TokensCharged
+				event.ServedProvider = req.ServedProvider
+				event.Attempts = req.Attempts
 				emit(event)
 			}()
 			return next(ctx, req)
@@ -228,6 +230,8 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			ServedModel:    f.req.ServedModel,
 			Usage:          f.req.Usage,
 			TokensCharged:  f.req.TokensCharged,
+			ServedProvider: f.req.ServedProvider,
+			Attempts:       f.req.Attempts,
 		})
 	})
 }

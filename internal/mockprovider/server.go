@@ -39,22 +39,6 @@ func (o Options) Validate() error {
 	return nil
 }
 
-// cannedResponse is an OpenAI-shaped chat completion, so the gateway's
-// upcoming chat-completions slice can proxy to the mock unchanged.
-const cannedResponse = `{
-  "id": "mock-cmpl-1",
-  "object": "chat.completion",
-  "model": "mock-model",
-  "choices": [
-    {
-      "index": 0,
-      "message": {"role": "assistant", "content": "This is a canned response from the Pusaq mock provider."},
-      "finish_reason": "stop"
-    }
-  ],
-  "usage": {"prompt_tokens": 12, "completion_tokens": 11, "total_tokens": 23}
-}`
-
 // Server is the mock provider's HTTP handler.
 type Server struct {
 	opts   Options
@@ -118,19 +102,34 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Stream bool `json:"stream"`
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
 	}
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	_ = json.Unmarshal(body, &req) // malformed body → buffered response
+	if req.Model == "" {
+		req.Model = "mock-model"
+	}
 
 	if req.Stream {
-		s.streamCompletion(w)
+		s.streamCompletion(w, req.Model)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, cannedResponse)
+	resp, _ := json.Marshal(map[string]any{
+		"id":     "mock-cmpl-1",
+		"object": "chat.completion",
+		"model":  req.Model, // echo, like a real upstream serving the request
+		"choices": []map[string]any{{
+			"index":         0,
+			"message":       map[string]string{"role": "assistant", "content": cannedContent},
+			"finish_reason": "stop",
+		}},
+		"usage": map[string]int{"prompt_tokens": 12, "completion_tokens": 11, "total_tokens": 23},
+	})
+	_, _ = w.Write(resp)
 }
 
 // cannedContent is what the streaming mode splits into word chunks.
@@ -138,7 +137,7 @@ const cannedContent = "This is a canned response from the Pusaq mock provider."
 
 // streamCompletion emits the canned content as OpenAI chat.completion.chunk
 // events, a final chunk carrying usage, then "data: [DONE]".
-func (s *Server) streamCompletion(w http.ResponseWriter) {
+func (s *Server) streamCompletion(w http.ResponseWriter, model string) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
@@ -153,7 +152,7 @@ func (s *Server) streamCompletion(w http.ResponseWriter) {
 		b, _ := json.Marshal(map[string]any{
 			"id":     "mock-cmpl-1",
 			"object": "chat.completion.chunk",
-			"model":  "mock-model",
+			"model":  model,
 			"choices": []map[string]any{{
 				"index":         0,
 				"delta":         map[string]string{"content": delta},
@@ -180,7 +179,7 @@ func (s *Server) streamCompletion(w http.ResponseWriter) {
 	usage, _ := json.Marshal(map[string]any{
 		"id":      "mock-cmpl-1",
 		"object":  "chat.completion.chunk",
-		"model":   "mock-model",
+		"model":   model,
 		"choices": []any{},
 		"usage":   map[string]int{"prompt_tokens": 12, "completion_tokens": 11, "total_tokens": 23},
 	})
