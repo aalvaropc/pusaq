@@ -1,0 +1,24 @@
+# Binaries
+/bin/
+/pusaq
+*.exe
+
+# Test and coverage
+*.test
+*.out
+coverage.html
+
+# Env and local config
+.env
+.env.*
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+.DS_Store
