@@ -25,4 +25,10 @@ type CostEvent struct {
 	Outcome   Outcome       `json:"outcome"`
 	ErrorCode Code          `json:"error_code,omitempty"`
 	Latency   time.Duration `json:"latency_ms"`
+
+	// RequestedModel and ServedModel are set for operations that resolve
+	// models (empty otherwise); Usage carries provider-reported tokens.
+	RequestedModel string `json:"requested_model,omitempty"`
+	ServedModel    string `json:"served_model,omitempty"`
+	Usage          Usage  `json:"usage,omitzero"`
 }

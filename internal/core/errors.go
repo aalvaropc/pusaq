@@ -18,6 +18,9 @@ const (
 	// CodeInternal marks an unexpected gateway failure. It is the fallback
 	// for unknown errors and never leaks internal details to the client.
 	CodeInternal Code = "internal"
+	// CodeUpstream marks a provider failure or timeout. The provider's raw
+	// response is never forwarded to the client.
+	CodeUpstream Code = "upstream_error"
 )
 
 // statusByCode maps each code to the HTTP status the transport layer renders.
@@ -25,6 +28,7 @@ var statusByCode = map[Code]int{
 	CodeInvalidRequest: http.StatusBadRequest,
 	CodeNotFound:       http.StatusNotFound,
 	CodeInternal:       http.StatusInternalServerError,
+	CodeUpstream:       http.StatusBadGateway,
 }
 
 // Error is Pusaq's normalized error: every failure the gateway reports has a

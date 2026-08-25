@@ -16,6 +16,7 @@ import (
 	"github.com/aalvaropc/pusaq/internal/config"
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/gateway"
+	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/telemetry"
 )
 
@@ -40,7 +41,17 @@ func run(logger *slog.Logger) error {
 		gateway.Accounting(emitter.Emit, logger),
 		gateway.RequestID(),
 	)
-	srv := gateway.NewServer(logger, pipeline)
+
+	providers := map[string]provider.Provider{
+		"mock": provider.NewHTTP("mock", cfg.MockURL, cfg.UpstreamTimeout, logger),
+	}
+	routes := make(map[string]gateway.Route, len(cfg.Routes))
+	for alias, r := range cfg.Routes {
+		routes[alias] = gateway.Route{Provider: r.Provider, Model: r.Model}
+	}
+	completions := gateway.CompletionsHandler(routes, providers)
+
+	srv := gateway.NewServer(logger, pipeline, completions)
 
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,

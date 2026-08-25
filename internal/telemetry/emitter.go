@@ -5,6 +5,7 @@
 package telemetry
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -26,14 +27,23 @@ type SlogSink struct {
 
 // Write implements Sink.
 func (s SlogSink) Write(event core.CostEvent) {
-	s.Logger.Info("cost_event",
+	attrs := []slog.Attr{
 		slog.String("request_id", event.RequestID),
 		slog.Time("timestamp", event.Timestamp),
 		slog.String("op", event.Op),
 		slog.String("outcome", string(event.Outcome)),
 		slog.String("error_code", string(event.ErrorCode)),
 		slog.Int64("latency_ms", event.Latency.Milliseconds()),
-	)
+	}
+	if event.RequestedModel != "" {
+		attrs = append(attrs,
+			slog.String("requested_model", event.RequestedModel),
+			slog.String("served_model", event.ServedModel),
+			slog.Int("prompt_tokens", event.Usage.PromptTokens),
+			slog.Int("completion_tokens", event.Usage.CompletionTokens),
+		)
+	}
+	s.Logger.LogAttrs(context.Background(), slog.LevelInfo, "cost_event", attrs...)
 }
 
 // Emitter delivers cost events to a Sink from a single drain goroutine.
