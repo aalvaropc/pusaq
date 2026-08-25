@@ -1,0 +1,121 @@
+package mockprovider
+
+import (
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestOptionsValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    Options
+		wantErr bool
+	}{
+		{"zero options valid", Options{}, false},
+		{"sane latencies valid", Options{LatencyP50: 50 * time.Millisecond, LatencyP99: 200 * time.Millisecond}, false},
+		{"p99 below p50 rejected", Options{LatencyP50: 200 * time.Millisecond, LatencyP99: 50 * time.Millisecond}, true},
+		{"negative latency rejected", Options{LatencyP50: -time.Millisecond}, true},
+		{"error rate above 1 rejected", Options{ErrorRate: 1.5}, true},
+		{"negative error rate rejected", Options{ErrorRate: -0.1}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.opts.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCompletionReturnsOpenAIShapedBody(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Object  string `json:"object"`
+		Choices []struct {
+			Message struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not JSON: %v", err)
+	}
+	if body.Object != "chat.completion" || len(body.Choices) == 0 || body.Usage.TotalTokens == 0 {
+		t.Fatalf("body missing OpenAI-shaped fields: %+v", body)
+	}
+}
+
+func TestErrorRateInjectsFailures(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{ErrorRate: 1.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 with error-rate 1.0", rec.Code)
+	}
+}
+
+func TestSampleLatencyBounds(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{
+		LatencyP50: 50 * time.Millisecond,
+		LatencyP99: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Drive the sampler across its whole randomness range.
+	seq := []float64{0.0, 0.1, 0.45, 0.89, 0.9, 0.95, 0.999}
+	i := 0
+	s.random = func() float64 {
+		v := seq[i%len(seq)]
+		i++
+		return v
+	}
+	for range 50 {
+		d := s.sampleLatency()
+		if d < 0 || d > 200*time.Millisecond {
+			t.Fatalf("sampled latency %s outside [0, p99]", d)
+		}
+	}
+}
+
+func TestZeroLatencyConfigSleepsZero(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var slept []time.Duration
+	s.sleep = func(d time.Duration) { slept = append(slept, d) }
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+
+	if len(slept) != 1 || slept[0] != 0 {
+		t.Fatalf("slept = %v, want exactly one zero-duration sleep", slept)
+	}
+}
