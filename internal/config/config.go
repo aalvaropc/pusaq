@@ -32,10 +32,27 @@ type Route struct {
 	Model    string
 }
 
-// Upstream names one OpenAI-compatible backend.
+// Upstream names one OpenAI-compatible backend. APIKey, when set
+// (PUSAQ_UPSTREAM_KEY_<NAME>), authenticates calls to it; it is never
+// logged.
 type Upstream struct {
-	Name string
-	URL  string
+	Name   string
+	URL    string
+	APIKey string
+}
+
+// envKeyName maps an upstream name to its key variable suffix: uppercased,
+// non-alphanumerics replaced by underscores.
+func envKeyName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(name) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return "PUSAQ_UPSTREAM_KEY_" + b.String()
 }
 
 func defaultUpstreams() []Upstream {
@@ -160,6 +177,17 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 		cfg.Upstreams = ups
 	}
+	for i := range cfg.Upstreams {
+		if key, ok := lookup(envKeyName(cfg.Upstreams[i].Name)); ok && key != "" {
+			cfg.Upstreams[i].APIKey = key
+		}
+	}
+
+	if v, ok := lookup("PUSAQ_ROUTES"); ok && v != "" {
+		if err := applyRouteModels(cfg.Routes, v); err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_ROUTES: %w", err)
+		}
+	}
 
 	if v, ok := lookup("PUSAQ_UPSTREAM_TIMEOUT"); ok {
 		d, err := time.ParseDuration(v)
@@ -256,6 +284,30 @@ func parseUpstreams(v string) ([]Upstream, error) {
 		return nil, fmt.Errorf("no valid name=url pairs")
 	}
 	return ups, nil
+}
+
+// applyRouteModels overrides per-alias physical models from
+// "alias=model" comma-separated pairs. The alias set is fixed — the three
+// public aliases are the product contract — so an unknown alias is a
+// startup error, not a new route.
+func applyRouteModels(routes map[string]Route, v string) error {
+	for pair := range strings.SplitSeq(v, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		alias, model, ok := strings.Cut(pair, "=")
+		if !ok || alias == "" || model == "" {
+			return fmt.Errorf("malformed pair %q, want alias=model", pair)
+		}
+		r, exists := routes[alias]
+		if !exists {
+			return fmt.Errorf("unknown alias %q", alias)
+		}
+		r.Model = model
+		routes[alias] = r
+	}
+	return nil
 }
 
 // parseAPIKeys parses "key:tenant" comma-separated pairs, failing fast on

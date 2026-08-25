@@ -21,6 +21,7 @@ const maxUpstreamBody = 4 << 20 // 4 MiB
 type HTTP struct {
 	name    string
 	baseURL string
+	apiKey  string
 	// client bounds buffered calls end to end.
 	client *http.Client
 	// streamClient bounds only time-to-first-byte: a whole-exchange
@@ -29,11 +30,20 @@ type HTTP struct {
 	logger       *slog.Logger
 }
 
+// Option customizes an HTTP adapter.
+type Option func(*HTTP)
+
+// WithAPIKey authenticates every call to this upstream with a bearer key.
+// The key is attached per request and never logged.
+func WithAPIKey(key string) Option {
+	return func(h *HTTP) { h.apiKey = key }
+}
+
 // NewHTTP builds an adapter for the endpoint at baseURL (no trailing slash).
 // Buffered calls are bounded end to end by timeout; streamed calls bound
 // only the response headers by it.
-func NewHTTP(name, baseURL string, timeout time.Duration, logger *slog.Logger) *HTTP {
-	return &HTTP{
+func NewHTTP(name, baseURL string, timeout time.Duration, logger *slog.Logger, opts ...Option) *HTTP {
+	h := &HTTP{
 		name:    name,
 		baseURL: baseURL,
 		client:  &http.Client{Timeout: timeout},
@@ -41,6 +51,17 @@ func NewHTTP(name, baseURL string, timeout time.Duration, logger *slog.Logger) *
 			Transport: &http.Transport{ResponseHeaderTimeout: timeout},
 		},
 		logger: logger,
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// authorize attaches the upstream's bearer key when configured.
+func (p *HTTP) authorize(req *http.Request) {
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 }
 
@@ -61,6 +82,7 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 		return ChatResponse{}, fmt.Errorf("build upstream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	p.authorize(httpReq)
 
 	httpResp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -115,6 +137,7 @@ func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadClos
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
+	p.authorize(httpReq)
 
 	httpResp, err := p.streamClient.Do(httpReq)
 	if err != nil {
