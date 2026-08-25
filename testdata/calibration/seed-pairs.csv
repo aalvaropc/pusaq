@@ -1,0 +1,61 @@
+text_a,text_b,label
+How do I cancel my subscription?,I want to cancel my subscription,equivalent
+How do I cancel my subscription?,What are the steps to cancel my subscription?,equivalent
+What is the capital of Peru?,Tell me the capital city of Peru,equivalent
+What is the capital of Peru?,Which city is Peru's capital?,equivalent
+How do I reset my password?,"I forgot my password, how can I reset it?",equivalent
+How do I reset my password?,What is the way to reset my password?,equivalent
+What are your business hours?,When are you open?,equivalent
+How much does the premium plan cost?,What is the price of the premium plan?,equivalent
+How do I update my billing address?,I need to change my billing address,equivalent
+Can I get a refund for my last payment?,I would like a refund for my most recent payment,equivalent
+How do I export my data?,What is the process to export my data?,equivalent
+How do I contact support?,What is the way to reach customer support?,equivalent
+How do I enable two-factor authentication?,How can I turn on two-factor authentication?,equivalent
+How do I delete my account?,I want to permanently delete my account,equivalent
+Where can I download my invoice?,How do I get a copy of my invoice?,equivalent
+¿Cómo cancelo mi suscripción?,Quiero cancelar mi suscripción,equivalent
+¿Cuál es la capital de Perú?,Dime la capital de Perú,equivalent
+¿Cómo restablezco mi contraseña?,"Olvidé mi contraseña, ¿cómo la recupero?",equivalent
+¿Cuánto cuesta el plan premium?,¿Cuál es el precio del plan premium?,equivalent
+¿Cómo actualizo mi dirección de facturación?,Necesito cambiar mi dirección de facturación,equivalent
+¿Puedo obtener un reembolso de mi último pago?,Quisiera un reembolso de mi pago más reciente,equivalent
+¿Cómo exporto mis datos?,¿Cuál es el proceso para exportar mis datos?,equivalent
+¿Cómo contacto a soporte?,¿Cómo me comunico con atención al cliente?,equivalent
+¿Cómo activo la autenticación de dos factores?,¿Cómo enciendo la verificación en dos pasos?,equivalent
+¿Cómo elimino mi cuenta?,Quiero borrar mi cuenta permanentemente,equivalent
+¿Dónde descargo mi factura?,¿Cómo obtengo una copia de mi factura?,equivalent
+What is the exchange rate for dollars?,What's the dollar exchange rate?,equivalent
+How long does a bank transfer take?,How much time does a bank transfer need?,equivalent
+¿Cuánto demora una transferencia bancaria?,¿Cuánto tiempo tarda una transferencia bancaria?,equivalent
+Is there a free trial available?,Do you offer a free trial?,equivalent
+What is the capital of Peru?,What is the capital of Bolivia?,trap
+What is the capital of Peru?,What is the currency of Peru?,trap
+¿Cuál es la capital de Perú?,¿Cuál es la capital de Bolivia?,trap
+¿Cuál es la capital de Perú?,¿Cuál es la moneda de Perú?,trap
+How do I cancel my subscription?,How do I renew my subscription?,trap
+How do I cancel my subscription?,How do I upgrade my subscription?,trap
+¿Cómo cancelo mi suscripción?,¿Cómo renuevo mi suscripción?,trap
+How do I enable two-factor authentication?,How do I disable two-factor authentication?,trap
+¿Cómo activo la autenticación de dos factores?,¿Cómo desactivo la autenticación de dos factores?,trap
+How much does the premium plan cost?,How much does the basic plan cost?,trap
+¿Cuánto cuesta el plan premium?,¿Cuánto cuesta el plan básico?,trap
+Is my payment refundable?,Is my payment non-refundable?,trap
+Can I change my plan?,Can I not change my plan?,trap
+¿Mi pago es reembolsable?,¿Mi pago no es reembolsable?,trap
+What was the invoice total for January?,What was the invoice total for February?,trap
+¿Cuál fue el total de la factura de enero?,¿Cuál fue el total de la factura de febrero?,trap
+How do I transfer 100 dollars?,How do I transfer 1000 dollars?,trap
+¿Cómo transfiero 100 dólares?,¿Cómo transfiero 1000 dólares?,trap
+What are the fees for domestic transfers?,What are the fees for international transfers?,trap
+¿Cuáles son las comisiones de transferencias nacionales?,¿Cuáles son las comisiones de transferencias internacionales?,trap
+How do I send money to Chile?,How do I receive money from Chile?,trap
+¿Cómo envío dinero a Chile?,¿Cómo recibo dinero de Chile?,trap
+How long does a deposit take?,How long does a withdrawal take?,trap
+¿Cuánto demora un depósito?,¿Cuánto demora un retiro?,trap
+What is the limit for incoming transfers?,What is the limit for outgoing transfers?,trap
+Does the premium plan include support?,Does the free plan include support?,trap
+Can I pay with a credit card?,Can I pay with a debit card?,trap
+¿Puedo pagar con tarjeta de crédito?,¿Puedo pagar con tarjeta de débito?,trap
+How do I add a user to my team?,How do I remove a user from my team?,trap
+¿Cómo agrego un usuario a mi equipo?,¿Cómo quito un usuario de mi equipo?,trap
