@@ -23,7 +23,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
 		},
 		{
 			name: "all overrides applied",
@@ -32,7 +32,6 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_DRAIN_DELAY":         "0s",
 				"PUSAQ_SHUTDOWN_GRACE":      "30s",
 				"PUSAQ_TELEMETRY_BUFFER":    "256",
-				"PUSAQ_MOCK_URL":            "http://mock:9090/",
 				"PUSAQ_UPSTREAM_TIMEOUT":    "5s",
 				"PUSAQ_REDIS_ADDR":          "redis:6379",
 				"PUSAQ_RPM_LIMIT":           "120",
@@ -40,8 +39,11 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_TPM_LIMIT":           "6000",
 				"PUSAQ_TPM_BURST":           "2000",
 				"PUSAQ_TPM_RESERVE_DEFAULT": "256",
+				"PUSAQ_CACHE_MODE":          "shadow",
+				"PUSAQ_CACHE_TAU":           "0.9",
+				"PUSAQ_CACHE_MAX_ENTRIES":   "500",
 			},
-			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256, CacheMode: "shadow", CacheTau: 0.9, CacheMaxEntries: 500, EmbedderKind: "local"},
 		},
 		{
 			name:    "empty addr rejected",
@@ -111,6 +113,29 @@ func TestLoad(t *testing.T) {
 		{
 			name:    "malformed tpm reserve rejected",
 			env:     map[string]string{"PUSAQ_TPM_RESERVE_DEFAULT": "many"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid cache mode rejected",
+			env:     map[string]string{"PUSAQ_CACHE_MODE": "serve"},
+			wantErr: true,
+		},
+		{
+			name:    "tau above one rejected",
+			env:     map[string]string{"PUSAQ_CACHE_TAU": "1.5"},
+			wantErr: true,
+		},
+		{
+			name:    "embedder naming unconfigured upstream rejected",
+			env:     map[string]string{"PUSAQ_EMBEDDER": "openai:gemini"},
+			wantErr: true,
+		},
+		{
+			name: "openai embedder requires a model",
+			env: map[string]string{
+				"PUSAQ_UPSTREAMS": "gemini=http://g:1",
+				"PUSAQ_EMBEDDER":  "openai:gemini",
+			},
 			wantErr: true,
 		},
 		{
@@ -226,5 +251,19 @@ func TestRouteOverrideUnknownAliasRejected(t *testing.T) {
 	}
 	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/fast"})); err == nil {
 		t.Fatal("malformed pair accepted")
+	}
+}
+
+func TestOpenAIEmbedderAccepted(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{
+		"PUSAQ_UPSTREAMS":   "gemini=http://g:1",
+		"PUSAQ_EMBEDDER":    "openai:gemini",
+		"PUSAQ_EMBED_MODEL": "gemini-embedding-001",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.EmbedderKind != "openai:gemini" || got.EmbedModel != "gemini-embedding-001" {
+		t.Fatalf("embedder = %q model %q", got.EmbedderKind, got.EmbedModel)
 	}
 }

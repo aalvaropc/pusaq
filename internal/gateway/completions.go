@@ -7,11 +7,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/aalvaropc/pusaq/internal/breaker"
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
+	"github.com/aalvaropc/pusaq/internal/semcache"
 )
 
 // ServedModelHeader reports the physical model that served the request
@@ -99,6 +101,12 @@ func parseCompletionRequest(payload []byte) (completionRequest, error) {
 	return req, nil
 }
 
+// ShadowCache receives samples of successful completions for shadow-mode
+// evaluation. Satisfied by *semcache.Shadow; nil disables shadowing.
+type ShadowCache interface {
+	Offer(sample semcache.Sample)
+}
+
 // CompletionsOptions parameterize the completions flow.
 type CompletionsOptions struct {
 	// Tokens enables TPM limiting when non-nil.
@@ -107,8 +115,67 @@ type CompletionsOptions struct {
 	ReserveDefault int
 	// Breakers guards upstream backends; nil disables circuit breaking.
 	Breakers BreakerFor
-	Logger   *slog.Logger
+	// Shadow enables shadow-mode cache evaluation when non-nil.
+	Shadow ShadowCache
+	Logger *slog.Logger
 }
+
+// cacheable reports whether a request is structurally eligible for the
+// semantic cache (§5.4): exactly one user message, optionally preceded by
+// system messages. Multi-turn is never cacheable. It returns the system
+// prompt (namespace material) and the user content (the embedded text).
+func cacheable(messages []provider.Message) (systemPrompt, userContent string, ok bool) {
+	users := 0
+	var sys strings.Builder
+	for _, m := range messages {
+		switch m.Role {
+		case "system":
+			if users > 0 {
+				return "", "", false // system after user: not the simple shape
+			}
+			sys.WriteString(m.Content)
+			sys.WriteByte('\n')
+		case "user":
+			users++
+			userContent = m.Content
+		default:
+			return "", "", false // assistant/tool turns: multi-turn
+		}
+	}
+	if users != 1 {
+		return "", "", false
+	}
+	return sys.String(), userContent, true
+}
+
+// offerShadow registers a finalizer that enqueues a shadow sample once the
+// request has fully finished (buffered return or stream end) — the hot path
+// does nothing but this registration. completed gates the offer: a stream
+// that died mid-way must never be inserted as a cacheable observation.
+func offerShadow(req *core.Request, cr completionRequest, opts CompletionsOptions, completed func() bool, fingerprint func() string) {
+	if opts.Shadow == nil {
+		return
+	}
+	systemPrompt, userContent, ok := cacheable(cr.Messages)
+	if !ok {
+		return
+	}
+	tenant, model, id := req.Tenant, req.ServedModel, req.ID
+	req.OnFinalize(func() {
+		if !completed() {
+			return
+		}
+		opts.Shadow.Offer(semcache.Sample{
+			RequestID:   id,
+			Namespace:   semcache.Namespace(tenant, model, systemPrompt),
+			Prompt:      userContent,
+			Fingerprint: fingerprint(),
+		})
+	})
+}
+
+// always is the completed-gate for buffered successes.
+func always() bool { return true }
 
 // breakerFor resolves the breaker for a backend, tolerating a nil registry.
 func (o CompletionsOptions) breakerFor(backend string) *breaker.Breaker {
@@ -153,6 +220,12 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 			return nil, err
 		}
 		req.Usage = upstream.Usage
+
+		var content strings.Builder
+		for _, c := range upstream.Choices {
+			content.WriteString(c.Message.Content)
+		}
+		offerShadow(req, cr, opts, always, func() string { return semcache.Fingerprint(content.String()) })
 
 		body, err := json.Marshal(completionResponse{
 			ID:      upstream.ID,
@@ -324,9 +397,12 @@ func streamCompletion(ctx context.Context, providers map[string]provider.Provide
 		return nil, core.NewError(core.CodeUpstream, "all upstream backends unavailable")
 	}
 
+	scanner := &usageScanningStream{inner: upstream, req: req}
+	offerShadow(req, cr, opts, scanner.completed, scanner.contentFingerprint)
+
 	resp := &core.Response{
 		Status: http.StatusOK,
-		Stream: &usageScanningStream{inner: upstream, req: req},
+		Stream: scanner,
 	}
 	resp.SetHeader("Content-Type", "text/event-stream")
 	resp.SetHeader("Cache-Control", "no-cache")
@@ -335,12 +411,25 @@ func streamCompletion(ctx context.Context, providers map[string]provider.Provide
 }
 
 // usageScanningStream forwards SSE bytes untouched while watching complete
-// "data:" lines for a usage object; found usage lands on the envelope.
-// Pusaq never rewrites provider chunks — passthrough fidelity first.
+// "data:" lines for a usage object (landed on the envelope) and
+// accumulating delta content for the response fingerprint. Pusaq never
+// rewrites provider chunks — passthrough fidelity first.
 type usageScanningStream struct {
-	inner io.ReadCloser
-	req   *core.Request
-	buf   []byte
+	inner   io.ReadCloser
+	req     *core.Request
+	buf     []byte
+	content strings.Builder
+	done    bool
+}
+
+// completed reports whether the stream reached its [DONE] terminator — the
+// gate that keeps aborted streams out of the shadow cache.
+func (u *usageScanningStream) completed() bool { return u.done }
+
+// contentFingerprint hashes the content the scanner has seen; called at
+// finalize time, after the stream ended.
+func (u *usageScanningStream) contentFingerprint() string {
+	return semcache.Fingerprint(u.content.String())
 }
 
 func (u *usageScanningStream) Read(p []byte) (int, error) {
@@ -369,14 +458,28 @@ func (u *usageScanningStream) scan(b []byte) {
 			continue
 		}
 		payload = bytes.TrimSpace(payload)
-		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+		if len(payload) == 0 {
+			continue
+		}
+		if bytes.Equal(payload, []byte("[DONE]")) {
+			u.done = true
 			continue
 		}
 		var chunk struct {
-			Usage *core.Usage `json:"usage"`
+			Usage   *core.Usage `json:"usage"`
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
 		}
-		if err := json.Unmarshal(payload, &chunk); err == nil && chunk.Usage != nil {
-			u.req.Usage = *chunk.Usage
+		if err := json.Unmarshal(payload, &chunk); err == nil {
+			if chunk.Usage != nil {
+				u.req.Usage = *chunk.Usage
+			}
+			for _, c := range chunk.Choices {
+				u.content.WriteString(c.Delta.Content)
+			}
 		}
 	}
 }
