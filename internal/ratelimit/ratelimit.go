@@ -18,7 +18,7 @@ import (
 // background refiller). The bucket starts full so a new tenant can use its
 // burst immediately. `now` comes from the replica: redis.TIME would remove
 // the replica-clock dependence but makes the script non-deterministic for
-// replication — the founding doc's documented trade-off.
+// replication — the trade-off documented in docs/design.md §5.2.
 //
 // KEYS[1] = bucket key. ARGV: capacity(B), rate(r tokens/sec), now(ms),
 // cost, ttl(sec). Returns {allowed, remaining, retry_after_ms}.

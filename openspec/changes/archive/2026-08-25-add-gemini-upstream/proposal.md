@@ -2,7 +2,7 @@
 
 ## Why
 
-Every capability so far — pipeline, streaming, tenants, RPM/TPM, breakers, fallback — has been proven against the mock. The V1 milestone is "change your base_url and it works" against a **real model**. Google exposes Gemini through an OpenAI-compatible endpoint, which is exactly the seam Pusaq already speaks: this slice adds authenticated upstreams and configurable per-alias models, and Gemini becomes a config entry — no new adapter code.
+Every capability so far — pipeline, streaming, tenants, RPM/TPM, breakers, fallback — has been proven against the mock. The product contract is "change your base_url and it works" against a **real model**. Google exposes Gemini through an OpenAI-compatible endpoint, which is exactly the seam Pusaq already speaks: this change adds authenticated upstreams and configurable per-alias models, and Gemini becomes a config entry — no new adapter code.
 
 ## What Changes
 

@@ -8,7 +8,7 @@ import "context"
 type Handler func(ctx context.Context, req *Request) (*Response, error)
 
 // Stage decorates a Handler with a cross-cutting concern (identification,
-// accounting, and — in later slices — limiting, policy, caching, routing).
+// accounting, authentication, rate limiting) and lets others be added.
 // A stage may short-circuit by returning without calling next.
 type Stage func(next Handler) Handler
 

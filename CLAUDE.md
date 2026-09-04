@@ -49,6 +49,9 @@ review → archive (`/opsx:archive`).
 
 - Slices are vertical and small ("RPM token bucket for one tenant, end-to-end,
   with a concurrency test"), never horizontal layers.
-- Development runs locally at $0 (Redis in Docker, mock provider); GCP is only
-  for real measurement runs, created and destroyed with Terraform per run.
+- Development runs locally (Redis in Docker, mock provider); cloud resources
+  exist only for measurement runs, created and destroyed with Terraform per run.
+- Repository docs describe the system as it is. Roadmaps, phases, schedules,
+  and budgets are not tracked here; unbuilt behavior is stated as "not
+  implemented" or "out of scope for this change".
 - Commits follow Conventional Commits. Never add Claude co-authorship.

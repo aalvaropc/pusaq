@@ -2,7 +2,7 @@
 
 ## Why
 
-Chat completions exist but only buffered; real LLM clients stream. `stream: true` with SSE passthrough completes the V1 API subset the design doc commits to — and forces the one architectural question streaming raises: how the "exactly one cost event per request" invariant survives a response that outlives the pipeline call.
+Chat completions exist but only buffered; real LLM clients stream. `stream: true` with SSE passthrough completes the OpenAI-compatible API subset the design doc commits to — and forces the one architectural question streaming raises: how the "exactly one cost event per request" invariant survives a response that outlives the pipeline call.
 
 ## What Changes
 

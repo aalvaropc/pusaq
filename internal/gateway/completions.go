@@ -121,7 +121,7 @@ type CompletionsOptions struct {
 }
 
 // cacheable reports whether a request is structurally eligible for the
-// semantic cache (§5.4): exactly one user message, optionally preceded by
+// semantic cache (docs/design.md §5.4): exactly one user message, optionally preceded by
 // system messages. Multi-turn is never cacheable. It returns the system
 // prompt (namespace material) and the user content (the embedded text).
 func cacheable(messages []provider.Message) (systemPrompt, userContent string, ok bool) {

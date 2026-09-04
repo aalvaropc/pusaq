@@ -20,19 +20,31 @@ record about it. Models are addressed through aliases (`pusaq/fast`,
 
 ## Status
 
-**Foundation + chat completions in place** (changes `add-project-foundation`,
-`add-chat-completions`): middleware pipeline with a guaranteed cost event per
-request, async cost telemetry, liveness/readiness with graceful drain, and a
-OpenAI-compatible `POST /v1/chat/completions` — buffered and SSE streaming —
-proxied to the mock provider through configurable model aliases, with
-API-key authentication, per-tenant cost attribution, and distributed
-per-tenant rate limiting — requests (RPM) and LLM tokens (TPM) with
-reservation/reconciliation — as atomic Lua token buckets in Redis, plus
-circuit breakers and fallback across equivalent upstreams — and any
-OpenAI-compatible model behind it, Gemini included, as pure configuration —
-plus the semantic cache in shadow mode: measuring hit-rates, similarity
-distributions, and candidate false positives against real traffic before a
-single cached answer is ever served.
+What the gateway does today:
+
+- **OpenAI-compatible chat completions** — `POST /v1/chat/completions`,
+  buffered and SSE streaming, model aliases resolved from configuration,
+  `X-Pusaq-Model` on every response, normalized errors.
+- **Tenants** — API-key authentication with per-tenant cost attribution;
+  explicit dev mode when no keys are configured.
+- **Distributed rate limiting** — per-tenant requests (RPM) and LLM tokens
+  (TPM) as atomic Lua token buckets in Redis; TPM charges a reservation on
+  admission and reconciles it exactly once when actual usage is known.
+- **Resilience** — a circuit breaker per upstream backend and ordered
+  fallback across equivalent backends; streams fall back only before the
+  first byte.
+- **Any OpenAI-compatible upstream** — Gemini included — as pure
+  configuration, with per-upstream credentials.
+- **Semantic cache in shadow mode** — measures would-be hits, similarity
+  distributions, and candidate false positives against real traffic; serves
+  nothing. A calibration command picks the similarity threshold for a
+  precision floor.
+- **Cost telemetry** — exactly one asynchronous cost event per request, on
+  success, error, panic, and stream end alike.
+
+Not implemented: serving from the cache, routing rules for `pusaq/auto`
+(it currently resolves like `pusaq/fast`), a policy filter, dollar pricing
+in cost events, lease-mode limiting, and multi-region deployment.
 
 ## API
 
@@ -41,8 +53,8 @@ single cached answer is ever served.
 Events: `chat.completion.chunk` deltas passed through from the provider,
 a final usage chunk, then `data: [DONE]`. The `model` field takes an alias: `pusaq/fast`,
 `pusaq/best`, or `pusaq/auto` (aliases resolve to physical models in
-configuration; `pusaq/auto` becomes a real routing decision in a later
-change). Responses carry `X-Pusaq-Model` (the physical model served) and
+configuration; `pusaq/auto` currently resolves like `pusaq/fast` because
+routing rules are not implemented). Responses carry `X-Pusaq-Model` (the physical model served) and
 `X-Pusaq-Request-Id`. All errors share one JSON shape:
 `{"error":{"code":"...","message":"..."}}` — provider failures surface as
 `upstream_error` (502) without leaking upstream responses.
@@ -93,8 +105,8 @@ embedder implementations the gateway runs, writes the precision/recall
 curve, and prints `τ* = min{τ : precision ≥ 0.99}` — or fails loudly when
 the embedder cannot separate the traps (which the local embedder, being
 lexical, often cannot: that failure is the harness working). The seed
-dataset (60 pairs) proves the harness; a production τ needs the
-experiments-phase corpus (≥200+200 pairs) and a real embedder.
+dataset (60 pairs) proves the harness; a production τ needs a
+production-traffic corpus (≥200+200 pairs) and a real embedder.
 
 **Authentication.** Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the
@@ -134,9 +146,9 @@ disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
 > the Docker bridge. The containers still reach each other inside the Compose
 > network; run the mock natively with `make mock` as a workaround.
 
-- [`docs/design.md`](docs/design.md) — full design: architecture, request
-  path, theory, technology choices, phased scope (V1–V4), experiments,
-  costs, risks.
+- [`docs/design.md`](docs/design.md) — architecture, request path,
+  theory, technology choices, design constraints, measurement protocol,
+  risks.
 - [`openspec/`](openspec/) — spec-driven workflow ([OpenSpec](https://github.com/Fission-AI/OpenSpec)):
   every change goes proposal → approved plan → vertical slice → measured
   verification → archive.

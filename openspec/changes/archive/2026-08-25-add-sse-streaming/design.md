@@ -13,7 +13,7 @@ Buffered completions work end-to-end; the accounting stage emits the cost event 
 
 **Non-Goals:**
 
-- Client-requested `stream_options`; TPM reservation/reconciliation (limiter slices); retry/fallback mid-stream.
+- Client-requested `stream_options`; TPM reservation/reconciliation (a token-limiter concern); retry/fallback mid-stream.
 
 ## Decisions
 
@@ -31,6 +31,6 @@ Buffered completions work end-to-end; the accounting stage emits the cost event 
 
 ## Risks / Trade-offs
 
-- **Usage depends on the upstream emitting it in-stream.** Accepted: the mock does, OpenAI-compatible upstreams can; absent usage yields an event without token counts rather than a failure. Estimation belongs to the TPM slice.
-- **A malformed final chunk loses usage silently.** Accepted for this slice; the scanner logs nothing on parse misses to stay off the hot path. The TPM slice adds reconciliation pressure that will surface gaps.
-- **`ResponseHeaderTimeout`-only bounding means a stalled mid-stream upstream holds a connection** until the client gives up. Accepted now; per-chunk idle timeouts arrive with the resilience slice.
+- **Usage depends on the upstream emitting it in-stream.** Accepted: the mock does, OpenAI-compatible upstreams can; absent usage yields an event without token counts rather than a failure. Estimation is a token-limiting concern.
+- **A malformed final chunk loses usage silently.** Accepted for this change; the scanner logs nothing on parse misses to stay off the hot path. Token limiting adds reconciliation pressure that will surface gaps.
+- **`ResponseHeaderTimeout`-only bounding means a stalled mid-stream upstream holds a connection** until the client gives up. Accepted now; per-chunk idle timeouts are a resilience concern.

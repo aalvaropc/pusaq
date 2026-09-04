@@ -2,7 +2,7 @@
 
 ## Why
 
-Pusaq has a full design ([docs/design.md](../../../docs/design.md)) but no code, and the constitution requires every slice to end in something observable and verified. Before any feature (rate limiting, caching, routing) can be built, the project needs its structural invariants in place: a composable request pipeline, cost telemetry that can never block or be skipped, operational endpoints that support draining, and a reproducible local environment.
+Pusaq has a full design ([docs/design.md](../../../docs/design.md)) but no code, and the constitution requires every change to end in something observable and verified. Before any feature (rate limiting, caching, routing) can be built, the project needs its structural invariants in place: a composable request pipeline, cost telemetry that can never block or be skipped, operational endpoints that support draining, and a reproducible local environment.
 
 ## What Changes
 
@@ -32,4 +32,4 @@ None — this is the first change; no specs exist yet.
 - New code: `cmd/pusaq`, `cmd/mockprovider`, `internal/core`, `internal/gateway`, `internal/telemetry`, `internal/config`, `internal/mockprovider`.
 - New tooling: `Makefile`, `Dockerfile`, `docker-compose.yml`, `.golangci.yml`, `.github/workflows/ci.yml`, `.editorconfig`.
 - Docs: README gains a Development/Quickstart section.
-- No external Go dependencies introduced; Redis appears in Compose only (no code uses it yet — it anchors the local environment contract for the rate-limiting slice).
+- No external Go dependencies introduced; Redis appears in Compose only (no code uses it yet — it anchors the local environment contract for the rate-limiting change).

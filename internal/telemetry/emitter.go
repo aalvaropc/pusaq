@@ -1,7 +1,7 @@
 // Package telemetry emits per-request cost events asynchronously. Telemetry
 // observes the hot path but never participates in it: a slow or unavailable
 // sink must never delay a user response, so overflow drops events (counted)
-// instead of blocking (design.md §5.7).
+// instead of blocking (docs/design.md §5.7).
 package telemetry
 
 import (

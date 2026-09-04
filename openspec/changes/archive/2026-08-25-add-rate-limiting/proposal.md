@@ -2,16 +2,16 @@
 
 ## Why
 
-Per-tenant request limits are the gateway's first governed resource and the project's centerpiece claim: a limit that stays exact when M replicas share it. The naive read-decide-decrement against shared state is a textbook race; this change implements the token bucket as a single atomic Redis Lua script — the design the founding document calls "the heart of the project" — and proves its exactness under concurrency with tests, not assertions.
+Per-tenant request limits are the gateway's first governed resource and the project's centerpiece claim: a limit that stays exact when M replicas share it. The naive read-decide-decrement against shared state is a textbook race; this change implements the token bucket as a single atomic Redis Lua script — the design the design doc calls "the heart of the project" — and proves its exactness under concurrency with tests, not assertions.
 
 ## What Changes
 
 - Distributed RPM rate limiting: one token bucket per tenant in Redis, decided by an atomic Lua script (lazy refill, bucket starts full, consume-if-enough, TTL on idle buckets, computed `retry_after`), shared by all gateway replicas.
 - A rate-limit pipeline stage after Auth: denials are a new normalized `rate_limited` error (429) carrying `retry_after_ms` in the body and a `Retry-After` header.
-- **Fail-open degraded mode:** if Redis is unreachable the request passes with a logged warning — a gateway that rejects everything because its semaphore died trades a cost problem for an availability outage (design doc §11). The choice is documented and observable.
-- Rate limiting is enabled by configuring `PUSAQ_REDIS_ADDR`; unset means disabled with a startup warning (the same explicit dev-mode pattern as auth). Limits: `PUSAQ_RPM_LIMIT` (sustained requests/minute) and `PUSAQ_RPM_BURST` (bucket capacity), applied per tenant; per-tenant overrides arrive with the policy slice.
+- **Fail-open degraded mode:** if Redis is unreachable the request passes with a logged warning — a gateway that rejects everything because its semaphore died trades a cost problem for an availability outage (docs/design.md §9). The choice is documented and observable.
+- Rate limiting is enabled by configuring `PUSAQ_REDIS_ADDR`; unset means disabled with a startup warning (the same explicit dev-mode pattern as auth). Limits: `PUSAQ_RPM_LIMIT` (sustained requests/minute) and `PUSAQ_RPM_BURST` (bucket capacity), applied per tenant; per-tenant overrides are a policy concern.
 - The gateway joins Docker Compose (it finally consumes Redis), wired to Redis and the mock provider inside the network.
-- First external Go dependencies, each earned by this slice: `redis/go-redis` (client) and `alicebob/miniredis` (test-only in-memory Redis with Lua support, keeping CI self-contained).
+- First external Go dependencies, each earned by this change: `redis/go-redis` (client) and `alicebob/miniredis` (test-only in-memory Redis with Lua support, keeping CI self-contained).
 
 ## Capabilities
 

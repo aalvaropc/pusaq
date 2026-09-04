@@ -1,6 +1,6 @@
 // Package mockprovider implements Pusaq's fake upstream model provider.
 // Rate-limiting and failover experiments run against it at zero token cost
-// (design.md §6): it returns a canned OpenAI-shaped chat completion with
+// (docs/design.md §6): it returns a canned OpenAI-shaped chat completion with
 // configurable latency and error rate.
 package mockprovider
 

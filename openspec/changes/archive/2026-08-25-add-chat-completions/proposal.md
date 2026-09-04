@@ -2,7 +2,7 @@
 
 ## Why
 
-The foundation proves the pipeline with a throwaway echo endpoint; Pusaq's actual contract is "point your OpenAI SDK at a new base_url and it works". This change delivers the first real slice of that contract — non-streaming chat completions proxied to a provider through the pipeline — and establishes the provider abstraction and model-alias resolution every later slice (routing, streaming, real Vertex adapters) builds on.
+The foundation proves the pipeline with a throwaway echo endpoint; Pusaq's actual contract is "point your OpenAI SDK at a new base_url and it works". This change delivers the first real piece of that contract — non-streaming chat completions proxied to a provider through the pipeline — and establishes the provider abstraction and model-alias resolution routing, streaming, and real Vertex adapters build on.
 
 ## What Changes
 
@@ -28,4 +28,4 @@ The foundation proves the pipeline with a throwaway echo endpoint; Pusaq's actua
 
 - New code: `internal/provider` (interface + mock HTTP adapter), completions types and terminal handler in `internal/gateway`, alias/routing table and upstream settings in `internal/config`.
 - Modified: `internal/core` (CostEvent model/usage fields, `upstream_error` code), `internal/gateway` (route swap: echo → chat completions), `cmd/pusaq` (wiring), README, Makefile smoke target.
-- No new external Go dependencies. The mock provider remains the only upstream; Gemini arrives in a later change.
+- No new external Go dependencies. The mock provider remains the only upstream; Gemini is wired in a separate change.
