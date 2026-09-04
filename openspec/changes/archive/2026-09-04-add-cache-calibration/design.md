@@ -13,14 +13,14 @@ Shadow records carry best-similarity per request, but choosing τ needs ground t
 
 **Non-Goals:**
 
-- The final production dataset (≥200+200 pairs from a real corpus — experiments phase); plotting (the CSV is the interface; any tool plots it); calibrating the local embedder as if its numbers meant semantic quality (the README says which embedder a number came from).
+- The final production dataset (≥200+200 pairs from a real corpus — a separate measurement effort); plotting (the CSV is the interface; any tool plots it); calibrating the local embedder as if its numbers meant semantic quality (the README says which embedder a number came from).
 
 ## Decisions
 
 1. **Sweep logic lives in `internal/calibrate`, CLI in `cmd/cachecal`.** The library takes labeled pairs + an `embed.Embedder` and returns the curve + τ\* — unit-testable with synthetic vectors and a fake embedder, no CLI involved. The CLI does flags, CSV I/O, and exit codes.
 2. **Per-pair similarity, computed once.** Each pair is embedded and scored once; the τ sweep is then pure arithmetic over the scored pairs (predicted-equivalent iff sim ≥ τ): precision = TP/(TP+FP) over trap/equivalent labels, recall = TP/(TP+FE). Embedding N pairs once instead of once-per-τ keeps API-embedder runs affordable.
 3. **Precision floor semantics**: τ\* = min{τ : precision(τ) ≥ floor} — the *smallest* qualifying τ maximizes recall at the required precision. Undefined precision (no predicted positives) counts as passing the floor with recall 0 — reported but ranked after any τ with actual recall; if nothing with recall > 0 passes, the run fails with exit 1 and says so.
-4. **In-repo Go, no Python.** The founding doc suggested Python for analysis; sharing the exact embedder implementation outweighs pandas — fidelity of the number beats convenience of the notebook. The curve CSV is consumable anywhere.
+4. **In-repo Go, no Python.** The design doc originally suggested Python for analysis; sharing the exact embedder implementation outweighs pandas — fidelity of the number beats convenience of the notebook. The curve CSV is consumable anywhere.
 5. **Seed dataset is honest about its size**: ~30 equivalent + ~30 trap pairs (EN/ES; entity swaps, negations, quantities, dates). It proves the harness and documents the *shape* of a good dataset; the README states the production target explicitly.
 
 ## Risks / Trade-offs
