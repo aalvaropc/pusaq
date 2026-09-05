@@ -10,8 +10,8 @@
 > **distributed-systems properties demonstrated with numbers**.
 
 - Language: Go. Runtime: Cloud Run. State: Memorystore (Redis). Models: Vertex AI (Gemini + Claude) plus a mock provider.
-- Realistic effort: **8–12 weeks** part-time (a presentable MVP much earlier). GCP budget: $30–50; all development runs locally at $0.
-- Status: design phase. Work is spec-driven — see [`../openspec/`](../openspec/) and the workflow rules in [`../CLAUDE.md`](../CLAUDE.md).
+- Development runs locally against Redis in Docker and a mock provider; cloud resources exist only for measurement runs.
+- Work is spec-driven — see [`../openspec/`](../openspec/) and the design rules in [`../CLAUDE.md`](../CLAUDE.md). Current capabilities are listed in the [README](../README.md).
 
 ---
 
@@ -23,11 +23,9 @@
 - [4. The path of a request](#4-the-path-of-a-request)
 - [5. Theory and key mechanisms](#5-theory-and-key-mechanisms)
 - [6. Technology choices](#6-technology-choices)
-- [7. Design corrections adopted](#7-design-corrections-adopted)
-- [8. Phased scope](#8-phased-scope)
-- [9. Experiments and metrics](#9-experiments-and-metrics)
-- [10. Costs](#10-costs)
-- [11. Risks](#11-risks)
+- [7. Design constraints](#7-design-constraints)
+- [8. Measurement protocol](#8-measurement-protocol)
+- [9. Risks](#9-risks)
 
 ---
 
@@ -116,8 +114,9 @@ absolute truth.
 The landscape validating the category: LiteLLM, Portkey, Kong AI Gateway,
 OpenRouter, Cloudflare AI Gateway. Vertex AI brings loose pieces (per-project
 quotas, *exact* context caching, multi-region endpoints) but not the
-multi-tenant control plane nor routing across model families. None of these
-products examine you in an interview — how they work inside does.
+multi-tenant control plane nor routing across model families. Pusaq builds
+the same mechanisms in the open, so that how they behave under load and
+failure can be measured rather than assumed.
 
 ## 3. Architecture
 
@@ -131,7 +130,7 @@ proxy with many features.
 
 ```mermaid
 flowchart LR
-    A[Applications and agents] --> LB[Global load balancer<br/>advanced phase]
+    A[Applications and agents] --> LB[Global load balancer<br/>multi-region]
 
     LB --> RA[Cloud Run<br/>region A]
     LB --> RB[Cloud Run<br/>region B]
@@ -273,7 +272,7 @@ meaning: "How do I cancel my subscription?" and "I want to close my account"
 — embed the prompt, nearest-neighbor search among answered prompts, serve the
 stored answer if similarity ≥ τ.
 [Memorystore already offers vector search](https://docs.cloud.google.com/memorystore/docs/redis/about-vector-search)
-(exact and HNSW indexes), so no home-built distributed index in v1.
+(exact and HNSW indexes), so no home-built distributed index is needed.
 
 **The central danger: false positives.** "What is the capital of Peru?" and
 "What is the capital of Bolivia?" can score ~0.93 similarity — *between* real
@@ -309,7 +308,7 @@ break-even is part of the deliverable.
 ### 5.5 Routing
 
 Model prices differ by an order of magnitude, and a large share of real
-traffic is simple work the cheap model solves equally well. **V1 needs no AI
+traffic is simple work the cheap model solves equally well. **The router needs no AI
 to decide** — an explicit table is easier to understand and audit:
 
 ```
@@ -392,9 +391,9 @@ for Memorystore's real network latency or partitions — the local limiter p99
 is an optimistic floor, and "what if Redis doesn't answer?" must be injected
 deliberately (kill the container mid-run), not waited for.
 
-## 7. Design corrections adopted
+## 7. Design constraints
 
-Five corrections over the original draft, adopted as constraints:
+Four constraints the architecture accepts explicitly:
 
 1. **Multi-region is not scale-to-zero.** Automatic Cloud Run failover needs
    at least one min-instance per region — "always-on failover" and "zero cost
@@ -415,64 +414,19 @@ Five corrections over the original draft, adopted as constraints:
    not necessarily reported as unhealthy. Chaos experiments deliberately fail
    the readiness endpoint instead. See
    [service health limitations](https://docs.cloud.google.com/run/docs/configuring/configure-service-health).
-5. **The original 3–5 week estimate was too small.** Gateway, streaming,
-   limiter, semantic cache, routing, policy filter, observability, and
-   multi-region are nearly several projects. Realistic estimate: **8–12
-   weeks**, with a presentable MVP much earlier — hence the phasing below.
 
-## 8. Phased scope
-
-### V1 — usable product
-
-- Reduced OpenAI-compatible API (chat completions, SSE streaming, basic tool
-  calling, usage, normalized errors).
-- Gemini plus a mock provider.
-- Tenants and API keys; static routing table; cost accounting.
-- Minimum dashboard. Cloud Run in one region.
-
-**Done when:** any OpenAI SDK pointed at Pusaq switches models by alias alone,
-and recorded cost matches the provider's token counts.
-
-### V2 — technical depth
-
-- Distributed rate limiting in Redis: RPM and TPM, atomic Lua scripts,
-  reservation/reconciliation, lease mode behind a flag.
-- Circuit breaker; fallback against the mock provider.
-- Concurrency tests with k6: N clients pushing 10× the limit against M
-  replicas — accepted count equals the limit ± configured burst.
-
-### V3 — differentiator
-
-- Claude as the second real model.
-- Semantic cache in shadow mode; τ calibration dataset (≥200 equivalent +
-  ≥200 trap pairs); published precision/recall curve.
-- Net savings and false-positive rate published.
-
-### V4 — GCP experiment
-
-- Two regions, global load balancer, readiness-based health.
-- Regional Redis with split quotas.
-- Injected regional failure (readiness endpoint forced to fail) under live k6
-  load; report of recovered vs interrupted requests.
-
-### Explicitly out of scope (for now)
-
-Learned router · LLM-judge cascades · hedged requests · self-hosted
-open-weight models · a full "firewall" · SaaS billing · a complex admin panel.
-
-Value hierarchy if anything must be cut (right to left): exact, verified
+**Value hierarchy.** If anything must be cut, it is cut right to left: exact, verified
 distributed rate limiting > semantic cache with published FP rate > multi-
 region failover under load > cost/quality routing with a judge > policy
 filter. The pair "atomic limiter under aggressive concurrency + cache with
 measured false-positive rate" is never cut — without it there is no project,
 only a proxy with extra features.
 
-## 9. Experiments and metrics
+## 8. Measurement protocol
 
-The headline: *"X% cost and latency reduction via semantic cache on replayed
-traffic; rate limiting exact at N req/s across M replicas; cross-region
-failover < Y s with recovered/interrupted requests counted; router saving Z%
-by choosing the fast model when it suffices."*
+Every property Pusaq claims is measured under load or under injected failure,
+with a written protocol. The numbers, once captured, are published next to
+their protocol — including the ones that disappoint.
 
 | Metric | Protocol | Reported |
 |---|---|---|
@@ -488,29 +442,12 @@ provider (exactness at zero token cost); **an ugly number is published anyway,
 with its explanation** — a 20% hit-rate with a sensitivity analysis is worth
 more than an inflated 80%.
 
-## 10. Costs
-
-Budget $30–50. Development (V1–V3 logic) is fully local: Redis in Docker,
-mock provider, free-tier Gemini for the real path. GCP spends only during
-measurement runs:
-
-| Item | Control |
-|---|---|
-| Run tokens ($10–20) | The fast model as the workhorse; corpus cost computed before running |
-| Memorystore ($5–10) | **The treacherous line item** — billed per provisioned hour, traffic or not. Created for the run, destroyed the same day; a nightly check for any instance labeled `project=pusaq` is cheap insurance |
-| Cloud Run + global LB (<$10) | Min-instances only during the experiment window; created/destroyed with Terraform |
-| BigQuery / embeddings (<$7) | Small volumes |
-
-Expensive runs are sequenced cheap-to-costly: failover logic against the mock
-first, judge runs at small volume next, the large cache replay last — so a bug
-is found while spending little.
-
-## 11. Risks
+## 9. Risks
 
 | Risk | Mitigation |
 |---|---|
 | Semantic cache hit-rate disappoints (traffic without semantic repetition) | Zipf-realistic replay, declared; report hit-rate sensitivity to repetition skew. "The cache only pays with traffic this repetitive" is a publishable finding, not a failure |
 | Badly calibrated τ serves wrong answers | Shadow mode first; τ chosen for precision ≥ 0.99, never for hit-rate; FP rate always published |
 | Redis partition/outage vs limiter exactness | Documented degraded mode: **fail-open** with a conservative local limit (`limit/M` per replica) by default — a gateway that rejects everything because its semaphore died trades a cost problem for an availability outage; per-tenant `fail_closed` flag for hard budgets |
-| Multi-region doubles deploy friction | Terraform from day one; one region-parameterized definition; V4 does not start without clean `apply`/`destroy` cycles |
+| Multi-region doubles deploy friction | Terraform from day one; one region-parameterized definition; no load run starts without clean `apply`/`destroy` cycles |
 | Scope creep (more providers, UI, queues) | Mechanical gate: the headline numbers must be captured and script-reproducible before any new feature is considered |

@@ -2,7 +2,7 @@
 
 ## Context
 
-The pipeline, completions (buffered + streaming), and accounting exist; nothing identifies who is calling. The next slice (distributed rate limiting) keys its buckets by tenant, so attribution must exist first. See proposal.md.
+The pipeline, completions (buffered + streaming), and accounting exist; nothing identifies who is calling. Distributed rate limiting keys its buckets by tenant, so attribution must exist first. See proposal.md.
 
 ## Goals / Non-Goals
 
@@ -29,6 +29,6 @@ The pipeline, completions (buffered + streaming), and accounting exist; nothing 
 
 ## Risks / Trade-offs
 
-- **Plaintext keys in env/config.** Accepted for the lab stage and documented; the control-plane slice moves them. Keys never appear in logs or cost events — only the tenant does.
+- **Plaintext keys in env/config.** Accepted for now and documented; a control plane would move them. Keys never appear in logs or cost events — only the tenant does.
 - **Dev mode could reach production config.** Mitigated by the startup warning and by Terraform owning production env later; a `PUSAQ_REQUIRE_AUTH` hard switch can arrive with deployment work if needed.
 - **Constant-time comparison is skipped** (map lookup). Accepted: keys are high-entropy opaque strings, not passwords; timing side-channels on map lookups are not this threat model. Documented honestly rather than cargo-culting `subtle`.

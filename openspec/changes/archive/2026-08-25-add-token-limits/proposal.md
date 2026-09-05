@@ -2,7 +2,7 @@
 
 ## Why
 
-RPM protects infrastructure; invoices and provider quotas are measured in **tokens per minute**. A tenant sending 10 huge-context requests a minute costs more than one sending 1,000 short ones. The non-trivial part — the reason this is its own slice — is that output tokens are unknown until the response ends: the design is reserve-on-admission, reconcile-on-completion (founding doc §5.3), and the reconciliation must hold on success, error, panic, and at stream end.
+RPM protects infrastructure; invoices and provider quotas are measured in **tokens per minute**. A tenant sending 10 huge-context requests a minute costs more than one sending 1,000 short ones. The non-trivial part — the reason this is its own change — is that output tokens are unknown until the response ends: the design is reserve-on-admission, reconcile-on-completion (docs/design.md §5.3), and the reconciliation must hold on success, error, panic, and at stream end.
 
 ## What Changes
 

@@ -28,7 +28,7 @@ type Neighbor struct {
 
 // Index is an exact, in-process flat cosine index partitioned by namespace,
 // with a global LRU cap. Per replica by design: shadow measures per-process
-// and the serving-mode slice will choose the shared design with data in
+// and a serving mode would choose a shared design with this data in
 // hand. Safe for concurrent use.
 type Index struct {
 	mu   sync.Mutex

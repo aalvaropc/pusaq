@@ -2,7 +2,7 @@
 
 ## Why
 
-A provider outage today is inherited downtime: every request wastes its full timeout against a dead upstream and fails. The design doc's resilience story (§5.6) turns that into a log line — a circuit breaker per backend stops hammering the dead, and fallback routes traffic to an equivalent backend. This completes the V2 scope ("circuit breaker; fallback against the mock provider").
+A provider outage today is inherited downtime: every request wastes its full timeout against a dead upstream and fails. The design doc's resilience story (docs/design.md §5.6) turns that into a log line — a circuit breaker per backend stops hammering the dead, and fallback routes traffic to an equivalent backend. This completes the resilience scope: circuit breaker and fallback against the mock provider.
 
 ## What Changes
 

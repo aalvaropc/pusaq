@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The composable stage pipeline every gateway request traverses. It defines how cross-cutting concerns (identification, accounting, and — in later changes — limiting, policy, caching, routing) wrap the terminal handler, and it guarantees that every request is accounted for exactly once, no matter how it ends.
+The composable stage pipeline every gateway request traverses. It defines how cross-cutting concerns (identification, accounting, and — in other changes — limiting, policy, caching, routing) wrap the terminal handler, and it guarantees that every request is accounted for exactly once, no matter how it ends.
 
 ## ADDED Requirements
 

@@ -2,7 +2,7 @@
 
 ## Why
 
-Everything the gateway will govern — rate limits, budgets, policies, cost reports — is *per tenant*, and no tenant exists yet. Attribution must land before the rate-limiting slice: a limiter without tenant identity has nothing to key its buckets on.
+Everything the gateway will govern — rate limits, budgets, policies, cost reports — is *per tenant*, and no tenant exists yet. Attribution must land before the rate-limiting change: a limiter without tenant identity has nothing to key its buckets on.
 
 ## What Changes
 

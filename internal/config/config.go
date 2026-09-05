@@ -67,9 +67,9 @@ func defaultUpstreams() []Upstream {
 	return []Upstream{{Name: "mock", URL: "http://localhost:9090"}}
 }
 
-// defaultRoutes maps the public aliases to the mock model until real
-// adapters land. pusaq/auto currently resolves like pusaq/fast; the router
-// slice will make it a real decision.
+// defaultRoutes maps the public aliases to the mock model; physical models
+// are overridden per alias via PUSAQ_ROUTES. pusaq/auto currently resolves
+// like pusaq/fast: routing rules are not implemented.
 func defaultRoutes() map[string]Route {
 	return map[string]Route{
 		"pusaq/fast": {Provider: "mock", Model: "mock-model"},

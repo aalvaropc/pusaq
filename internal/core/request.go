@@ -10,8 +10,7 @@ import (
 )
 
 // Request is the transport-agnostic envelope that traverses the pipeline.
-// It starts minimal on purpose: fields for tenant, model, and tokens arrive
-// with the slices that use them.
+// Only the fields the pipeline stages actually use live here.
 type Request struct {
 	// ID uniquely identifies the request. Assigned by the request-ID stage;
 	// empty until then.

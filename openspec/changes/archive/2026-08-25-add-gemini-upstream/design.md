@@ -13,7 +13,7 @@ The provider seam (`internal/provider/http.go`) already speaks the OpenAI-compat
 
 **Non-Goals:**
 
-- Vertex AI (service-account) auth — that is the GCP-deployment slice; the Gemini API key path is the local/dev route.
+- Vertex AI (service-account) auth — that is a cloud-deployment concern; the Gemini API key path is the local/dev route.
 - Per-alias primary *providers* (all aliases still share the chain's primary); the cost/quality router owns that later.
 - Model capability validation (Pusaq forwards; the upstream rejects models it doesn't serve — normalized as `upstream_error`).
 
@@ -30,4 +30,4 @@ The provider seam (`internal/provider/http.go`) already speaks the OpenAI-compat
 ## Risks / Trade-offs
 
 - **Google's OpenAI-compat surface may drift** from the subset Pusaq emits (e.g. usage-in-stream needs `stream_options` on some backends). Mitigated: E2E against the real endpoint; a missing usage chunk degrades to charge-stands semantics already spec'd, not an error.
-- **A keyed fallback chain mixing real + mock** can serve mock answers on failover during local runs. Deliberate: that's the resilience demo; production chains would list only real backends.
+- **A keyed fallback chain mixing real + mock** can serve mock answers on failover during local runs. Deliberate: that exercises the failover path; production chains would list only real backends.
