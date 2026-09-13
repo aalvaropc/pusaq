@@ -23,7 +23,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
 		},
 		{
 			name: "all overrides applied",
@@ -36,6 +36,9 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_REDIS_ADDR":          "redis:6379",
 				"PUSAQ_RPM_LIMIT":           "120",
 				"PUSAQ_RPM_BURST":           "30",
+				"PUSAQ_RATELIMIT_MODE":      "lease",
+				"PUSAQ_LEASE_SIZE":          "5",
+				"PUSAQ_LEASE_TTL":           "500ms",
 				"PUSAQ_TPM_LIMIT":           "6000",
 				"PUSAQ_TPM_BURST":           "2000",
 				"PUSAQ_TPM_RESERVE_DEFAULT": "256",
@@ -43,7 +46,7 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_CACHE_TAU":           "0.9",
 				"PUSAQ_CACHE_MAX_ENTRIES":   "500",
 			},
-			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256, CacheMode: "shadow", CacheTau: 0.9, CacheMaxEntries: 500, EmbedderKind: "local"},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, RateLimitMode: "lease", LeaseSize: 5, LeaseTTL: 500 * time.Millisecond, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256, CacheMode: "shadow", CacheTau: 0.9, CacheMaxEntries: 500, EmbedderKind: "local"},
 		},
 		{
 			name:    "empty addr rejected",
@@ -106,6 +109,21 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "unknown rate-limit mode rejected",
+			env:     map[string]string{"PUSAQ_RATELIMIT_MODE": "batched"},
+			wantErr: true,
+		},
+		{
+			name:    "lease size above burst rejected",
+			env:     map[string]string{"PUSAQ_RPM_BURST": "5", "PUSAQ_LEASE_SIZE": "6"},
+			wantErr: true,
+		},
+		{
+			name:    "non-positive lease ttl rejected",
+			env:     map[string]string{"PUSAQ_LEASE_TTL": "0s"},
+			wantErr: true,
+		},
+		{
 			name:    "negative tpm limit rejected",
 			env:     map[string]string{"PUSAQ_TPM_LIMIT": "-5"},
 			wantErr: true,
@@ -113,7 +131,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "zero tpm limit disables token limiting",
 			env:  map[string]string{"PUSAQ_TPM_LIMIT": "0"},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
 		},
 		{
 			name:    "tpm burst with zero limit rejected",
