@@ -53,6 +53,12 @@ func (s SlogSink) Write(event core.CostEvent) {
 			slog.Int("attempts", event.Attempts),
 		)
 	}
+	if event.Cost.TableVersion != "" {
+		attrs = append(attrs,
+			slog.Float64("cost_usd", event.Cost.USD),
+			slog.String("price_table_version", event.Cost.TableVersion),
+		)
+	}
 	s.Logger.LogAttrs(context.Background(), slog.LevelInfo, "cost_event", attrs...)
 }
 

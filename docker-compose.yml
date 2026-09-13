@@ -46,6 +46,8 @@ services:
       PUSAQ_TPM_LIMIT: "300"
       PUSAQ_TPM_RESERVE_DEFAULT: "50"
       PUSAQ_CACHE_MODE: shadow
+      PUSAQ_PRICES: mock-model=0.10/0.40
+      PUSAQ_PRICE_TABLE_VERSION: local-2026-09
       PUSAQ_DRAIN_DELAY: 0s
     ports:
       - "8080:8080"

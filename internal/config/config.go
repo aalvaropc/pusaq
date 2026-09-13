@@ -48,6 +48,13 @@ type Route struct {
 	Model    string
 }
 
+// Price is what one physical model costs, in USD per million tokens
+// (PUSAQ_PRICES).
+type Price struct {
+	InputPerM  float64
+	OutputPerM float64
+}
+
 // Upstream names one OpenAI-compatible backend. APIKey, when set
 // (PUSAQ_UPSTREAM_KEY_<NAME>), authenticates calls to it; it is never
 // logged.
@@ -108,6 +115,12 @@ type Config struct {
 	UpstreamTimeout time.Duration
 	// Routes maps model aliases to providers and physical models.
 	Routes map[string]Route
+	// Prices is the price table keyed by physical model (PUSAQ_PRICES);
+	// nil means no table: cost events carry no cost fields.
+	// PriceTableVersion labels the table (PUSAQ_PRICE_TABLE_VERSION) and
+	// is required whenever a table is set.
+	Prices            map[string]Price
+	PriceTableVersion string
 	// APIKeys maps API keys to tenant names (PUSAQ_API_KEYS,
 	// "key:tenant" comma-separated). Empty means dev mode: no
 	// authentication, every request attributed to the "dev" tenant.
@@ -226,6 +239,30 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	if v, ok := lookup("PUSAQ_ROUTES"); ok && v != "" {
 		if err := applyRouteModels(cfg.Routes, v); err != nil {
 			return Config{}, fmt.Errorf("PUSAQ_ROUTES: %w", err)
+		}
+	}
+
+	if v, ok := lookup("PUSAQ_PRICES"); ok && v != "" {
+		prices, err := parsePrices(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_PRICES: %w", err)
+		}
+		cfg.Prices = prices
+	}
+	if v, ok := lookup("PUSAQ_PRICE_TABLE_VERSION"); ok && v != "" {
+		cfg.PriceTableVersion = v
+	}
+	if cfg.Prices != nil && cfg.PriceTableVersion == "" {
+		return Config{}, fmt.Errorf("PUSAQ_PRICE_TABLE_VERSION: required when PUSAQ_PRICES is set")
+	}
+	if cfg.Prices == nil && cfg.PriceTableVersion != "" {
+		return Config{}, fmt.Errorf("PUSAQ_PRICE_TABLE_VERSION: set without PUSAQ_PRICES")
+	}
+	if cfg.Prices != nil {
+		for alias, r := range cfg.Routes {
+			if _, priced := cfg.Prices[r.Model]; !priced {
+				return Config{}, fmt.Errorf("PUSAQ_PRICES: no price for model %q (route %s)", r.Model, alias)
+			}
 		}
 	}
 
@@ -406,6 +443,43 @@ func parseUpstreams(v string) ([]Upstream, error) {
 		return nil, fmt.Errorf("no valid name=url pairs")
 	}
 	return ups, nil
+}
+
+// parsePrices parses "model=input/output" comma-separated rates in USD per
+// million tokens, failing fast on malformed pairs, negative rates, and
+// duplicates.
+func parsePrices(v string) (map[string]Price, error) {
+	prices := make(map[string]Price)
+	for pair := range strings.SplitSeq(v, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		model, rates, ok := strings.Cut(pair, "=")
+		if !ok || model == "" || rates == "" {
+			return nil, fmt.Errorf("malformed pair %q, want model=input/output", pair)
+		}
+		in, out, ok := strings.Cut(rates, "/")
+		if !ok {
+			return nil, fmt.Errorf("malformed pair %q, want model=input/output", pair)
+		}
+		inputPerM, err := strconv.ParseFloat(in, 64)
+		if err != nil || inputPerM < 0 {
+			return nil, fmt.Errorf("model %q: input rate must be a non-negative number, got %q", model, in)
+		}
+		outputPerM, err := strconv.ParseFloat(out, 64)
+		if err != nil || outputPerM < 0 {
+			return nil, fmt.Errorf("model %q: output rate must be a non-negative number, got %q", model, out)
+		}
+		if _, dup := prices[model]; dup {
+			return nil, fmt.Errorf("duplicate price for model %q", model)
+		}
+		prices[model] = Price{InputPerM: inputPerM, OutputPerM: outputPerM}
+	}
+	if len(prices) == 0 {
+		return nil, fmt.Errorf("no valid model=input/output pairs")
+	}
+	return prices, nil
 }
 
 // applyRouteModels overrides per-alias physical models from

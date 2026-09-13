@@ -1,6 +1,10 @@
 package telemetry
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -103,4 +107,33 @@ func TestEmitAfterCloseDropsWithoutPanic(t *testing.T) {
 		t.Fatalf("Dropped() = %d, want 1", e.Dropped())
 	}
 	e.Close() // idempotent
+}
+
+func TestSlogSinkWritesCostFieldsOnlyWhenPriced(t *testing.T) {
+	var buf bytes.Buffer
+	sink := SlogSink{Logger: slog.New(slog.NewJSONHandler(&buf, nil))}
+
+	priced := event("priced")
+	priced.RequestedModel = "pusaq/fast"
+	priced.Cost = core.Cost{USD: 5.6e-6, TableVersion: "v1"}
+	sink.Write(priced)
+	sink.Write(event("unpriced"))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	var first, second map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatal(err)
+	}
+	if first["cost_usd"] != 5.6e-6 || first["price_table_version"] != "v1" {
+		t.Fatalf("priced line = %v, want cost_usd and price_table_version", first)
+	}
+	if _, ok := second["cost_usd"]; ok {
+		t.Fatalf("unpriced line carries cost_usd: %v", second)
+	}
 }

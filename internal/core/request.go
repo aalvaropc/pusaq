@@ -46,6 +46,9 @@ type Request struct {
 	// TokensCharged is what the token limiter charged on admission
 	// (input estimate + output reservation); zero when TPM is disabled.
 	TokensCharged int
+	// Cost is set by a finalizer once usage is known and a price table is
+	// configured.
+	Cost Cost
 
 	// finalizers run exactly once when the request is finalized by the
 	// accounting stage — buffered return, stream end, or panic — before
