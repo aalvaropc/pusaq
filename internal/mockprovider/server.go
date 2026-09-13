@@ -43,11 +43,13 @@ func (o Options) Validate() error {
 
 // Stats is the upstream-side ground truth a load run checks against: how
 // many completion requests reached the mock, how many it failed on purpose,
-// and how many arrived per requested model.
+// how many arrived per requested model, and whether a failure window is
+// open right now.
 type Stats struct {
 	Requests uint64            `json:"requests"`
 	Errors   uint64            `json:"errors"`
 	ByModel  map[string]uint64 `json:"by_model"`
+	Failing  bool              `json:"failing"`
 }
 
 // Server is the mock provider's HTTP handler.
@@ -59,6 +61,12 @@ type Server struct {
 	sleep func(time.Duration)
 	// random returns a float in [0,1); swapped in tests for determinism.
 	random func() float64
+	// now is the clock the failure window is measured against; swapped in
+	// tests.
+	now func() time.Time
+	// failUntil is the end of the current failure window in Unix
+	// nanoseconds; zero means none.
+	failUntil atomic.Int64
 
 	requests  atomic.Uint64
 	errors    atomic.Uint64
@@ -77,6 +85,7 @@ func NewServer(logger *slog.Logger, opts Options) (*Server, error) {
 		mux:     http.NewServeMux(),
 		sleep:   time.Sleep,
 		random:  rand.Float64,
+		now:     time.Now,
 		byModel: make(map[string]uint64),
 	}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -84,8 +93,59 @@ func NewServer(logger *slog.Logger, opts Options) (*Server, error) {
 		_, _ = io.WriteString(w, "ok\n")
 	})
 	s.mux.HandleFunc("GET /stats", s.handleStats)
+	s.mux.HandleFunc("POST /admin/fail", s.handleFailStart)
+	s.mux.HandleFunc("DELETE /admin/fail", s.handleFailClear)
 	s.mux.HandleFunc("POST /v1/chat/completions", s.handleCompletion)
 	return s, nil
+}
+
+// failing reports whether the mock is inside a failure window: every
+// completion returns 500 until it ends. It is how chaos runs make the
+// upstream die at a known instant (docs/design.md §8).
+func (s *Server) failing() bool {
+	until := s.failUntil.Load()
+	return until != 0 && s.now().UnixNano() < until
+}
+
+// handleFailStart opens a failure window of ?for=<duration>, replacing any
+// current one. Admin endpoints exist for the mock only; it is never
+// published.
+func (s *Server) handleFailStart(w http.ResponseWriter, r *http.Request) {
+	d, err := time.ParseDuration(r.URL.Query().Get("for"))
+	if err != nil || d <= 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"for must be a positive duration"}`)
+		return
+	}
+	from := s.now()
+	until := from.Add(d)
+	s.failUntil.Store(until.UnixNano())
+	s.logger.Info("failure_window",
+		slog.String("action", "start"),
+		slog.Duration("for", d),
+		slog.String("from", from.UTC().Format(time.RFC3339Nano)),
+		slog.String("until", until.UTC().Format(time.RFC3339Nano)),
+	)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"failing": true,
+		"from":    from.UTC().Format(time.RFC3339Nano),
+		"until":   until.UTC().Format(time.RFC3339Nano),
+	})
+}
+
+// handleFailClear ends the failure window early.
+func (s *Server) handleFailClear(w http.ResponseWriter, _ *http.Request) {
+	s.failUntil.Store(0)
+	s.logger.Info("failure_window",
+		slog.String("action", "clear"),
+		slog.String("at", s.now().UTC().Format(time.RFC3339Nano)),
+	)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, `{"failing":false}`+"\n")
 }
 
 // Stats returns a snapshot of the request counters.
@@ -100,6 +160,7 @@ func (s *Server) Stats() Stats {
 		Requests: s.requests.Load(),
 		Errors:   s.errors.Load(),
 		ByModel:  byModel,
+		Failing:  s.failing(),
 	}
 }
 
@@ -155,7 +216,7 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 
 	s.sleep(s.sampleLatency())
 
-	if s.random() < s.opts.ErrorRate {
+	if s.failing() || s.random() < s.opts.ErrorRate {
 		s.errors.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)

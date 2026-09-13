@@ -94,8 +94,13 @@ Every cost event records `tokens_charged` next to actual usage, so the
 estimate's error is measurable from the event stream.
 
 **Resilience.** Each upstream backend is guarded by a circuit breaker
-(closed / open / half-open: opens on a >50% failure rate over a 20-sample
-window with a 10-sample minimum; 10s cooldown; 3 half-open probes). On an
+(closed / open / half-open). Defaults: opens on a >50% failure rate over a
+20-sample window with a 10-sample minimum, 10s cooldown, 3 half-open
+probes — configurable with `PUSAQ_BREAKER_WINDOW`, `PUSAQ_BREAKER_MIN_SAMPLES`,
+`PUSAQ_BREAKER_THRESHOLD`, `PUSAQ_BREAKER_COOLDOWN`, `PUSAQ_BREAKER_PROBES`,
+validated and logged at startup. Every transition is one `breaker_state`
+log record (`backend`, `from`, `to`), which is what detection and recovery
+times are measured from. On an
 upstream error or an open breaker, the route's fallback backends are tried
 in order — at most once each, same model contract; streams fall back only
 before the first byte. Failover is observable per request: every cost event
@@ -139,6 +144,8 @@ Requirements: Go 1.26+, Docker with Compose, golangci-lint.
 make up      # start local environment: gateway + Redis + mock provider
 make run     # run the gateway on :8080
 make smoke   # POST /v1/chat/completions with pusaq/fast
+             # mock provider admin (never published): POST /admin/fail?for=5s fails
+             # every completion for 5s, DELETE /admin/fail clears; GET /stats counts
 make test    # go test -race -cover ./...
 make lint    # golangci-lint + go vet
 make down    # stop local environment
@@ -211,6 +218,12 @@ failure, by one reproducible command, and published with its protocol in
   nginx, a zero-latency mock, k6 in a container); `make loadtest-down` stops
   it. Results are cross-checked from k6, the mock provider's `GET /stats`
   counter, and the gateways' cost events.
+- [`breaker-detection.md`](docs/measurements/breaker-detection.md) — how
+  fast each replica's breaker opens when the primary upstream dies at a
+  known instant, how long it stays open, and how fast it closes once the
+  upstream is back, with zero client errors thanks to the fallback.
+  `make breakertest` runs it (same profile plus a fallback mock; the
+  primary is failed on command with `POST /admin/fail?for=<duration>`).
 
 ## Cloud
 

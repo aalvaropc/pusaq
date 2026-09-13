@@ -136,11 +136,34 @@ func run(logger *slog.Logger) error {
 			opts = append(opts, provider.WithAPIKey(up.APIKey))
 		}
 		providers[up.Name] = provider.NewHTTP(up.Name, up.URL, cfg.UpstreamTimeout, logger, opts...)
-		breakers[up.Name] = breaker.New(breaker.Config{})
+		backend := up.Name
+		breakers[backend] = breaker.New(breaker.Config{
+			Window:           cfg.BreakerWindow,
+			MinSamples:       cfg.BreakerMinSamples,
+			FailureThreshold: cfg.BreakerThreshold,
+			Cooldown:         cfg.BreakerCooldown,
+			Probes:           cfg.BreakerProbes,
+			// One log line per transition: the observable that detection
+			// and recovery times are measured from.
+			OnStateChange: func(from, to breaker.State) {
+				logger.Info("breaker_state",
+					slog.String("backend", backend),
+					slog.String("from", string(from)),
+					slog.String("to", string(to)),
+				)
+			},
+		})
 		if i > 0 {
 			fallbacks = append(fallbacks, up.Name)
 		}
 	}
+	logger.Info("circuit breakers configured",
+		slog.Int("window", cfg.BreakerWindow),
+		slog.Int("min_samples", cfg.BreakerMinSamples),
+		slog.Float64("threshold", cfg.BreakerThreshold),
+		slog.Duration("cooldown", cfg.BreakerCooldown),
+		slog.Int("probes", cfg.BreakerProbes),
+	)
 	primary := cfg.Upstreams[0].Name
 	routes := make(map[string]gateway.Route, len(cfg.Routes))
 	for alias, r := range cfg.Routes {

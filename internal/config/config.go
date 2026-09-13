@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aalvaropc/pusaq/internal/breaker"
 )
 
 // Defaults applied when the corresponding variable is unset.
@@ -169,6 +171,13 @@ type Config struct {
 	// may hold them before unused tokens are returned (PUSAQ_LEASE_TTL).
 	LeaseSize int
 	LeaseTTL  time.Duration
+	// Circuit-breaker parameters applied to every upstream backend
+	// (PUSAQ_BREAKER_WINDOW, _MIN_SAMPLES, _THRESHOLD, _COOLDOWN, _PROBES).
+	BreakerWindow     int
+	BreakerMinSamples int
+	BreakerThreshold  float64
+	BreakerCooldown   time.Duration
+	BreakerProbes     int
 	// TPMLimit is the sustained per-tenant LLM-token rate in tokens per
 	// minute (PUSAQ_TPM_LIMIT). Zero disables token limiting, announced by
 	// a startup warning.
@@ -358,6 +367,53 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_LEASE_TTL: must be positive, got %s", d)
 		}
 		cfg.LeaseTTL = d
+	}
+
+	cfg.BreakerWindow = breaker.DefaultWindow
+	cfg.BreakerMinSamples = breaker.DefaultMinSamples
+	cfg.BreakerThreshold = breaker.DefaultFailureThreshold
+	cfg.BreakerCooldown = breaker.DefaultCooldown
+	cfg.BreakerProbes = breaker.DefaultProbes
+	if v, ok := lookup("PUSAQ_BREAKER_WINDOW"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_BREAKER_WINDOW: must be a positive integer, got %q", v)
+		}
+		cfg.BreakerWindow = n
+	}
+	if v, ok := lookup("PUSAQ_BREAKER_MIN_SAMPLES"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_BREAKER_MIN_SAMPLES: must be a positive integer, got %q", v)
+		}
+		cfg.BreakerMinSamples = n
+	}
+	if cfg.BreakerMinSamples > cfg.BreakerWindow {
+		return Config{}, fmt.Errorf("PUSAQ_BREAKER_MIN_SAMPLES: %d exceeds the window %d", cfg.BreakerMinSamples, cfg.BreakerWindow)
+	}
+	if v, ok := lookup("PUSAQ_BREAKER_THRESHOLD"); ok {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n <= 0 || n >= 1 {
+			return Config{}, fmt.Errorf("PUSAQ_BREAKER_THRESHOLD: must be in (0,1), got %q", v)
+		}
+		cfg.BreakerThreshold = n
+	}
+	if v, ok := lookup("PUSAQ_BREAKER_COOLDOWN"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_BREAKER_COOLDOWN: %w", err)
+		}
+		if d <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_BREAKER_COOLDOWN: must be positive, got %s", d)
+		}
+		cfg.BreakerCooldown = d
+	}
+	if v, ok := lookup("PUSAQ_BREAKER_PROBES"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_BREAKER_PROBES: must be a positive integer, got %q", v)
+		}
+		cfg.BreakerProbes = n
 	}
 
 	cfg.TPMLimit = DefaultTPMLimit
