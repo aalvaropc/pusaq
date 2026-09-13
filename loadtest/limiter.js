@@ -36,6 +36,8 @@ const TOLL_RPS = Number(env('TOLL_RPS', 8));
 const TOLL_DURATION = env('TOLL_DURATION', '60s');
 const RUN_ID = env('RUN_ID', 'manual');
 const REPLICAS = Number(env('REPLICAS', 2));
+const MODE = env('MODE', 'strict');
+const LEASE_SIZE = Number(env('LEASE_SIZE', 10));
 const KEYS = { A: env('API_KEY_A', 'lt-a'), B: env('API_KEY_B', 'lt-b'), TOLL: env('API_KEY_TOLL', 'lt-c') };
 
 // Tolerance for refill accrued outside the nominal window (scenario ramp,
@@ -54,16 +56,22 @@ function seconds(d) {
 }
 
 // Admitted-count bound for a bucket that starts full: capacity plus refill
-// over the window, with ε seconds of tolerance on either side.
+// over the window, with ε seconds of tolerance on either side. In lease
+// mode each replica may end the window holding up to LEASE_SIZE unspent
+// tokens, so the lower bound drops by REPLICAS × LEASE_SIZE; the upper bound
+// is the same — tokens are taken before they are spent.
 function bound() {
   const r = RPM / 60;
   const T = seconds(DURATION);
+  const held = MODE === 'lease' ? REPLICAS * LEASE_SIZE : 0;
   return {
-    lower: Math.ceil(BURST + r * (T - EPSILON_S)),
+    lower: Math.ceil(BURST + r * (T - EPSILON_S)) - held,
     upper: Math.floor(BURST + r * (T + EPSILON_S)),
     epsilon_s: EPSILON_S,
     rate_per_s: r,
     window_s: T,
+    mode: MODE,
+    lease_size: MODE === 'lease' ? LEASE_SIZE : 0,
   };
 }
 
@@ -241,6 +249,8 @@ export function handleSummary(data) {
   const summary = {
     run_id: RUN_ID,
     params: {
+      mode: MODE,
+      lease_size: LEASE_SIZE,
       rpm: RPM,
       burst: BURST,
       duration: DURATION,
@@ -279,7 +289,7 @@ export function handleSummary(data) {
   const tu = summary.toll.unlimited_ms || {};
   const lines = [
     '',
-    `run ${RUN_ID}: RPM=${RPM} B=${BURST} T=${DURATION} offered=${exactnessRate} rps x${RATE_MULT}`,
+    `run ${RUN_ID} (${MODE}): RPM=${RPM} B=${BURST} T=${DURATION} offered=${exactnessRate} rps x${RATE_MULT}`,
     `  exactness: admitted=${admitted} bound=[${B.lower}, ${B.upper}] within=${summary.exactness.within_bound} rejected=${rejected} other=${other} mock_served=${summary.exactness.mock_served} dropped=${summary.exactness.dropped_iterations}`,
     `  neighbor:  rejected=${summary.neighbor.rejected} other=${summary.neighbor.other} mock_served=${summary.neighbor.mock_served}`,
     `  toll:      limited p50/p95/p99 = ${fmt(tl.p50)}/${fmt(tl.p95)}/${fmt(tl.p99)} ms | unlimited = ${fmt(tu.p50)}/${fmt(tu.p95)}/${fmt(tu.p99)} ms | p99 delta = ${fmt(tl.p99 - tu.p99)} ms | rejected=${summary.toll.rejected} | mock_served(both arms)=${summary.toll.mock_served_both_arms}`,

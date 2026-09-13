@@ -25,6 +25,9 @@ x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll
   PUSAQ_RPM_LIMIT: ${LOADTEST_RPM:-600}
   PUSAQ_RPM_BURST: ${LOADTEST_BURST:-100}
+  PUSAQ_RATELIMIT_MODE: ${LOADTEST_MODE:-strict}
+  PUSAQ_LEASE_SIZE: ${LOADTEST_LEASE_SIZE:-10}
+  PUSAQ_LEASE_TTL: 1s
   PUSAQ_TPM_LIMIT: "0"
   PUSAQ_CACHE_MODE: "off"
   PUSAQ_TELEMETRY_BUFFER: "65536"
@@ -141,6 +144,8 @@ services:
       TOLL_RPS: ${LOADTEST_TOLL_RPS:-8}
       TOLL_DURATION: ${LOADTEST_TOLL_DURATION:-60s}
       RUN_ID: ${RUN_ID:-manual}
+      MODE: ${LOADTEST_MODE:-strict}
+      LEASE_SIZE: ${LOADTEST_LEASE_SIZE:-10}
       REPLICAS: "2"
       API_KEY_A: lt-a
       API_KEY_B: lt-b

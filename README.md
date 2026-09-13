@@ -69,6 +69,18 @@ the gateway **fails open** within a 250ms budget — temporarily inexact
 limits beat an outage caused by the limiter itself. Unset `PUSAQ_REDIS_ADDR`
 disables limiting with a startup warning.
 
+Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one
+atomic store decision per request, exact across replicas. **`lease`**: each
+replica takes up to `PUSAQ_LEASE_SIZE` request tokens per round-trip and
+admits locally; unused tokens return when the lease passes `PUSAQ_LEASE_TTL`
+or the replica drains, and a store denial is cached locally until its retry
+time. Cumulative admissions never exceed the bucket in either mode; in lease
+mode up to `replicas × lease size` tokens can sit unspent in leases at any
+moment, and a replica that dies without draining strands at most one lease
+per tenant (under-admission, never overrun). Lease mode covers request
+limits only; token limits are always strict. Both modes are measured with
+the same load test.
+
 **Token limits (TPM).** Alongside RPM, each tenant has an LLM-token bucket.
 After model resolution a request is charged its input estimate (chars/4)
 plus an output reservation (`max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`);
@@ -138,7 +150,9 @@ Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 `PUSAQ_UPSTREAMS` (`mock=http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
 `PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
 disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
-(default = limit), `PUSAQ_TPM_LIMIT` (`100000` tokens/min; `0` disables token
+(default = limit), `PUSAQ_RATELIMIT_MODE` (`strict` | `lease`),
+`PUSAQ_LEASE_SIZE` (`10`, at most the burst), `PUSAQ_LEASE_TTL` (`1s`),
+`PUSAQ_TPM_LIMIT` (`100000` tokens/min; `0` disables token
 limiting with a startup warning), `PUSAQ_TPM_BURST` (default = limit),
 `PUSAQ_TPM_RESERVE_DEFAULT` (`512`).
 

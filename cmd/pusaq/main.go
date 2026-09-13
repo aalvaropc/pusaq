@@ -59,6 +59,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	var shadow *semcache.Shadow
+	var leased *ratelimit.Leased
 	if cfg.CacheMode == config.CacheShadow {
 		var embedder embed.Embedder = embed.Local{}
 		if name, ok := strings.CutPrefix(cfg.EmbedderKind, "openai:"); ok {
@@ -89,7 +90,12 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		stages = append(stages, gateway.RateLimit(rpm, logger))
+		var admitter gateway.Admitter = rpm
+		if cfg.RateLimitMode == config.RateLimitLease {
+			leased = ratelimit.NewLeased(rpm, cfg.LeaseSize, cfg.LeaseTTL)
+			admitter = leased
+		}
+		stages = append(stages, gateway.RateLimit(admitter, logger))
 		if cfg.TPMLimit > 0 {
 			tpm, err := ratelimit.New(client, "tpm", ratelimit.Limits{
 				Burst: cfg.TPMBurst,
@@ -105,6 +111,9 @@ func run(logger *slog.Logger) error {
 		}
 		logger.Info("rate limiting enabled",
 			slog.String("redis", cfg.RedisAddr),
+			slog.String("mode", cfg.RateLimitMode),
+			slog.Int("lease_size", cfg.LeaseSize),
+			slog.Duration("lease_ttl", cfg.LeaseTTL),
 			slog.Float64("rpm_limit", cfg.RPMLimit),
 			slog.Float64("rpm_burst", cfg.RPMBurst),
 			slog.Float64("tpm_limit", cfg.TPMLimit),
@@ -180,6 +189,19 @@ func run(logger *slog.Logger) error {
 		logger.Error("shutdown error", slog.Any("error", err))
 	}
 
+	if leased != nil {
+		// Return held request tokens to the shared bucket before exit.
+		leased.Close()
+		st := leased.Stats()
+		logger.Info("lease-mode limiter stopped",
+			slog.Uint64("acquisitions", st.Acquisitions),
+			slog.Uint64("local_admits", st.LocalAdmits),
+			slog.Uint64("local_denies", st.LocalDenies),
+			slog.Uint64("refunds", st.Refunds),
+			slog.Uint64("refund_failures", st.RefundFailures),
+			slog.Float64("tokens_lost", st.TokensLost),
+		)
+	}
 	if shadow != nil {
 		shadow.Close()
 		logger.Info("shadow cache stopped",
