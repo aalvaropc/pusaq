@@ -1,6 +1,12 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help up down run mock test lint tidy smoke calibrate
+# Cloud foundation (Terraform). The state bucket exists already; its name is
+# passed at init time so it is never hardcoded in the configuration.
+TF_STATE_BUCKET ?= aalvaropc-tfstate
+TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
+
+.PHONY: help up down run mock test lint tidy smoke calibrate \
+        infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,3 +41,21 @@ smoke: ## Send a chat completion through the gateway (gateway + mock must be run
 		-H 'Content-Type: application/json' \
 		-d '{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}]}' \
 		-w '\nstatus: %{http_code}\n'
+
+infra-init: ## Initialize the cloud foundation (state in the existing bucket)
+	$(TF_FOUNDATION) init -backend-config="bucket=$(TF_STATE_BUCKET)"
+
+infra-plan: ## Show what the cloud foundation would change
+	$(TF_FOUNDATION) plan
+
+infra-apply: ## Apply the cloud foundation (registry, publisher identity, budget)
+	$(TF_FOUNDATION) apply
+
+infra-destroy: ## Destroy the cloud foundation (never disables shared APIs)
+	$(TF_FOUNDATION) destroy
+
+infra-fmt: ## Format Terraform files
+	terraform fmt -recursive infra/terraform
+
+infra-validate: ## Validate Terraform without touching the backend
+	$(TF_FOUNDATION) init -backend=false -input=false >/dev/null && $(TF_FOUNDATION) validate
