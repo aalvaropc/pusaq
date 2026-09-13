@@ -76,7 +76,38 @@ request would pay a second script call plus a reconciliation call.
 
 ## Results
 
-_Filled after the run._
+Runs of 2026-09-13 at the default parameters (RPM 600 → r = 10/s, B = 100,
+×10 → 100 requests/s offered) for 120 s and 300 s. Every run: k6 thresholds
+passed, `verify.sh` OK.
+
+### Exactness
+
+| Run | Mode | RPM / B / T | Offered | Admitted | Bound | 429 | Mock served | Admitted per replica (a / b) | Neighbor 429 | Fail-open | Lua calls | Calls per limited request | Cost events / requests |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `strict-120s` | strict | 600 / 100 / 120s | 12001 | **1299** | [1280, 1320] | 10702 | 1299 | 670 / 629 | 0 of 241 | 0 | 12723 | 1.000 | 12001 / 12001 |
+| `strict-300s` | strict | 600 / 100 / 300s | 30001 | **3099** | [3080, 3120] | 26902 | 3099 | 1581 / 1518 | 0 of 601 | 0 | 31082 | 1.000 | 30001 / 30001 |
+
+Reading: the bucket started full (100) and refilled at 10/s; over 120 s
+that is 1 300 admissions and the gateways admitted 1 299 — through two
+processes, from 12 001 offered. The mock provider counted the same 1 299;
+the cost events on the two replicas add up to the same 1 299 (split
+≈ 52/48 by nginx round-robin); zero fail-open. The 300 s run lands at 3 099
+of a nominal 3 100. One Lua call per request that reached a limited replica,
+admitted or rejected.
+
+### Limiter toll (requests under the limit, same clock window)
+
+| Run | Mode | Limited p50 / p95 / p99 (ms) | Unlimited p50 / p95 / p99 (ms) | Delta p50 / p95 / p99 (ms) | 429 in toll arms |
+|---|---|---|---|---|---|
+| `strict-120s` | strict | 1.79 / 3.51 / 4.23 | 1.71 / 3.46 / 4.09 | 0.07 / 0.05 / 0.14 | 0 |
+| `strict-300s` | strict | 2.21 / 3.07 / 3.79 | 1.91 / 2.63 / 3.41 | 0.31 / 0.44 / 0.38 | 0 |
+
+Reading: the request limiter's toll on this host is a fraction of a
+millisecond at every percentile — one Redis round-trip (Redis reported
+~0.13–0.19 ms per Lua call) on a ~2 ms path. Run-to-run variation between
+the two rows (0.1 vs 0.4 ms) is of the same order as the toll itself; the
+number to quote is "under half a millisecond on a local Redis", not a
+single figure.
 
 ## Caveats
 
