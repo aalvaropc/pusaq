@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+billing_account      = "XXXXXX-XXXXXX-XXXXXX"
+budget_amount_units  = "50"
+notification_channel = "projects/aalvaropc/notificationChannels/<channel-id>"

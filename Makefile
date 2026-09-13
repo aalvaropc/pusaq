@@ -12,7 +12,13 @@ LOADTEST_LEASE_SIZE ?= 10
 RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 export LOADTEST_RPM LOADTEST_BURST LOADTEST_DURATION LOADTEST_RATE_MULT LOADTEST_TOLL_RPS LOADTEST_TOLL_DURATION LOADTEST_MODE LOADTEST_LEASE_SIZE RUN_ID
 
-.PHONY: help up down run mock test lint tidy smoke calibrate loadtest loadtest-down
+# Cloud foundation (Terraform). The state bucket exists already; its name is
+# passed at init time so it is never hardcoded in the configuration.
+TF_STATE_BUCKET ?= aalvaropc-tfstate
+TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
+
+.PHONY: help up down run mock test lint tidy smoke calibrate loadtest loadtest-down \
+        infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -58,3 +64,21 @@ loadtest: ## Limiter load test: 2 replicas behind nginx, k6 in Docker, cross-che
 
 loadtest-down: ## Stop the load-test profile
 	docker compose --profile loadtest down --remove-orphans
+
+infra-init: ## Initialize the cloud foundation (state in the existing bucket)
+	$(TF_FOUNDATION) init -backend-config="bucket=$(TF_STATE_BUCKET)"
+
+infra-plan: ## Show what the cloud foundation would change
+	$(TF_FOUNDATION) plan
+
+infra-apply: ## Apply the cloud foundation (registry, publisher identity, budget)
+	$(TF_FOUNDATION) apply
+
+infra-destroy: ## Destroy the cloud foundation (never disables shared APIs)
+	$(TF_FOUNDATION) destroy
+
+infra-fmt: ## Format Terraform files
+	terraform fmt -recursive infra/terraform
+
+infra-validate: ## Validate Terraform without touching the backend
+	$(TF_FOUNDATION) init -backend=false -input=false >/dev/null && $(TF_FOUNDATION) validate

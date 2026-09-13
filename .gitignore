@@ -16,6 +16,7 @@ coverage.html
 *.tfstate
 *.tfstate.*
 .terraform/
+infra/terraform/**/terraform.tfvars
 
 # Editor
 .idea/
@@ -32,4 +33,3 @@ AGENTS.md
 !/loadtest/out/.gitkeep
 
 # Terraform local variables
-infra/terraform/**/terraform.tfvars

@@ -201,6 +201,34 @@ failure, by one reproducible command, and published with its protocol in
   it. Results are cross-checked from k6, the mock provider's `GET /stats`
   counter, and the gateways' cost events.
 
+## Cloud
+
+The cloud side is declared as code in [`infra/terraform/foundation/`](infra/terraform/foundation/)
+and creates only what publishing needs — nothing that runs continuously:
+
+- an Artifact Registry repository for the gateway and mock-provider images,
+  with cleanup policies (untagged layers after 7 days, tagged images after
+  30 days except the 10 most recent);
+- a publisher service account reachable only through workload identity
+  federation from this repository's GitHub Actions, with write access to
+  that one registry and no project-level roles;
+- a monthly budget over every resource labeled `project=pusaq`, alerting an
+  existing notification channel at 50/75/90/100 %.
+
+```sh
+cp infra/terraform/foundation/terraform.tfvars.example infra/terraform/foundation/terraform.tfvars
+make infra-init      # state lives in an existing bucket, passed at init time
+make infra-plan      # read it: registry, identity, budget — nothing else
+make infra-apply
+```
+
+After the first apply, set the two repository variables the publishing
+workflow reads (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`) from
+the Terraform outputs. From then on every push to `main` publishes
+`pusaq` and `mockprovider` images tagged with the commit SHA and `main`
+([`release-image.yml`](.github/workflows/release-image.yml)). CI checks
+Terraform formatting and validity without credentials.
+
 ## Stack
 
 Go · Cloud Run · Memorystore (Redis, Lua) · Firestore · Vertex AI

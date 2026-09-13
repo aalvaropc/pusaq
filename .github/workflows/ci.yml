@@ -30,3 +30,15 @@ jobs:
       - run: go vet ./...
       - run: go test -race -cover ./...
       - run: go build ./...
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.1
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive -diff infra/terraform
+      - run: terraform -chdir=infra/terraform/foundation init -backend=false -input=false
+      - run: terraform -chdir=infra/terraform/foundation validate
