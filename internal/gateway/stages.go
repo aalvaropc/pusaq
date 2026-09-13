@@ -139,6 +139,8 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					Latency:        time.Since(start),
 					RequestedModel: req.RequestedModel,
 					ServedModel:    req.ServedModel,
+					FeatureTag:     req.FeatureTag,
+					RouteReason:    req.RouteReason,
 					Usage:          req.Usage,
 				}
 				if r := recover(); r != nil {
@@ -229,6 +231,8 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			Latency:        time.Since(f.start),
 			RequestedModel: f.req.RequestedModel,
 			ServedModel:    f.req.ServedModel,
+			FeatureTag:     f.req.FeatureTag,
+			RouteReason:    f.req.RouteReason,
 			Usage:          f.req.Usage,
 			TokensCharged:  f.req.TokensCharged,
 			ServedProvider: f.req.ServedProvider,

@@ -10,7 +10,8 @@
 //                  the bucket bound (see bound() below); everything else 429.
 //   neighbor       tenant B at 2 rps during the same window: zero 429s.
 //   toll_limited   tenant C at TOLL_RPS (under its limit) after the overload,
-//                  against the limited replicas.
+//                  against the limited replicas, through pusaq/auto with a
+//                  feature tag the routing rules send to pusaq/best.
 //   toll_unlimited same, against replicas with limiting disabled. The two
 //                  toll arms run in the same clock window; their p99 delta is
 //                  the limiter's toll.
@@ -44,9 +45,10 @@ const KEYS = { A: env('API_KEY_A', 'lt-a'), B: env('API_KEY_B', 'lt-b'), TOLL: e
 // scheduler jitter, the last in-flight requests). Two seconds of refill.
 const EPSILON_S = 2;
 
-// Models are the physical names the load-test routes map each alias to,
-// so the mock's per-model counter separates the scenarios.
-const MODELS = { exactness: 'mock-exactness', neighbor: 'mock-neighbor', toll: 'mock-toll' };
+// Models are the physical names the load-test routes map each alias to.
+// The exactness tenant has a model of its own; neighbor and toll traffic
+// share the other one (toll reaches it through pusaq/auto + feature tag).
+const MODELS = { exactness: 'mock-exactness', other: 'mock-neighbor' };
 
 function seconds(d) {
   const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(String(d).trim());
@@ -88,8 +90,8 @@ const rejectedNeighbor = new Counter('rejected_neighbor');
 const otherNeighbor = new Counter('other_neighbor');
 const rejectedToll = new Counter('rejected_toll');
 const mockServedExactness = new Counter('mock_served_exactness');
-const mockServedNeighbor = new Counter('mock_served_neighbor');
-const mockServedToll = new Counter('mock_served_toll');
+const mockServedOther = new Counter('mock_served_other');
+const routeReasonMismatch = new Counter('route_reason_mismatch');
 
 export const options = {
   discardResponseBodies: true,
@@ -147,6 +149,8 @@ export const options = {
     other_neighbor: ['count==0'],
     // Toll tenants run under their limit: a 429 there is a setup error.
     rejected_toll: ['count==0'],
+    // Toll traffic must be routed by its feature tag.
+    route_reason_mismatch: ['count==0'],
     // The offered load must actually have been delivered.
     dropped_iterations: ['count==0'],
     // Referencing the per-scenario latency sub-metrics materializes them
@@ -161,10 +165,12 @@ export const options = {
 const okOr429 = http.expectedStatuses(200, 429);
 const okOnly = http.expectedStatuses(200);
 
-function completion(baseURL, key, alias, callback) {
+function completion(baseURL, key, alias, callback, metadata) {
+  const body = { model: alias, messages: [{ role: 'user', content: 'ping' }], max_tokens: 8 };
+  if (metadata) body.metadata = metadata;
   return http.post(
     `${baseURL}/v1/chat/completions`,
-    JSON.stringify({ model: alias, messages: [{ role: 'user', content: 'ping' }], max_tokens: 8 }),
+    JSON.stringify(body),
     {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       responseCallback: callback,
@@ -209,21 +215,27 @@ export function neighbor() {
   else if (res.status !== 200) otherNeighbor.add(1);
 }
 
+const TOLL_METADATA = { feature_tag: 'toll' };
+
+function checkRouted(res) {
+  if (res.headers['X-Pusaq-Route-Reason'] !== 'rule:toll') routeReasonMismatch.add(1);
+}
+
 export function tollLimited() {
-  const res = completion(BASE_URL, KEYS.TOLL, 'pusaq/auto', okOr429);
+  const res = completion(BASE_URL, KEYS.TOLL, 'pusaq/auto', okOr429, TOLL_METADATA);
   if (res.status === 429) rejectedToll.add(1);
+  checkRouted(res);
 }
 
 export function tollUnlimited() {
-  completion(BASE_URL_NOLIMIT, KEYS.TOLL, 'pusaq/auto', okOnly);
+  checkRouted(completion(BASE_URL_NOLIMIT, KEYS.TOLL, 'pusaq/auto', okOnly, TOLL_METADATA));
 }
 
 export function teardown(data) {
   const after = mockStats();
   const delta = (model) => (after[model] || 0) - (data.statsBefore[model] || 0);
   mockServedExactness.add(delta(MODELS.exactness));
-  mockServedNeighbor.add(delta(MODELS.neighbor));
-  mockServedToll.add(delta(MODELS.toll));
+  mockServedOther.add(delta(MODELS.other));
 }
 
 function count(data, name) {
@@ -273,13 +285,13 @@ export function handleSummary(data) {
     neighbor: {
       rejected: count(data, 'rejected_neighbor'),
       other: count(data, 'other_neighbor'),
-      mock_served: count(data, 'mock_served_neighbor'),
       latency_ms: pct(data, 'http_req_duration{scenario:neighbor}'),
     },
+    // Neighbor and both toll arms share one physical model on the mock.
+    mock_served_other: count(data, 'mock_served_other'),
     toll: {
       rejected: count(data, 'rejected_toll'),
-      // Both toll arms route to the same physical model; this is their sum.
-      mock_served_both_arms: count(data, 'mock_served_toll'),
+      route_reason_mismatch: count(data, 'route_reason_mismatch'),
       limited_ms: pct(data, 'http_req_duration{scenario:toll_limited}'),
       unlimited_ms: pct(data, 'http_req_duration{scenario:toll_unlimited}'),
     },
@@ -291,8 +303,8 @@ export function handleSummary(data) {
     '',
     `run ${RUN_ID} (${MODE}): RPM=${RPM} B=${BURST} T=${DURATION} offered=${exactnessRate} rps x${RATE_MULT}`,
     `  exactness: admitted=${admitted} bound=[${B.lower}, ${B.upper}] within=${summary.exactness.within_bound} rejected=${rejected} other=${other} mock_served=${summary.exactness.mock_served} dropped=${summary.exactness.dropped_iterations}`,
-    `  neighbor:  rejected=${summary.neighbor.rejected} other=${summary.neighbor.other} mock_served=${summary.neighbor.mock_served}`,
-    `  toll:      limited p50/p95/p99 = ${fmt(tl.p50)}/${fmt(tl.p95)}/${fmt(tl.p99)} ms | unlimited = ${fmt(tu.p50)}/${fmt(tu.p95)}/${fmt(tu.p99)} ms | p99 delta = ${fmt(tl.p99 - tu.p99)} ms | rejected=${summary.toll.rejected} | mock_served(both arms)=${summary.toll.mock_served_both_arms}`,
+    `  neighbor:  rejected=${summary.neighbor.rejected} other=${summary.neighbor.other} | mock_served(neighbor + toll arms)=${summary.mock_served_other}`,
+    `  toll:      limited p50/p95/p99 = ${fmt(tl.p50)}/${fmt(tl.p95)}/${fmt(tl.p99)} ms | unlimited = ${fmt(tu.p50)}/${fmt(tu.p95)}/${fmt(tu.p99)} ms | p99 delta = ${fmt(tl.p99 - tu.p99)} ms | rejected=${summary.toll.rejected} | route_reason_mismatch=${summary.toll.route_reason_mismatch}`,
     `  thresholds passed: ${summary.thresholds_passed}`,
     '',
   ];

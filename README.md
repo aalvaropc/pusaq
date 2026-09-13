@@ -43,20 +43,23 @@ What the gateway does today:
   success, error, panic, and stream end alike; completions are priced in
   dollars against a versioned price table from configuration.
 
-Not implemented: serving from the cache, routing rules for `pusaq/auto`
-(it currently resolves like `pusaq/fast`), a policy filter, and
-multi-region deployment.
+Not implemented: serving from the cache, a policy filter, and multi-region
+deployment.
 
 ## API
 
 `POST /v1/chat/completions` — OpenAI request subset (`model`, `messages`,
 `max_tokens`, `stream`). With `"stream": true` the response is Server-Sent
 Events: `chat.completion.chunk` deltas passed through from the provider,
-a final usage chunk, then `data: [DONE]`. The `model` field takes an alias: `pusaq/fast`,
-`pusaq/best`, or `pusaq/auto` (aliases resolve to physical models in
-configuration; `pusaq/auto` currently resolves like `pusaq/fast` because
-routing rules are not implemented). Responses carry `X-Pusaq-Model` (the physical model served) and
-`X-Pusaq-Request-Id`. All errors share one JSON shape:
+a final usage chunk, then `data: [DONE]`. The `model` field takes an alias:
+`pusaq/fast` and `pusaq/best` resolve to physical models in configuration;
+`pusaq/auto` resolves through routing rules keyed by the request's
+`metadata.feature_tag` (`PUSAQ_ROUTING_RULES`, default
+`classify`/`extract` → fast, `reason`/`code` → best, everything else →
+fast). Responses carry `X-Pusaq-Model` (the physical model served),
+`X-Pusaq-Route-Reason` (`direct`, `rule:<tag>`, `default:untagged`, or
+`default:unknown_tag`) and `X-Pusaq-Request-Id`; the cost event records the
+same as `route_reason` and `feature_tag`. All errors share one JSON shape:
 `{"error":{"code":"...","message":"..."}}` — provider failures surface as
 `upstream_error` (502) without leaking upstream responses.
 
@@ -149,7 +152,9 @@ readiness and turns 503 during the drain window on SIGTERM.
 Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 (`1s`), `PUSAQ_SHUTDOWN_GRACE` (`10s`), `PUSAQ_TELEMETRY_BUFFER` (`1024`),
 `PUSAQ_UPSTREAMS` (`mock=http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
-`PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
+`PUSAQ_ROUTES` (`alias=model,...` for `pusaq/fast` and `pusaq/best`),
+`PUSAQ_ROUTING_RULES` (`tag=alias,...,default=alias`; replaces the default
+table), `PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
 disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
 (default = limit), `PUSAQ_RATELIMIT_MODE` (`strict` | `lease`),
 `PUSAQ_LEASE_SIZE` (`10`, at most the burst), `PUSAQ_LEASE_TTL` (`1s`),
@@ -183,7 +188,8 @@ a config entry — no code:
 ```sh
 export PUSAQ_UPSTREAMS="gemini=https://generativelanguage.googleapis.com/v1beta/openai,mock=http://localhost:9090"
 export PUSAQ_UPSTREAM_KEY_GEMINI="<your Gemini API key>"
-export PUSAQ_ROUTES="pusaq/fast=gemini-2.5-flash,pusaq/best=gemini-2.5-pro,pusaq/auto=gemini-2.5-flash"
+export PUSAQ_ROUTES="pusaq/fast=gemini-2.5-flash,pusaq/best=gemini-2.5-pro"
+export PUSAQ_ROUTING_RULES="classify=pusaq/fast,extract=pusaq/fast,reason=pusaq/best,code=pusaq/best,default=pusaq/fast"
 make run
 ```
 

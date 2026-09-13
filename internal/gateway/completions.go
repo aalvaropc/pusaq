@@ -21,6 +21,37 @@ import (
 // (constitution rule 7).
 const ServedModelHeader = "X-Pusaq-Model"
 
+// RouteReasonHeader reports how the requested alias was resolved: "direct"
+// for a concrete alias; for pusaq/auto, "rule:<tag>" when a routing rule
+// named the request's feature tag, "default:untagged" when it carried none,
+// "default:unknown_tag" when no rule named it.
+const RouteReasonHeader = "X-Pusaq-Route-Reason"
+
+// AutoAlias is the router alias; it resolves through RoutingRules.
+const AutoAlias = "pusaq/auto"
+
+// RoutingRules is the explicit routing table for AutoAlias (docs/design.md
+// §5.5): feature tag → concrete alias, with a default for the rest.
+type RoutingRules struct {
+	ByTag   map[string]string
+	Default string
+}
+
+// resolve maps a requested alias (and the request's feature tag) to the
+// concrete alias to serve and the reason to report.
+func (r RoutingRules) resolve(requested, tag string) (alias, reason string) {
+	if requested != AutoAlias {
+		return requested, "direct"
+	}
+	if tag == "" {
+		return r.Default, "default:untagged"
+	}
+	if a, ok := r.ByTag[tag]; ok {
+		return a, "rule:" + tag
+	}
+	return r.Default, "default:unknown_tag"
+}
+
 // TokenLimiter is the TPM decision surface: charge on admission, reconcile
 // once actual consumption is known. Satisfied by *ratelimit.Limiter; nil
 // disables token limiting.
@@ -68,6 +99,22 @@ type completionRequest struct {
 	Messages  []provider.Message `json:"messages"`
 	MaxTokens int                `json:"max_tokens"`
 	Stream    bool               `json:"stream"`
+	// Metadata is the OpenAI metadata map; feature_tag drives the router.
+	Metadata map[string]any `json:"metadata"`
+}
+
+// featureTag extracts metadata.feature_tag: absent means untagged, any
+// non-string value is a client error.
+func featureTag(cr completionRequest) (string, error) {
+	v, ok := cr.Metadata["feature_tag"]
+	if !ok || v == nil {
+		return "", nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", core.NewError(core.CodeInvalidRequest, "metadata.feature_tag must be a string")
+	}
+	return s, nil
 }
 
 // completionResponse is the OpenAI response subset Pusaq returns.
@@ -121,6 +168,9 @@ type CompletionsOptions struct {
 	// Prices prices completions when non-nil; nil leaves cost events
 	// without cost fields.
 	Prices *pricing.Table
+	// Rules resolve AutoAlias; a zero value makes auto requests fail as
+	// unknown models.
+	Rules  RoutingRules
 	Logger *slog.Logger
 }
 
@@ -220,12 +270,19 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 			return nil, err
 		}
 
-		route, ok := routes[cr.Model]
+		tag, err := featureTag(cr)
+		if err != nil {
+			return nil, err
+		}
+		alias, reason := opts.Rules.resolve(cr.Model, tag)
+		route, ok := routes[alias]
 		if !ok {
 			return nil, core.Errorf(core.CodeInvalidRequest, "unknown model %q", cr.Model)
 		}
 		req.RequestedModel = cr.Model
 		req.ServedModel = route.Model
+		req.FeatureTag = tag
+		req.RouteReason = reason
 		priceOnFinalize(req, opts.Prices)
 
 		// TPM is charged once, before any backend attempt: the model
@@ -268,6 +325,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		resp := &core.Response{Status: http.StatusOK, Body: body}
 		resp.SetHeader("Content-Type", "application/json")
 		resp.SetHeader(ServedModelHeader, route.Model)
+		resp.SetHeader(RouteReasonHeader, req.RouteReason)
 		return resp, nil
 	}
 }
@@ -430,6 +488,7 @@ func streamCompletion(ctx context.Context, providers map[string]provider.Provide
 	resp.SetHeader("Content-Type", "text/event-stream")
 	resp.SetHeader("Cache-Control", "no-cache")
 	resp.SetHeader(ServedModelHeader, route.Model)
+	resp.SetHeader(RouteReasonHeader, req.RouteReason)
 	return resp, nil
 }
 

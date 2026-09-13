@@ -320,8 +320,14 @@ to decide** — an explicit table is easier to understand and audit:
 
 ```
 classify → fast     extract → fast     reason → best
-code     → claude   default → fast     (fail toward savings)
+code     → best     default → fast     (fail toward savings)
 ```
+
+The table is configuration (`PUSAQ_ROUTING_RULES`, keyed by the request's
+`metadata.feature_tag`); `pusaq/auto` resolves through it to a concrete
+alias, and every response says how in `X-Pusaq-Route-Reason` (`direct`,
+`rule:<tag>`, `default:untagged`, `default:unknown_tag`), recorded on the
+cost event as `route_reason` next to `feature_tag`.
 
 Documented extensions, deliberately not built yet: a learned router (no real
 traffic to train it), and cascade/fallback-by-confidence (worst case pays both

@@ -137,3 +137,23 @@ func TestSlogSinkWritesCostFieldsOnlyWhenPriced(t *testing.T) {
 		t.Fatalf("unpriced line carries cost_usd: %v", second)
 	}
 }
+
+func TestSlogSinkWritesRoutingFields(t *testing.T) {
+	var buf bytes.Buffer
+	sink := SlogSink{Logger: slog.New(slog.NewJSONHandler(&buf, nil))}
+
+	e := event("routed")
+	e.RequestedModel = "pusaq/auto"
+	e.ServedModel = "model-b"
+	e.FeatureTag = "reason"
+	e.RouteReason = "rule:reason"
+	sink.Write(e)
+
+	var line map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &line); err != nil {
+		t.Fatal(err)
+	}
+	if line["route_reason"] != "rule:reason" || line["feature_tag"] != "reason" {
+		t.Fatalf("line = %v, want route_reason and feature_tag", line)
+	}
+}

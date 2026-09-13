@@ -94,6 +94,9 @@ func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler 
 			if req.ServedModel != "" {
 				w.Header().Set(ServedModelHeader, req.ServedModel)
 			}
+			if req.RouteReason != "" {
+				w.Header().Set(RouteReasonHeader, req.RouteReason)
+			}
 			s.writeError(w, req.ID, core.AsError(err))
 			return
 		}

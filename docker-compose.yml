@@ -16,12 +16,14 @@ x-pusaq-loadtest: &pusaq-loadtest
     mock-lt:
       condition: service_started
 
-# Each alias maps to a distinct physical model so the mock's per-model
-# counter separates the load scenarios without forwarding tenant identity.
+# Each concrete alias maps to a distinct physical model so the mock's
+# per-model counter isolates the overload scenario; toll traffic goes through
+# pusaq/auto with a feature tag the rules send to pusaq/best.
 x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_REDIS_ADDR: redis:6379
   PUSAQ_UPSTREAMS: mock=http://mock-lt:9090
-  PUSAQ_ROUTES: pusaq/fast=mock-exactness,pusaq/best=mock-neighbor,pusaq/auto=mock-toll
+  PUSAQ_ROUTES: pusaq/fast=mock-exactness,pusaq/best=mock-neighbor
+  PUSAQ_ROUTING_RULES: toll=pusaq/best,default=pusaq/fast
   PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll
   PUSAQ_RPM_LIMIT: ${LOADTEST_RPM:-600}
   PUSAQ_RPM_BURST: ${LOADTEST_BURST:-100}

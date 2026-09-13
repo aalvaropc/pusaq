@@ -30,7 +30,7 @@ lower=$(jqs '.summary.bound.lower')
 upper=$(jqs '.summary.bound.upper')
 
 echo "k6:       admitted=$admitted rejected=$rejected other=$other dropped_iterations=$dropped"
-echo "mock:     served(exactness)=$mock_served served(neighbor)=$(jqs '.summary.neighbor.mock_served') served(toll, both arms)=$(jqs '.summary.toll.mock_served_both_arms')"
+echo "mock:     served(exactness)=$mock_served served(neighbor + toll arms)=$(jqs '.summary.mock_served_other') route_reason_mismatch=$(jqs '.summary.toll.route_reason_mismatch')"
 echo "neighbor: rejected=$(jqs '.summary.neighbor.rejected') other=$(jqs '.summary.neighbor.other')"
 r2='def r2: if . == null then "n/a" else (. * 100 | round / 100 | tostring) end;'
 echo "toll:     limited p50/p95/p99=$(jqs "$r2"' .summary.toll.limited_ms | "\(.p50|r2)/\(.p95|r2)/\(.p99|r2)"') ms  unlimited=$(jqs "$r2"' .summary.toll.unlimited_ms | "\(.p50|r2)/\(.p95|r2)/\(.p99|r2)"') ms  p99 delta=$(jqs "$r2"' (.summary.toll.limited_ms.p99 - .summary.toll.unlimited_ms.p99) | r2') ms"

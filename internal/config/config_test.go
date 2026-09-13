@@ -23,7 +23,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast"},
 		},
 		{
 			name: "all overrides applied",
@@ -46,7 +46,7 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_CACHE_TAU":           "0.9",
 				"PUSAQ_CACHE_MAX_ENTRIES":   "500",
 			},
-			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, RateLimitMode: "lease", LeaseSize: 5, LeaseTTL: 500 * time.Millisecond, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256, CacheMode: "shadow", CacheTau: 0.9, CacheMaxEntries: 500, EmbedderKind: "local"},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, RateLimitMode: "lease", LeaseSize: 5, LeaseTTL: 500 * time.Millisecond, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256, CacheMode: "shadow", CacheTau: 0.9, CacheMaxEntries: 500, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast"},
 		},
 		{
 			name:    "empty addr rejected",
@@ -126,7 +126,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "price table parsed with its version",
 			env:  map[string]string{"PUSAQ_PRICES": "mock-model=0.10/0.40, other=1/2", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", Prices: map[string]Price{"mock-model": {0.10, 0.40}, "other": {1, 2}}, PriceTableVersion: "v1"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", Prices: map[string]Price{"mock-model": {0.10, 0.40}, "other": {1, 2}}, PriceTableVersion: "v1"},
 		},
 		{
 			name:    "price table requires a version",
@@ -166,7 +166,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "zero tpm limit disables token limiting",
 			env:  map[string]string{"PUSAQ_TPM_LIMIT": "0"},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast"},
 		},
 		{
 			name:    "tpm burst with zero limit rejected",
@@ -239,10 +239,10 @@ func TestLoad(t *testing.T) {
 			if len(gotUpstreams) == 0 {
 				t.Fatal("Upstreams empty")
 			}
-			if len(gotRoutes) != 3 {
-				t.Fatalf("Routes has %d aliases, want 3", len(gotRoutes))
+			if len(gotRoutes) != 2 {
+				t.Fatalf("Routes has %d aliases, want 2", len(gotRoutes))
 			}
-			for _, alias := range []string{"pusaq/fast", "pusaq/best", "pusaq/auto"} {
+			for _, alias := range []string{"pusaq/fast", "pusaq/best"} {
 				if _, ok := gotRoutes[alias]; !ok {
 					t.Fatalf("Routes missing alias %q", alias)
 				}
@@ -303,8 +303,39 @@ func TestRouteModelOverrides(t *testing.T) {
 	if got.Routes["pusaq/best"].Model != "gemini-2.5-pro" {
 		t.Fatalf("best model = %q", got.Routes["pusaq/best"].Model)
 	}
-	if got.Routes["pusaq/auto"].Model != "mock-model" {
-		t.Fatalf("auto model = %q, want untouched default", got.Routes["pusaq/auto"].Model)
+	if _, ok := got.Routes["pusaq/auto"]; ok {
+		t.Fatal("pusaq/auto must not be a route")
+	}
+}
+
+func TestRouteOverrideAutoRejected(t *testing.T) {
+	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/auto=x"})); err == nil {
+		t.Fatal("pusaq/auto accepted as a route")
+	}
+}
+
+func TestRoutingRulesReplaceDefaults(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTING_RULES": "toll=pusaq/best, default=pusaq/fast"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !reflect.DeepEqual(got.RoutingRules, map[string]string{"toll": "pusaq/best"}) || got.RoutingDefault != "pusaq/fast" {
+		t.Fatalf("rules = %v default = %q, want the configured table only", got.RoutingRules, got.RoutingDefault)
+	}
+}
+
+func TestRoutingRulesRejections(t *testing.T) {
+	for name, v := range map[string]string{
+		"missing default":   "classify=pusaq/fast",
+		"auto target":       "classify=pusaq/auto,default=pusaq/fast",
+		"unknown alias":     "classify=pusaq/turbo,default=pusaq/fast",
+		"duplicate tag":     "classify=pusaq/fast,classify=pusaq/best,default=pusaq/fast",
+		"duplicate default": "default=pusaq/fast,default=pusaq/best",
+		"malformed pair":    "classify,default=pusaq/fast",
+	} {
+		if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTING_RULES": v})); err == nil {
+			t.Fatalf("%s accepted: %q", name, v)
+		}
 	}
 }
 
