@@ -14,6 +14,6 @@
 
 ## 3. Measurement and delivery
 
-- [ ] 3.1 `make loadtest LOADTEST_MODE=lease` (120 s and 300 s); add the lease rows to `docs/measurements/limiter-exactness.md` next to the strict ones: admitted vs bound, script calls per request, toll p50/p95/p99 both arms.
-- [ ] 3.2 README (rate-limiting section: modes and their contract; configuration list) and `docs/design.md` §5.2 (implemented semantics: refunds on TTL and drain, a crash loses at most K per tenant).
-- [ ] 3.3 Full suite `-race` green; lint + vet clean; conventional commit(s) on `feat/lease-mode`, PR stacked on `feat/limiter-load-test`; CI green.
+- [x] 3.1 `make loadtest LOADTEST_MODE=lease` (120 s and 300 s); add the lease rows to `docs/measurements/limiter-exactness.md` next to the strict ones: admitted vs bound, script calls per request, toll p50/p95/p99 both arms.
+- [x] 3.2 README (rate-limiting section: modes and their contract; configuration list) and `docs/design.md` §5.2 (implemented semantics: refunds on TTL and drain, a crash loses at most K per tenant).
+- [x] 3.3 Full suite `-race` green; lint + vet clean; conventional commit(s) on `feat/lease-mode`, PR stacked on `feat/limiter-load-test`; CI green.

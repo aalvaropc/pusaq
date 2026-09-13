@@ -86,14 +86,29 @@ passed, `verify.sh` OK.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `strict-120s` | strict | 600 / 100 / 120s | 12001 | **1299** | [1280, 1320] | 10702 | 1299 | 670 / 629 | 0 of 241 | 0 | 12723 | 1.000 | 12001 / 12001 |
 | `strict-300s` | strict | 600 / 100 / 300s | 30001 | **3099** | [3080, 3120] | 26902 | 3099 | 1581 / 1518 | 0 of 601 | 0 | 31082 | 1.000 | 30001 / 30001 |
+| `lease-120s` | lease (K=10) | 600 / 100 / 120s | 12001 | **1299** | [1260, 1320] | 10702 | 1299 | 663 / 636 | 0 of 240 | 0 | 4066 | 0.320 | 12001 / 12001 |
+| `lease-300s` | lease (K=10) | 600 / 100 / 300s | 30000 | **3099** | [3060, 3120] | 26901 | 3099 | 1520 / 1579 | 0 of 600 | 0 | 9896 | 0.319 | 30000 / 30000 |
 
 Reading: the bucket started full (100) and refilled at 10/s; over 120 s
 that is 1 300 admissions and the gateways admitted 1 299 — through two
 processes, from 12 001 offered. The mock provider counted the same 1 299;
 the cost events on the two replicas add up to the same 1 299 (split
 ≈ 52/48 by nginx round-robin); zero fail-open. The 300 s run lands at 3 099
-of a nominal 3 100. One Lua call per request that reached a limited replica,
-admitted or rejected.
+of a nominal 3 100. In strict mode, one Lua call per request that reached a
+limited replica, admitted or rejected.
+
+Lease mode (`PUSAQ_RATELIMIT_MODE=lease`, `PUSAQ_LEASE_SIZE=10`,
+`PUSAQ_LEASE_TTL=1s`) admitted the same 1 299 and 3 099: under sustained
+overload every lease is spent as soon as it is taken, so nothing sits unspent
+at the end of the window and the floor of the bound (lowered by
+`replicas × K = 20`) is never approached. The ceiling is unchanged — tokens
+are taken before they are spent — and the runs stay under it. Lua calls
+drop to 0.32 per request, 3.1× fewer than strict. The reduction under
+overload is bounded by the retry interval, not by K: with r = 10/s a denied
+replica is told to retry in ~100 ms, so each replica still makes ~10 store
+round-trips per second while overloaded (≈ 2 400 of the 4 066 calls in the
+120 s run); the remaining calls are leases for the two tenants under their
+limit, one per K admissions, plus refunds.
 
 ### Limiter toll (requests under the limit, same clock window)
 
@@ -101,13 +116,19 @@ admitted or rejected.
 |---|---|---|---|---|---|
 | `strict-120s` | strict | 1.79 / 3.51 / 4.23 | 1.71 / 3.46 / 4.09 | 0.07 / 0.05 / 0.14 | 0 |
 | `strict-300s` | strict | 2.21 / 3.07 / 3.79 | 1.91 / 2.63 / 3.41 | 0.31 / 0.44 / 0.38 | 0 |
+| `lease-120s` | lease (K=10) | 2.06 / 2.92 / 3.28 | 1.97 / 2.69 / 3.20 | 0.09 / 0.22 / 0.09 | 0 |
+| `lease-300s` | lease (K=10) | 1.95 / 2.74 / 3.05 | 1.94 / 2.46 / 2.72 | 0.01 / 0.28 / 0.33 | 0 |
 
 Reading: the request limiter's toll on this host is a fraction of a
 millisecond at every percentile — one Redis round-trip (Redis reported
 ~0.13–0.19 ms per Lua call) on a ~2 ms path. Run-to-run variation between
 the two rows (0.1 vs 0.4 ms) is of the same order as the toll itself; the
 number to quote is "under half a millisecond on a local Redis", not a
-single figure.
+single figure. Lease mode's toll is indistinguishable from strict mode's
+here: on a local Redis the round-trip it saves is already sub-millisecond,
+so its benefit shows in store load (calls per request), not in client
+latency. Against a networked Redis the saved round-trip is what would move
+these percentiles.
 
 ## Caveats
 
