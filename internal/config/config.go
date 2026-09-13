@@ -25,6 +25,14 @@ const (
 	DefaultBucketTTL       = 10 * time.Minute
 	DefaultCacheTau        = 0.95
 	DefaultCacheMaxEntries = 10000
+	DefaultLeaseSize       = 10
+	DefaultLeaseTTL        = 1 * time.Second
+)
+
+// Rate-limit modes.
+const (
+	RateLimitStrict = "strict"
+	RateLimitLease  = "lease"
 )
 
 // Cache modes.
@@ -114,8 +122,19 @@ type Config struct {
 	// RPMBurst is the per-tenant bucket capacity (PUSAQ_RPM_BURST,
 	// default: equal to RPMLimit).
 	RPMBurst float64
+	// RateLimitMode is strict (default: one atomic store decision per
+	// request) or lease (each replica takes batches of LeaseSize request
+	// tokens and admits locally until they run out or LeaseTTL passes).
+	// Lease mode applies to request limits only (PUSAQ_RATELIMIT_MODE).
+	RateLimitMode string
+	// LeaseSize is the number of request tokens a replica takes per store
+	// round-trip in lease mode (PUSAQ_LEASE_SIZE); LeaseTTL is how long it
+	// may hold them before unused tokens are returned (PUSAQ_LEASE_TTL).
+	LeaseSize int
+	LeaseTTL  time.Duration
 	// TPMLimit is the sustained per-tenant LLM-token rate in tokens per
-	// minute (PUSAQ_TPM_LIMIT).
+	// minute (PUSAQ_TPM_LIMIT). Zero disables token limiting, announced by
+	// a startup warning.
 	TPMLimit float64
 	// TPMBurst is the per-tenant token-bucket capacity (PUSAQ_TPM_BURST,
 	// default: equal to TPMLimit).
@@ -241,16 +260,49 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		cfg.RPMBurst = n
 	}
 
+	cfg.RateLimitMode = RateLimitStrict
+	if v, ok := lookup("PUSAQ_RATELIMIT_MODE"); ok && v != "" {
+		if v != RateLimitStrict && v != RateLimitLease {
+			return Config{}, fmt.Errorf("PUSAQ_RATELIMIT_MODE: must be %q or %q, got %q", RateLimitStrict, RateLimitLease, v)
+		}
+		cfg.RateLimitMode = v
+	}
+	cfg.LeaseSize = DefaultLeaseSize
+	if v, ok := lookup("PUSAQ_LEASE_SIZE"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_LEASE_SIZE: must be a positive integer, got %q", v)
+		}
+		cfg.LeaseSize = n
+	}
+	if float64(cfg.LeaseSize) > cfg.RPMBurst {
+		return Config{}, fmt.Errorf("PUSAQ_LEASE_SIZE: %d exceeds the request bucket capacity %g", cfg.LeaseSize, cfg.RPMBurst)
+	}
+	cfg.LeaseTTL = DefaultLeaseTTL
+	if v, ok := lookup("PUSAQ_LEASE_TTL"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_LEASE_TTL: %w", err)
+		}
+		if d <= 0 {
+			return Config{}, fmt.Errorf("PUSAQ_LEASE_TTL: must be positive, got %s", d)
+		}
+		cfg.LeaseTTL = d
+	}
+
 	cfg.TPMLimit = DefaultTPMLimit
 	if v, ok := lookup("PUSAQ_TPM_LIMIT"); ok {
 		n, err := strconv.ParseFloat(v, 64)
-		if err != nil || n <= 0 {
-			return Config{}, fmt.Errorf("PUSAQ_TPM_LIMIT: must be a positive number, got %q", v)
+		if err != nil || n < 0 {
+			return Config{}, fmt.Errorf("PUSAQ_TPM_LIMIT: must be a non-negative number (0 disables token limiting), got %q", v)
 		}
 		cfg.TPMLimit = n
 	}
 	cfg.TPMBurst = cfg.TPMLimit
 	if v, ok := lookup("PUSAQ_TPM_BURST"); ok {
+		if cfg.TPMLimit == 0 {
+			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: meaningless when PUSAQ_TPM_LIMIT is 0 (token limiting disabled)")
+		}
 		n, err := strconv.ParseFloat(v, 64)
 		if err != nil || n <= 0 {
 			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: must be a positive number, got %q", v)

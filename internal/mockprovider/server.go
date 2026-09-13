@@ -12,6 +12,8 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,6 +41,15 @@ func (o Options) Validate() error {
 	return nil
 }
 
+// Stats is the upstream-side ground truth a load run checks against: how
+// many completion requests reached the mock, how many it failed on purpose,
+// and how many arrived per requested model.
+type Stats struct {
+	Requests uint64            `json:"requests"`
+	Errors   uint64            `json:"errors"`
+	ByModel  map[string]uint64 `json:"by_model"`
+}
+
 // Server is the mock provider's HTTP handler.
 type Server struct {
 	opts   Options
@@ -48,6 +59,11 @@ type Server struct {
 	sleep func(time.Duration)
 	// random returns a float in [0,1); swapped in tests for determinism.
 	random func() float64
+
+	requests  atomic.Uint64
+	errors    atomic.Uint64
+	byModelMu sync.Mutex
+	byModel   map[string]uint64
 }
 
 // NewServer builds the mock with validated options.
@@ -56,18 +72,52 @@ func NewServer(logger *slog.Logger, opts Options) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		opts:   opts,
-		logger: logger,
-		mux:    http.NewServeMux(),
-		sleep:  time.Sleep,
-		random: rand.Float64,
+		opts:    opts,
+		logger:  logger,
+		mux:     http.NewServeMux(),
+		sleep:   time.Sleep,
+		random:  rand.Float64,
+		byModel: make(map[string]uint64),
 	}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
 	})
+	s.mux.HandleFunc("GET /stats", s.handleStats)
 	s.mux.HandleFunc("POST /v1/chat/completions", s.handleCompletion)
 	return s, nil
+}
+
+// Stats returns a snapshot of the request counters.
+func (s *Server) Stats() Stats {
+	s.byModelMu.Lock()
+	byModel := make(map[string]uint64, len(s.byModel))
+	for k, v := range s.byModel {
+		byModel[k] = v
+	}
+	s.byModelMu.Unlock()
+	return Stats{
+		Requests: s.requests.Load(),
+		Errors:   s.errors.Load(),
+		ByModel:  byModel,
+	}
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(s.Stats())
+}
+
+// record counts a completion request as received, keyed by the model it
+// asked for. Counting happens before latency and error injection: a request
+// that reached the mock was admitted by the gateway, whatever the mock does
+// with it afterwards.
+func (s *Server) record(model string) {
+	s.requests.Add(1)
+	s.byModelMu.Lock()
+	s.byModel[model]++
+	s.byModelMu.Unlock()
 }
 
 // ServeHTTP implements http.Handler.
@@ -92,15 +142,6 @@ func (s *Server) sampleLatency() time.Duration {
 }
 
 func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
-	s.sleep(s.sampleLatency())
-
-	if s.random() < s.opts.ErrorRate {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = io.WriteString(w, `{"error":{"code":"mock_upstream_error","message":"injected failure"}}`)
-		return
-	}
-
 	var req struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -109,6 +150,17 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(body, &req) // malformed body → buffered response
 	if req.Model == "" {
 		req.Model = "mock-model"
+	}
+	s.record(req.Model)
+
+	s.sleep(s.sampleLatency())
+
+	if s.random() < s.opts.ErrorRate {
+		s.errors.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":{"code":"mock_upstream_error","message":"injected failure"}}`)
+		return
 	}
 
 	if req.Stream {

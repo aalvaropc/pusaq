@@ -69,6 +69,18 @@ the gateway **fails open** within a 250ms budget — temporarily inexact
 limits beat an outage caused by the limiter itself. Unset `PUSAQ_REDIS_ADDR`
 disables limiting with a startup warning.
 
+Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one
+atomic store decision per request, exact across replicas. **`lease`**: each
+replica takes up to `PUSAQ_LEASE_SIZE` request tokens per round-trip and
+admits locally; unused tokens return when the lease passes `PUSAQ_LEASE_TTL`
+or the replica drains, and a store denial is cached locally until its retry
+time. Cumulative admissions never exceed the bucket in either mode; in lease
+mode up to `replicas × lease size` tokens can sit unspent in leases at any
+moment, and a replica that dies without draining strands at most one lease
+per tenant (under-admission, never overrun). Lease mode covers request
+limits only; token limits are always strict. Both modes are measured with
+the same load test.
+
 **Token limits (TPM).** Alongside RPM, each tenant has an LLM-token bucket.
 After model resolution a request is charged its input estimate (chars/4)
 plus an output reservation (`max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`);
@@ -138,8 +150,11 @@ Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 `PUSAQ_UPSTREAMS` (`mock=http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
 `PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
 disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
-(default = limit), `PUSAQ_TPM_LIMIT` (`100000` tokens/min), `PUSAQ_TPM_BURST`
-(default = limit), `PUSAQ_TPM_RESERVE_DEFAULT` (`512`).
+(default = limit), `PUSAQ_RATELIMIT_MODE` (`strict` | `lease`),
+`PUSAQ_LEASE_SIZE` (`10`, at most the burst), `PUSAQ_LEASE_TTL` (`1s`),
+`PUSAQ_TPM_LIMIT` (`100000` tokens/min; `0` disables token
+limiting with a startup warning), `PUSAQ_TPM_BURST` (default = limit),
+`PUSAQ_TPM_RESERVE_DEFAULT` (`512`).
 
 > Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
 > containers are healthy, the firewall is blocking host→container traffic on
@@ -171,6 +186,20 @@ Requests to `pusaq/fast` now hit Gemini through the whole pipeline —
 limits, breakers, accounting — with the mock as the fallback backend.
 Upstream keys come from `PUSAQ_UPSTREAM_KEY_<NAME>` (uppercased upstream
 name) and are never logged.
+
+## Measurements
+
+Every property the gateway claims is measured under load or under injected
+failure, by one reproducible command, and published with its protocol in
+[`docs/measurements/`](docs/measurements/):
+
+- [`limiter-exactness.md`](docs/measurements/limiter-exactness.md) — the
+  request limit across two gateway replicas under 10× overload, co-tenant
+  isolation, and the limiter's latency toll. `make loadtest` runs it
+  (Compose profile `loadtest`: two limited and two unlimited replicas behind
+  nginx, a zero-latency mock, k6 in a container); `make loadtest-down` stops
+  it. Results are cross-checked from k6, the mock provider's `GET /stats`
+  counter, and the gateways' cost events.
 
 ## Cloud
 
@@ -204,5 +233,5 @@ Terraform formatting and validity without credentials.
 
 Go · Cloud Run · Memorystore (Redis, Lua) · Firestore · Vertex AI
 (Gemini + Claude) · Pub/Sub → BigQuery · OpenTelemetry · Terraform · k6.
-All development runs locally at $0 (Docker: Redis + mock provider); GCP is
-used only for measurement runs.
+All development runs locally (Docker: Redis + mock provider); cloud
+resources exist only for measurement runs.

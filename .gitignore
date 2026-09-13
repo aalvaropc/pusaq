@@ -23,3 +23,13 @@ infra/terraform/**/terraform.tfvars
 .vscode/
 *.swp
 .DS_Store
+
+# Agent config for other assistants (not tracked)
+AGENTS.md
+.agents/
+
+# Load test output
+/loadtest/out/*
+!/loadtest/out/.gitkeep
+
+# Terraform local variables

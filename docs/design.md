@@ -243,12 +243,19 @@ immediately); refill is computed lazily at read time (no background refiller);
 idle buckets expire via TTL; `retry_after` is returned computed.
 
 The cost — one Redis round-trip per request (~0.5–1 ms same-zone) — has a
-measured alternative: **lease mode**, where each replica grabs a batch of K
-tokens and serves K requests locally. K× fewer Redis trips, at the price of a
-relaxed bound (`≤ limit + M×K` worst case) and tokens stranded in dead
-replicas until lease TTL. Pusaq implements both modes and **measures both**:
-limit exactness under aggressive concurrency vs p99 added by the limiter.
-Documenting when to choose each is the point.
+measured alternative: **lease mode** (`PUSAQ_RATELIMIT_MODE=lease`), where
+each replica takes a batch of up to K request tokens in one atomic operation
+and admits K requests locally. Tokens are taken before they are spent, so
+cumulative admissions never exceed the bucket; what relaxes is the window:
+across M replicas up to `M×K` tokens sit in leases, unspent and invisible to
+the store. Unused tokens return to the bucket when a lease expires (lease
+TTL) or the replica drains; a replica that dies without draining strands at
+most K per tenant — under-admission, never overrun. A denial is cached
+locally until the store's retry time, so overload costs one round-trip per
+retry interval instead of one per request. Lease mode covers request limits
+only; token limits stay strict. Pusaq implements both modes and **measures
+both**: limit exactness under aggressive concurrency vs round-trips and p99
+added by the limiter. Documenting when to choose each is the point.
 
 ### 5.3 The limit that actually matters: TPM
 

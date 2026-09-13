@@ -1,3 +1,38 @@
+# --- Load-test profile ------------------------------------------------------
+# `docker compose --profile loadtest up lb` starts two rate-limited gateway
+# replicas and two unlimited ones behind nginx, a zero-latency mock upstream,
+# and a k6 runner — all inside the Compose network. `make loadtest` drives it.
+# The default environment above is untouched: none of these services start
+# without the profile.
+
+x-pusaq-loadtest: &pusaq-loadtest
+  build:
+    context: .
+    target: pusaq
+  profiles: [loadtest]
+  depends_on:
+    redis:
+      condition: service_healthy
+    mock-lt:
+      condition: service_started
+
+# Each alias maps to a distinct physical model so the mock's per-model
+# counter separates the load scenarios without forwarding tenant identity.
+x-pusaq-loadtest-env: &pusaq-loadtest-env
+  PUSAQ_REDIS_ADDR: redis:6379
+  PUSAQ_UPSTREAMS: mock=http://mock-lt:9090
+  PUSAQ_ROUTES: pusaq/fast=mock-exactness,pusaq/best=mock-neighbor,pusaq/auto=mock-toll
+  PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll
+  PUSAQ_RPM_LIMIT: ${LOADTEST_RPM:-600}
+  PUSAQ_RPM_BURST: ${LOADTEST_BURST:-100}
+  PUSAQ_RATELIMIT_MODE: ${LOADTEST_MODE:-strict}
+  PUSAQ_LEASE_SIZE: ${LOADTEST_LEASE_SIZE:-10}
+  PUSAQ_LEASE_TTL: 1s
+  PUSAQ_TPM_LIMIT: "0"
+  PUSAQ_CACHE_MODE: "off"
+  PUSAQ_TELEMETRY_BUFFER: "65536"
+  PUSAQ_DRAIN_DELAY: 0s
+
 services:
   pusaq:
     build:
@@ -45,3 +80,75 @@ services:
       context: .
       target: mockprovider
     command: ["--addr", ":9090", "--latency-p50", "100ms", "--latency-p99", "1s", "--error-rate", "0"]
+
+  # --- Load-test profile services (see anchors at the top) ---
+  pusaq-a:
+    <<: *pusaq-loadtest
+    environment:
+      <<: *pusaq-loadtest-env
+
+  pusaq-b:
+    <<: *pusaq-loadtest
+    environment:
+      <<: *pusaq-loadtest-env
+
+  # Same image and settings with limiting disabled: the control arm for the
+  # limiter's latency toll.
+  pusaq-nolimit-a:
+    <<: *pusaq-loadtest
+    environment:
+      <<: *pusaq-loadtest-env
+      PUSAQ_REDIS_ADDR: ""
+
+  pusaq-nolimit-b:
+    <<: *pusaq-loadtest
+    environment:
+      <<: *pusaq-loadtest-env
+      PUSAQ_REDIS_ADDR: ""
+
+  mock-lt:
+    build:
+      context: .
+      target: mockprovider
+    profiles: [loadtest]
+    command: ["--addr", ":9090", "--latency-p50", "0", "--latency-p99", "0", "--error-rate", "0"]
+
+  # Round-robin balancer: :8080 → limited replicas, :8081 → unlimited ones.
+  # No published ports; k6 runs in-network.
+  lb:
+    image: nginx:1.27-alpine
+    profiles: [loadtest]
+    volumes:
+      - ./loadtest/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - pusaq-a
+      - pusaq-b
+      - pusaq-nolimit-a
+      - pusaq-nolimit-b
+
+  k6:
+    image: grafana/k6:1.4.0
+    profiles: [loadtest]
+    volumes:
+      - ./loadtest:/loadtest
+    working_dir: /loadtest
+    command: ["run", "limiter.js"]
+    environment:
+      BASE_URL: http://lb:8080
+      BASE_URL_NOLIMIT: http://lb:8081
+      MOCK_URL: http://mock-lt:9090
+      RPM: ${LOADTEST_RPM:-600}
+      BURST: ${LOADTEST_BURST:-100}
+      DURATION: ${LOADTEST_DURATION:-120s}
+      RATE_MULT: ${LOADTEST_RATE_MULT:-10}
+      TOLL_RPS: ${LOADTEST_TOLL_RPS:-8}
+      TOLL_DURATION: ${LOADTEST_TOLL_DURATION:-60s}
+      RUN_ID: ${RUN_ID:-manual}
+      MODE: ${LOADTEST_MODE:-strict}
+      LEASE_SIZE: ${LOADTEST_LEASE_SIZE:-10}
+      REPLICAS: "2"
+      API_KEY_A: lt-a
+      API_KEY_B: lt-b
+      API_KEY_TOLL: lt-c
+    depends_on:
+      - lb
