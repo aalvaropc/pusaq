@@ -1,6 +1,16 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help up down run mock test lint tidy smoke calibrate
+# Load-test parameters (override on the command line: make loadtest LOADTEST_DURATION=300s)
+LOADTEST_RPM ?= 600
+LOADTEST_BURST ?= 100
+LOADTEST_DURATION ?= 120s
+LOADTEST_RATE_MULT ?= 10
+LOADTEST_TOLL_RPS ?= 8
+LOADTEST_TOLL_DURATION ?= 60s
+RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
+export LOADTEST_RPM LOADTEST_BURST LOADTEST_DURATION LOADTEST_RATE_MULT LOADTEST_TOLL_RPS LOADTEST_TOLL_DURATION RUN_ID
+
+.PHONY: help up down run mock test lint tidy smoke calibrate loadtest loadtest-down
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,3 +45,14 @@ smoke: ## Send a chat completion through the gateway (gateway + mock must be run
 		-H 'Content-Type: application/json' \
 		-d '{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}]}' \
 		-w '\nstatus: %{http_code}\n'
+
+loadtest: ## Limiter load test: 2 replicas behind nginx, k6 in Docker, cross-checked report
+	docker compose --profile loadtest up -d --build --force-recreate \
+		pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b mock-lt lb
+	docker compose exec -T redis redis-cli FLUSHALL
+	docker compose exec -T redis redis-cli CONFIG RESETSTAT
+	docker compose --profile loadtest run --rm --user "$$(id -u):$$(id -g)" k6
+	./loadtest/verify.sh $(RUN_ID)
+
+loadtest-down: ## Stop the load-test profile
+	docker compose --profile loadtest down --remove-orphans

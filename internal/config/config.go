@@ -115,7 +115,8 @@ type Config struct {
 	// default: equal to RPMLimit).
 	RPMBurst float64
 	// TPMLimit is the sustained per-tenant LLM-token rate in tokens per
-	// minute (PUSAQ_TPM_LIMIT).
+	// minute (PUSAQ_TPM_LIMIT). Zero disables token limiting, announced by
+	// a startup warning.
 	TPMLimit float64
 	// TPMBurst is the per-tenant token-bucket capacity (PUSAQ_TPM_BURST,
 	// default: equal to TPMLimit).
@@ -244,13 +245,16 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	cfg.TPMLimit = DefaultTPMLimit
 	if v, ok := lookup("PUSAQ_TPM_LIMIT"); ok {
 		n, err := strconv.ParseFloat(v, 64)
-		if err != nil || n <= 0 {
-			return Config{}, fmt.Errorf("PUSAQ_TPM_LIMIT: must be a positive number, got %q", v)
+		if err != nil || n < 0 {
+			return Config{}, fmt.Errorf("PUSAQ_TPM_LIMIT: must be a non-negative number (0 disables token limiting), got %q", v)
 		}
 		cfg.TPMLimit = n
 	}
 	cfg.TPMBurst = cfg.TPMLimit
 	if v, ok := lookup("PUSAQ_TPM_BURST"); ok {
+		if cfg.TPMLimit == 0 {
+			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: meaningless when PUSAQ_TPM_LIMIT is 0 (token limiting disabled)")
+		}
 		n, err := strconv.ParseFloat(v, 64)
 		if err != nil || n <= 0 {
 			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: must be a positive number, got %q", v)

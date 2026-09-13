@@ -106,8 +106,18 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "non-positive tpm limit rejected",
+			name:    "negative tpm limit rejected",
 			env:     map[string]string{"PUSAQ_TPM_LIMIT": "-5"},
+			wantErr: true,
+		},
+		{
+			name: "zero tpm limit disables token limiting",
+			env:  map[string]string{"PUSAQ_TPM_LIMIT": "0"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local"},
+		},
+		{
+			name:    "tpm burst with zero limit rejected",
+			env:     map[string]string{"PUSAQ_TPM_LIMIT": "0", "PUSAQ_TPM_BURST": "10"},
 			wantErr: true,
 		},
 		{

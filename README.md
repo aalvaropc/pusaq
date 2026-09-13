@@ -138,8 +138,9 @@ Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 `PUSAQ_UPSTREAMS` (`mock=http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
 `PUSAQ_API_KEYS` (unset → dev mode), `PUSAQ_REDIS_ADDR` (unset → limiting
 disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
-(default = limit), `PUSAQ_TPM_LIMIT` (`100000` tokens/min), `PUSAQ_TPM_BURST`
-(default = limit), `PUSAQ_TPM_RESERVE_DEFAULT` (`512`).
+(default = limit), `PUSAQ_TPM_LIMIT` (`100000` tokens/min; `0` disables token
+limiting with a startup warning), `PUSAQ_TPM_BURST` (default = limit),
+`PUSAQ_TPM_RESERVE_DEFAULT` (`512`).
 
 > Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
 > containers are healthy, the firewall is blocking host→container traffic on
@@ -172,9 +173,23 @@ limits, breakers, accounting — with the mock as the fallback backend.
 Upstream keys come from `PUSAQ_UPSTREAM_KEY_<NAME>` (uppercased upstream
 name) and are never logged.
 
+## Measurements
+
+Every property the gateway claims is measured under load or under injected
+failure, by one reproducible command, and published with its protocol in
+[`docs/measurements/`](docs/measurements/):
+
+- [`limiter-exactness.md`](docs/measurements/limiter-exactness.md) — the
+  request limit across two gateway replicas under 10× overload, co-tenant
+  isolation, and the limiter's latency toll. `make loadtest` runs it
+  (Compose profile `loadtest`: two limited and two unlimited replicas behind
+  nginx, a zero-latency mock, k6 in a container); `make loadtest-down` stops
+  it. Results are cross-checked from k6, the mock provider's `GET /stats`
+  counter, and the gateways' cost events.
+
 ## Stack
 
 Go · Cloud Run · Memorystore (Redis, Lua) · Firestore · Vertex AI
 (Gemini + Claude) · Pub/Sub → BigQuery · OpenTelemetry · Terraform · k6.
-All development runs locally at $0 (Docker: Redis + mock provider); GCP is
-used only for measurement runs.
+All development runs locally (Docker: Redis + mock provider); cloud
+resources exist only for measurement runs.

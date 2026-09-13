@@ -89,16 +89,20 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		tpm, err := ratelimit.New(client, "tpm", ratelimit.Limits{
-			Burst: cfg.TPMBurst,
-			Rate:  cfg.TPMLimit / 60.0, // tokens/minute → tokens/second
-			TTL:   config.DefaultBucketTTL,
-		})
-		if err != nil {
-			return err
-		}
 		stages = append(stages, gateway.RateLimit(rpm, logger))
-		completionsOpts.Tokens = tpm
+		if cfg.TPMLimit > 0 {
+			tpm, err := ratelimit.New(client, "tpm", ratelimit.Limits{
+				Burst: cfg.TPMBurst,
+				Rate:  cfg.TPMLimit / 60.0, // tokens/minute → tokens/second
+				TTL:   config.DefaultBucketTTL,
+			})
+			if err != nil {
+				return err
+			}
+			completionsOpts.Tokens = tpm
+		} else {
+			logger.Warn("token limiting disabled: PUSAQ_TPM_LIMIT is 0")
+		}
 		logger.Info("rate limiting enabled",
 			slog.String("redis", cfg.RedisAddr),
 			slog.Float64("rpm_limit", cfg.RPMLimit),

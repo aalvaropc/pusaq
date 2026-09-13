@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -175,5 +176,101 @@ func TestStreamingCompletionFraming(t *testing.T) {
 	}
 	if usageChunks != 1 {
 		t.Fatalf("%d usage chunks, want exactly 1", usageChunks)
+	}
+}
+
+func readStats(t *testing.T, s *Server) Stats {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /stats status = %d, want 200", rec.Code)
+	}
+	var st Stats
+	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+		t.Fatalf("stats body is not JSON: %v", err)
+	}
+	return st
+}
+
+func completion(model string, stream bool) *http.Request {
+	body := `{"model":"` + model + `","messages":[{"role":"user","content":"x"}]`
+	if stream {
+		body += `,"stream":true`
+	}
+	body += `}`
+	return httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+}
+
+func TestStatsStartAtZero(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := readStats(t, s)
+	if st.Requests != 0 || st.Errors != 0 || len(st.ByModel) != 0 {
+		t.Fatalf("fresh stats = %+v, want all zero", st)
+	}
+}
+
+func TestStatsCountPerModelIncludingStreams(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sleep = func(time.Duration) {}
+	for _, r := range []*http.Request{
+		completion("model-a", false),
+		completion("model-a", true),
+		completion("model-b", false),
+	} {
+		s.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	st := readStats(t, s)
+	if st.Requests != 3 || st.Errors != 0 {
+		t.Fatalf("requests=%d errors=%d, want 3/0", st.Requests, st.Errors)
+	}
+	if st.ByModel["model-a"] != 2 || st.ByModel["model-b"] != 1 {
+		t.Fatalf("by_model = %v, want model-a:2 model-b:1", st.ByModel)
+	}
+}
+
+func TestStatsCountInjectedErrorsAsReceived(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{ErrorRate: 1.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		s.ServeHTTP(httptest.NewRecorder(), completion("model-a", false))
+	}
+	st := readStats(t, s)
+	if st.Requests != 4 || st.Errors != 4 || st.ByModel["model-a"] != 4 {
+		t.Fatalf("stats = %+v, want 4 received, 4 errors", st)
+	}
+}
+
+func TestStatsAreRaceFreeUnderConcurrency(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sleep = func(time.Duration) {}
+	const n = 100
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			model := "model-a"
+			if i%2 == 1 {
+				model = "model-b"
+			}
+			s.ServeHTTP(httptest.NewRecorder(), completion(model, false))
+		}()
+	}
+	wg.Wait()
+	st := s.Stats()
+	if st.Requests != n || st.ByModel["model-a"]+st.ByModel["model-b"] != n {
+		t.Fatalf("stats = %+v, want %d total", st, n)
 	}
 }
