@@ -274,3 +274,81 @@ func TestStatsAreRaceFreeUnderConcurrency(t *testing.T) {
 		t.Fatalf("stats = %+v, want %d total", st, n)
 	}
 }
+
+func TestFailureWindowFailsUntilItEnds(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.UnixMilli(1_700_000_000_000)
+	s.now = func() time.Time { return now }
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/fail?for=5s", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Failing bool   `json:"failing"`
+		From    string `json:"from"`
+		Until   string `json:"until"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || !body.Failing || body.From == "" || body.Until == "" {
+		t.Fatalf("admin body = %s (err %v)", rec.Body.String(), err)
+	}
+
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, completion("model-a", false))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("inside window status = %d, want 500", rec.Code)
+	}
+	if !readStats(t, s).Failing {
+		t.Fatal("stats do not report failing")
+	}
+
+	now = now.Add(6 * time.Second)
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, completion("model-a", false))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("after window status = %d, want 200", rec.Code)
+	}
+	st := readStats(t, s)
+	if st.Failing || st.Errors != 1 || st.Requests != 2 {
+		t.Fatalf("stats = %+v, want one error out of two, not failing", st)
+	}
+}
+
+func TestFailureWindowClear(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/admin/fail?for=1h", nil))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/admin/fail", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear status = %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, completion("model-a", false))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after clear = %d, want 200", rec.Code)
+	}
+}
+
+func TestFailureWindowRejectsBadDuration(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"", "?for=", "?for=abc", "?for=0s", "?for=-1s"} {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/fail"+q, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%q: status = %d, want 400", q, rec.Code)
+		}
+	}
+	if readStats(t, s).Failing {
+		t.Fatal("a rejected request opened a window")
+	}
+}

@@ -347,7 +347,11 @@ Pusaq's own regions dies. Handled by different pieces:
 - **Circuit breaker per provider×region** — closed / open / half-open, with a
   minimum-request threshold on the failure window (2 failures out of 2
   requests is not a signal), cooldown, and K probe requests in half-open.
-  Detection and recovery times are measured, not asserted.
+  Detection and recovery times are measured, not asserted: every
+  transition is a `breaker_state` log record, the parameters are
+  configuration (`PUSAQ_BREAKER_*`), and `make breakertest` fails the mock
+  provider at a known instant and reads both times from the logs
+  ([measurements](measurements/breaker-detection.md)).
 - **Health checking** — passive (real traffic outcomes) as the primary
   signal; active synthetic probes as the safety net in quiet hours and as the
   recovery probe.
@@ -446,7 +450,7 @@ their protocol — including the ones that disappoint.
 | Semantic cache savings | Replay corpus grouped by intent with paraphrases, Zipf-distributed frequencies; same requests, same order, with and without cache | Hit-rate, net $ savings, latency reduction, **FP rate against corpus labels** |
 | Limiter exactness | M replicas, N clients pushing 10× the limit ≥5 min against the mock; strict and lease modes | Accepted vs limit (± burst), max TPM overrun, p99 added per mode |
 | Regional failover | Sustained k6 against the global LB; readiness of region A forced to fail at a known instant; sequence IDs per request | Availability gap, requests redirected / recovered by retry / streams interrupted (**counted, not estimated**) |
-| Breaker detection | Mock starts returning 5xx at a known instant | Detection time (first 5xx → breaker open), recovery time (half-open → closed) |
+| Breaker detection | `make breakertest`: the mock primary fails on command for a known window under steady traffic with a healthy fallback | Detection time (failure start → breaker open), recovery time (failure end → closed), probes, extra attempts, fallback-served requests, client errors (must be zero) |
 | Router savings | Mixed-task dataset with reference answers; all-best vs router; LLM-as-judge rubric verifies quality within a declared margin | Z% savings at equivalent judged quality |
 
 Experiment rules: hypothesis written before running; every run tagged with an

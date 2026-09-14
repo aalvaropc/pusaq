@@ -15,13 +15,15 @@ x-pusaq-loadtest: &pusaq-loadtest
       condition: service_healthy
     mock-lt:
       condition: service_started
+    mock-lt-backup:
+      condition: service_started
 
 # Each concrete alias maps to a distinct physical model so the mock's
 # per-model counter isolates the overload scenario; toll traffic goes through
 # pusaq/auto with a feature tag the rules send to pusaq/best.
 x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_REDIS_ADDR: redis:6379
-  PUSAQ_UPSTREAMS: mock=http://mock-lt:9090
+  PUSAQ_UPSTREAMS: mock=http://mock-lt:9090,backup=http://mock-lt-backup:9090
   PUSAQ_ROUTES: pusaq/fast=mock-exactness,pusaq/best=mock-neighbor
   PUSAQ_ROUTING_RULES: toll=pusaq/best,default=pusaq/fast
   PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll
@@ -117,6 +119,15 @@ services:
     profiles: [loadtest]
     command: ["--addr", ":9090", "--latency-p50", "0", "--latency-p99", "0", "--error-rate", "0"]
 
+  # Fallback backend for the breaker run: the primary is made to fail on
+  # command (POST /admin/fail) and traffic must keep flowing through here.
+  mock-lt-backup:
+    build:
+      context: .
+      target: mockprovider
+    profiles: [loadtest]
+    command: ["--addr", ":9090", "--latency-p50", "0", "--latency-p99", "0", "--error-rate", "0"]
+
   # Round-robin balancer: :8080 → limited replicas, :8081 → unlimited ones.
   # No published ports; k6 runs in-network.
   lb:
@@ -151,6 +162,11 @@ services:
       MODE: ${LOADTEST_MODE:-strict}
       LEASE_SIZE: ${LOADTEST_LEASE_SIZE:-10}
       REPLICAS: "2"
+      MOCK_BACKUP_URL: http://mock-lt-backup:9090
+      BREAKER_RPS: ${BREAKER_RPS:-8}
+      BREAKER_WARMUP: ${BREAKER_WARMUP:-20s}
+      BREAKER_FAIL_FOR: ${BREAKER_FAIL_FOR:-5s}
+      BREAKER_DURATION: ${BREAKER_DURATION:-45s}
       API_KEY_A: lt-a
       API_KEY_B: lt-b
       API_KEY_TOLL: lt-c

@@ -152,3 +152,44 @@ func TestConcurrentAllowRecordIsSafe(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestOnStateChangeReportsEveryTransition(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	var seen []string
+	b := New(Config{Window: 4, MinSamples: 2, FailureThreshold: 0.5, Cooldown: time.Second, Probes: 1,
+		OnStateChange: func(from, to State) { seen = append(seen, string(from)+">"+string(to)) }})
+	b.SetClock(func() time.Time { return now })
+
+	failN(b, 3) // closed → open
+	now = now.Add(time.Second)
+	if !b.Allow() { // open → half_open, probe granted
+		t.Fatal("probe not granted after cooldown")
+	}
+	b.Record(false) // half_open → open
+	now = now.Add(time.Second)
+	if !b.Allow() {
+		t.Fatal("second probe not granted")
+	}
+	b.Record(true) // half_open → closed
+
+	want := []string{"closed>open", "open>half_open", "half_open>open", "open>half_open", "half_open>closed"}
+	if len(seen) != len(want) {
+		t.Fatalf("transitions = %v, want %v", seen, want)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("transitions = %v, want %v", seen, want)
+		}
+	}
+}
+
+func TestOnStateChangeRunsOutsideTheLock(t *testing.T) {
+	var b *Breaker
+	var observed State
+	b = New(Config{Window: 4, MinSamples: 2, FailureThreshold: 0.5,
+		OnStateChange: func(_, _ State) { observed = b.State() }}) // would deadlock under the lock
+	failN(b, 3)
+	if observed != StateOpen {
+		t.Fatalf("hook observed %q, want open", observed)
+	}
+}

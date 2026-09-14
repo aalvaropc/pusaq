@@ -34,6 +34,10 @@ type Config struct {
 	Cooldown time.Duration
 	// Probes is the maximum concurrent half-open probe attempts.
 	Probes int
+	// OnStateChange, when set, is called after every transition with the
+	// previous and new state, outside the breaker's lock. It is the seam
+	// that makes detection and recovery times observable.
+	OnStateChange func(from, to State)
 }
 
 // Defaults applied by New for zero fields.
@@ -104,9 +108,12 @@ func (b *Breaker) SetClock(now func() time.Time) {
 // State reports the current state (after applying cooldown transitions).
 func (b *Breaker) State() State {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	from := b.state
 	b.maybeHalfOpen()
-	return b.state
+	to := b.state
+	b.mu.Unlock()
+	b.notify(from, to)
+	return to
 }
 
 // Allow reports whether an attempt may proceed now. In half-open it grants
@@ -114,28 +121,45 @@ func (b *Breaker) State() State {
 // allowed attempt, or probe slots leak.
 func (b *Breaker) Allow() bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	from := b.state
 	b.maybeHalfOpen()
-
+	allowed := false
 	switch b.state {
 	case StateClosed:
-		return true
+		allowed = true
 	case StateHalfOpen:
 		if b.probes < b.cfg.Probes {
 			b.probes++
-			return true
+			allowed = true
 		}
-		return false
 	default: // StateOpen
-		return false
 	}
+	to := b.state
+	b.mu.Unlock()
+	b.notify(from, to)
+	return allowed
 }
 
 // Record feeds an attempt's outcome back into the machine.
 func (b *Breaker) Record(success bool) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	from := b.state
+	b.record(success)
+	to := b.state
+	b.mu.Unlock()
+	b.notify(from, to)
+}
 
+// notify reports a transition to the configured hook. Callers must NOT
+// hold b.mu: the hook may inspect the breaker.
+func (b *Breaker) notify(from, to State) {
+	if from != to && b.cfg.OnStateChange != nil {
+		b.cfg.OnStateChange(from, to)
+	}
+}
+
+// record applies an outcome. Callers hold b.mu.
+func (b *Breaker) record(success bool) {
 	switch b.state {
 	case StateHalfOpen:
 		if b.probes > 0 {

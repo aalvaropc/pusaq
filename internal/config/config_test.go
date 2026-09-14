@@ -23,7 +23,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "defaults when nothing is set",
 			env:  map[string]string{},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", BreakerWindow: 20, BreakerMinSamples: 10, BreakerThreshold: 0.5, BreakerCooldown: 10 * time.Second, BreakerProbes: 3},
 		},
 		{
 			name: "all overrides applied",
@@ -46,7 +46,7 @@ func TestLoad(t *testing.T) {
 				"PUSAQ_CACHE_TAU":           "0.9",
 				"PUSAQ_CACHE_MAX_ENTRIES":   "500",
 			},
-			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, RateLimitMode: "lease", LeaseSize: 5, LeaseTTL: 500 * time.Millisecond, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256, CacheMode: "shadow", CacheTau: 0.9, CacheMaxEntries: 500, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast"},
+			want: Config{Addr: ":9091", DrainDelay: 0, ShutdownGrace: 30 * time.Second, TelemetryBuffer: 256, UpstreamTimeout: 5 * time.Second, RedisAddr: "redis:6379", RPMLimit: 120, RPMBurst: 30, RateLimitMode: "lease", LeaseSize: 5, LeaseTTL: 500 * time.Millisecond, TPMLimit: 6000, TPMBurst: 2000, TPMReserveDefault: 256, CacheMode: "shadow", CacheTau: 0.9, CacheMaxEntries: 500, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", BreakerWindow: 20, BreakerMinSamples: 10, BreakerThreshold: 0.5, BreakerCooldown: 10 * time.Second, BreakerProbes: 3},
 		},
 		{
 			name:    "empty addr rejected",
@@ -126,7 +126,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "price table parsed with its version",
 			env:  map[string]string{"PUSAQ_PRICES": "mock-model=0.10/0.40, other=1/2", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", Prices: map[string]Price{"mock-model": {0.10, 0.40}, "other": {1, 2}}, PriceTableVersion: "v1"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", BreakerWindow: 20, BreakerMinSamples: 10, BreakerThreshold: 0.5, BreakerCooldown: 10 * time.Second, BreakerProbes: 3, Prices: map[string]Price{"mock-model": {0.10, 0.40}, "other": {1, 2}}, PriceTableVersion: "v1"},
 		},
 		{
 			name:    "price table requires a version",
@@ -166,7 +166,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "zero tpm limit disables token limiting",
 			env:  map[string]string{"PUSAQ_TPM_LIMIT": "0"},
-			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", BreakerWindow: 20, BreakerMinSamples: 10, BreakerThreshold: 0.5, BreakerCooldown: 10 * time.Second, BreakerProbes: 3},
 		},
 		{
 			name:    "tpm burst with zero limit rejected",
@@ -359,5 +359,36 @@ func TestOpenAIEmbedderAccepted(t *testing.T) {
 	}
 	if got.EmbedderKind != "openai:gemini" || got.EmbedModel != "gemini-embedding-001" {
 		t.Fatalf("embedder = %q model %q", got.EmbedderKind, got.EmbedModel)
+	}
+}
+
+func TestBreakerConfigOverrides(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{
+		"PUSAQ_BREAKER_WINDOW":      "8",
+		"PUSAQ_BREAKER_MIN_SAMPLES": "4",
+		"PUSAQ_BREAKER_THRESHOLD":   "0.25",
+		"PUSAQ_BREAKER_COOLDOWN":    "2s",
+		"PUSAQ_BREAKER_PROBES":      "1",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.BreakerWindow != 8 || got.BreakerMinSamples != 4 || got.BreakerThreshold != 0.25 || got.BreakerCooldown != 2*time.Second || got.BreakerProbes != 1 {
+		t.Fatalf("breaker config = %+v", got)
+	}
+}
+
+func TestBreakerConfigRejections(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"zero window":           {"PUSAQ_BREAKER_WINDOW": "0"},
+		"min above window":      {"PUSAQ_BREAKER_WINDOW": "5", "PUSAQ_BREAKER_MIN_SAMPLES": "6"},
+		"threshold one":         {"PUSAQ_BREAKER_THRESHOLD": "1"},
+		"threshold zero":        {"PUSAQ_BREAKER_THRESHOLD": "0"},
+		"non-positive cooldown": {"PUSAQ_BREAKER_COOLDOWN": "0s"},
+		"zero probes":           {"PUSAQ_BREAKER_PROBES": "0"},
+	} {
+		if _, err := Load(lookupFrom(env)); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
 	}
 }
