@@ -147,6 +147,11 @@ func run(logger *slog.Logger) error {
 		routes[alias] = gateway.Route{Provider: primary, Model: r.Model, Fallbacks: fallbacks}
 	}
 	completionsOpts.Breakers = func(backend string) *breaker.Breaker { return breakers[backend] }
+	completionsOpts.Rules = gateway.RoutingRules{ByTag: cfg.RoutingRules, Default: cfg.RoutingDefault}
+	logger.Info("routing rules loaded",
+		slog.Any("rules", cfg.RoutingRules),
+		slog.String("default", cfg.RoutingDefault),
+	)
 	if cfg.Prices != nil {
 		prices := make(map[string]pricing.Price, len(cfg.Prices))
 		for model, p := range cfg.Prices {

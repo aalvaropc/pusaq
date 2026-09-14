@@ -40,9 +40,13 @@ func (s SlogSink) Write(event core.CostEvent) {
 		attrs = append(attrs,
 			slog.String("requested_model", event.RequestedModel),
 			slog.String("served_model", event.ServedModel),
+			slog.String("route_reason", event.RouteReason),
 			slog.Int("prompt_tokens", event.Usage.PromptTokens),
 			slog.Int("completion_tokens", event.Usage.CompletionTokens),
 		)
+	}
+	if event.FeatureTag != "" {
+		attrs = append(attrs, slog.String("feature_tag", event.FeatureTag))
 	}
 	if event.TokensCharged > 0 {
 		attrs = append(attrs, slog.Int("tokens_charged", event.TokensCharged))

@@ -59,6 +59,12 @@ Ground truth, three vantage points that must agree:
 `verify.sh` also reads Redis `INFO commandstats` for Lua script calls, from
 which it reports script calls per limited request.
 
+Toll traffic is sent as `pusaq/auto` with `metadata.feature_tag: "toll"`
+and a routing rule that sends it to `pusaq/best`, so it also exercises the
+router under load (a wrong `X-Pusaq-Route-Reason` fails the run) and shares
+the mock's second physical model with the neighbor tenant; only the
+overload tenant's model is isolated.
+
 Token limiting is disabled for this profile (`PUSAQ_TPM_LIMIT=0`) so the
 measured toll is the request limiter's alone; with it on, every admitted
 request would pay a second script call plus a reconciliation call.

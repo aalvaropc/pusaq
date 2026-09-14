@@ -35,6 +35,10 @@ type Request struct {
 	// RequestedModel is the model alias the client asked for (e.g.
 	// "pusaq/fast"); set by operations that resolve models.
 	RequestedModel string
+	// FeatureTag is the request's declared feature (metadata.feature_tag),
+	// empty when absent; RouteReason says how the alias was resolved.
+	FeatureTag  string
+	RouteReason string
 	// ServedModel is the physical upstream model that handled the request.
 	ServedModel string
 	// ServedProvider is the upstream backend that actually answered

@@ -82,14 +82,32 @@ func defaultUpstreams() []Upstream {
 	return []Upstream{{Name: "mock", URL: "http://localhost:9090"}}
 }
 
-// defaultRoutes maps the public aliases to the mock model; physical models
-// are overridden per alias via PUSAQ_ROUTES. pusaq/auto currently resolves
-// like pusaq/fast: routing rules are not implemented.
+// AutoAlias is the router alias: it has no physical model of its own and
+// resolves to a concrete alias through the routing rules.
+const AutoAlias = "pusaq/auto"
+
+// DefaultRoutingTarget is the alias an auto request falls back to when no
+// rule names its feature tag (and when it carries none).
+const DefaultRoutingTarget = "pusaq/fast"
+
+// defaultRoutes maps the concrete aliases to the mock model; physical
+// models are overridden per alias via PUSAQ_ROUTES. pusaq/auto is not a
+// route: it resolves through PUSAQ_ROUTING_RULES.
 func defaultRoutes() map[string]Route {
 	return map[string]Route{
 		"pusaq/fast": {Provider: "mock", Model: "mock-model"},
 		"pusaq/best": {Provider: "mock", Model: "mock-model"},
-		"pusaq/auto": {Provider: "mock", Model: "mock-model"},
+	}
+}
+
+// defaultRoutingRules is the explicit table docs/design.md §5.5 describes:
+// cheap work to the fast model, reasoning and code to the best one.
+func defaultRoutingRules() map[string]string {
+	return map[string]string{
+		"classify": "pusaq/fast",
+		"extract":  "pusaq/fast",
+		"reason":   "pusaq/best",
+		"code":     "pusaq/best",
 	}
 }
 
@@ -113,8 +131,14 @@ type Config struct {
 	Upstreams []Upstream
 	// UpstreamTimeout bounds every provider call (PUSAQ_UPSTREAM_TIMEOUT).
 	UpstreamTimeout time.Duration
-	// Routes maps model aliases to providers and physical models.
+	// Routes maps the concrete model aliases to providers and physical
+	// models. pusaq/auto is never a route.
 	Routes map[string]Route
+	// RoutingRules maps a request's feature tag to a concrete alias for
+	// pusaq/auto (PUSAQ_ROUTING_RULES); RoutingDefault is the alias used
+	// when the tag is absent or unknown.
+	RoutingRules   map[string]string
+	RoutingDefault string
 	// Prices is the price table keyed by physical model (PUSAQ_PRICES);
 	// nil means no table: cost events carry no cost fields.
 	// PriceTableVersion labels the table (PUSAQ_PRICE_TABLE_VERSION) and
@@ -240,6 +264,15 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		if err := applyRouteModels(cfg.Routes, v); err != nil {
 			return Config{}, fmt.Errorf("PUSAQ_ROUTES: %w", err)
 		}
+	}
+	cfg.RoutingRules = defaultRoutingRules()
+	cfg.RoutingDefault = DefaultRoutingTarget
+	if v, ok := lookup("PUSAQ_ROUTING_RULES"); ok && v != "" {
+		rules, def, err := parseRoutingRules(v, cfg.Routes)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_ROUTING_RULES: %w", err)
+		}
+		cfg.RoutingRules, cfg.RoutingDefault = rules, def
 	}
 
 	if v, ok := lookup("PUSAQ_PRICES"); ok && v != "" {
@@ -496,6 +529,9 @@ func applyRouteModels(routes map[string]Route, v string) error {
 		if !ok || alias == "" || model == "" {
 			return fmt.Errorf("malformed pair %q, want alias=model", pair)
 		}
+		if alias == AutoAlias {
+			return fmt.Errorf("alias %q has no physical model; it resolves through PUSAQ_ROUTING_RULES", alias)
+		}
 		r, exists := routes[alias]
 		if !exists {
 			return fmt.Errorf("unknown alias %q", alias)
@@ -504,6 +540,45 @@ func applyRouteModels(routes map[string]Route, v string) error {
 		routes[alias] = r
 	}
 	return nil
+}
+
+// parseRoutingRules parses "tag=alias" comma-separated rules for the auto
+// alias. The whole table is replaced: a "default" entry is required, every
+// target must be a concrete configured alias, and tags must be unique.
+func parseRoutingRules(v string, routes map[string]Route) (map[string]string, string, error) {
+	rules := make(map[string]string)
+	def := ""
+	for pair := range strings.SplitSeq(v, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		tag, alias, ok := strings.Cut(pair, "=")
+		if !ok || tag == "" || alias == "" {
+			return nil, "", fmt.Errorf("malformed pair %q, want tag=alias", pair)
+		}
+		if alias == AutoAlias {
+			return nil, "", fmt.Errorf("rule %q: target must be a concrete alias, not %q", tag, alias)
+		}
+		if _, exists := routes[alias]; !exists {
+			return nil, "", fmt.Errorf("rule %q: unknown alias %q", tag, alias)
+		}
+		if tag == "default" {
+			if def != "" {
+				return nil, "", fmt.Errorf("duplicate default rule")
+			}
+			def = alias
+			continue
+		}
+		if _, dup := rules[tag]; dup {
+			return nil, "", fmt.Errorf("duplicate rule for tag %q", tag)
+		}
+		rules[tag] = alias
+	}
+	if def == "" {
+		return nil, "", fmt.Errorf("a default rule is required (default=<alias>)")
+	}
+	return rules, def, nil
 }
 
 // parseAPIKeys parses "key:tenant" comma-separated pairs, failing fast on

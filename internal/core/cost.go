@@ -31,6 +31,10 @@ type CostEvent struct {
 	// models (empty otherwise); Usage carries provider-reported tokens.
 	RequestedModel string `json:"requested_model,omitempty"`
 	ServedModel    string `json:"served_model,omitempty"`
+	// FeatureTag is the request's declared feature; RouteReason records
+	// how the requested alias resolved (direct, rule:<tag>, default:…).
+	FeatureTag  string `json:"feature_tag,omitempty"`
+	RouteReason string `json:"route_reason,omitempty"`
 	// ServedProvider names the backend that answered (after fallback);
 	// Attempts counts backend attempts, so failover is observable.
 	ServedProvider string `json:"served_provider,omitempty"`
