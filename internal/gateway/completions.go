@@ -11,6 +11,7 @@ import (
 
 	"github.com/aalvaropc/pusaq/internal/breaker"
 	"github.com/aalvaropc/pusaq/internal/core"
+	"github.com/aalvaropc/pusaq/internal/pricing"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
 	"github.com/aalvaropc/pusaq/internal/semcache"
@@ -117,7 +118,28 @@ type CompletionsOptions struct {
 	Breakers BreakerFor
 	// Shadow enables shadow-mode cache evaluation when non-nil.
 	Shadow ShadowCache
+	// Prices prices completions when non-nil; nil leaves cost events
+	// without cost fields.
+	Prices *pricing.Table
 	Logger *slog.Logger
+}
+
+// priceOnFinalize registers the finalizer that prices the request once its
+// usage is known — after a buffered return, at stream end, or never (an
+// error before the provider answered leaves no usage and no cost). The
+// price is keyed by the served model, which the fallback chain preserves.
+func priceOnFinalize(req *core.Request, prices *pricing.Table) {
+	if prices == nil {
+		return
+	}
+	req.OnFinalize(func() {
+		if req.Usage == (core.Usage{}) {
+			return
+		}
+		if usd, ok := prices.Cost(req.ServedModel, req.Usage); ok {
+			req.Cost = core.Cost{USD: usd, TableVersion: prices.Version}
+		}
+	})
 }
 
 // cacheable reports whether a request is structurally eligible for the
@@ -204,6 +226,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		}
 		req.RequestedModel = cr.Model
 		req.ServedModel = route.Model
+		priceOnFinalize(req, opts.Prices)
 
 		// TPM is charged once, before any backend attempt: the model
 		// contract is identical across the fallback chain.

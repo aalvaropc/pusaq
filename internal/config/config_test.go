@@ -124,6 +124,41 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "price table parsed with its version",
+			env:  map[string]string{"PUSAQ_PRICES": "mock-model=0.10/0.40, other=1/2", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", Prices: map[string]Price{"mock-model": {0.10, 0.40}, "other": {1, 2}}, PriceTableVersion: "v1"},
+		},
+		{
+			name:    "price table requires a version",
+			env:     map[string]string{"PUSAQ_PRICES": "mock-model=0.10/0.40"},
+			wantErr: true,
+		},
+		{
+			name:    "version without a price table rejected",
+			env:     map[string]string{"PUSAQ_PRICE_TABLE_VERSION": "v1"},
+			wantErr: true,
+		},
+		{
+			name:    "price table must cover every route model",
+			env:     map[string]string{"PUSAQ_ROUTES": "pusaq/best=other-model", "PUSAQ_PRICES": "mock-model=0.10/0.40", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
+			wantErr: true,
+		},
+		{
+			name:    "price without output rate rejected",
+			env:     map[string]string{"PUSAQ_PRICES": "mock-model=0.10", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
+			wantErr: true,
+		},
+		{
+			name:    "negative price rejected",
+			env:     map[string]string{"PUSAQ_PRICES": "mock-model=-1/0.40", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
+			wantErr: true,
+		},
+		{
+			name:    "duplicate price rejected",
+			env:     map[string]string{"PUSAQ_PRICES": "mock-model=1/1,mock-model=2/2", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
+			wantErr: true,
+		},
+		{
 			name:    "negative tpm limit rejected",
 			env:     map[string]string{"PUSAQ_TPM_LIMIT": "-5"},
 			wantErr: true,

@@ -361,9 +361,9 @@ The gateway sees every LLM request in the company — its log *is* the AI cost
 accounting system. Every request emits one event: tenant, feature tag,
 requested vs served model, routing decision and reason, cache hit/miss +
 similarity, input/output tokens (reserved and actual), **cost in $ against a
-versioned price table** (the table version travels in the event — prices
-change and historical reports must still add up), per-stage latency, region,
-result, policy-filter flags.
+versioned price table** (`PUSAQ_PRICES`, `PUSAQ_PRICE_TABLE_VERSION`; the
+table version travels in the event — prices change and historical reports
+must still add up), per-stage latency, region, result, policy-filter flags.
 
 The write is asynchronous and may **never** block or slow the response path:
 events are buffered and drained in batches; if the sink hiccups, records are

@@ -19,6 +19,7 @@ import (
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/embed"
 	"github.com/aalvaropc/pusaq/internal/gateway"
+	"github.com/aalvaropc/pusaq/internal/pricing"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
 	"github.com/aalvaropc/pusaq/internal/semcache"
@@ -146,6 +147,19 @@ func run(logger *slog.Logger) error {
 		routes[alias] = gateway.Route{Provider: primary, Model: r.Model, Fallbacks: fallbacks}
 	}
 	completionsOpts.Breakers = func(backend string) *breaker.Breaker { return breakers[backend] }
+	if cfg.Prices != nil {
+		prices := make(map[string]pricing.Price, len(cfg.Prices))
+		for model, p := range cfg.Prices {
+			prices[model] = pricing.Price{InputPerM: p.InputPerM, OutputPerM: p.OutputPerM}
+		}
+		completionsOpts.Prices = pricing.NewTable(cfg.PriceTableVersion, prices)
+		logger.Info("price table loaded",
+			slog.String("version", cfg.PriceTableVersion),
+			slog.Any("models", completionsOpts.Prices.Models()),
+		)
+	} else {
+		logger.Info("no price table configured: cost events carry no cost fields")
+	}
 	completions := gateway.CompletionsHandler(routes, providers, completionsOpts)
 
 	srv := gateway.NewServer(logger, pipeline, completions)

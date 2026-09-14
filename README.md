@@ -40,11 +40,12 @@ What the gateway does today:
   nothing. A calibration command picks the similarity threshold for a
   precision floor.
 - **Cost telemetry** — exactly one asynchronous cost event per request, on
-  success, error, panic, and stream end alike.
+  success, error, panic, and stream end alike; completions are priced in
+  dollars against a versioned price table from configuration.
 
 Not implemented: serving from the cache, routing rules for `pusaq/auto`
-(it currently resolves like `pusaq/fast`), a policy filter, dollar pricing
-in cost events, lease-mode limiting, and multi-region deployment.
+(it currently resolves like `pusaq/fast`), a policy filter, and
+multi-region deployment.
 
 ## API
 
@@ -154,7 +155,11 @@ disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
 `PUSAQ_LEASE_SIZE` (`10`, at most the burst), `PUSAQ_LEASE_TTL` (`1s`),
 `PUSAQ_TPM_LIMIT` (`100000` tokens/min; `0` disables token
 limiting with a startup warning), `PUSAQ_TPM_BURST` (default = limit),
-`PUSAQ_TPM_RESERVE_DEFAULT` (`512`).
+`PUSAQ_TPM_RESERVE_DEFAULT` (`512`), `PUSAQ_PRICES` (unset → no cost
+fields; `model=usd_per_1M_input/usd_per_1M_output,...` keyed by physical
+model, every route model must be priced), `PUSAQ_PRICE_TABLE_VERSION`
+(required with `PUSAQ_PRICES`; travels on every priced event as
+`price_table_version` next to `cost_usd`).
 
 > Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
 > containers are healthy, the firewall is blocking host→container traffic on
