@@ -3,7 +3,9 @@ name: release-image
 # Publishes the gateway and mock-provider images to Artifact Registry on every
 # push to main. Authentication is workload identity federation: the workflow's
 # OIDC token is exchanged for short-lived credentials of a service account
-# that can only write to the Pusaq registry. No stored keys.
+# that can only write to the Pusaq registry. No stored keys. The job is
+# skipped until the repository variables produced by the cloud foundation
+# (infra/terraform/foundation outputs) exist.
 
 on:
   push:
@@ -25,6 +27,7 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
     steps:
       - uses: actions/checkout@v4
 
