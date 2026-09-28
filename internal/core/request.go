@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// DevTenant is the tenant every request is attributed to when no API keys
+// are configured (dev mode — explicit, never silent).
+const DevTenant = "dev"
+
 // Request is the transport-agnostic envelope that traverses the pipeline.
 // Only the fields the pipeline stages actually use live here.
 type Request struct {
@@ -53,6 +57,9 @@ type Request struct {
 	// Cost is set by a finalizer once usage is known and a price table is
 	// configured.
 	Cost Cost
+	// SpendUSDMonth is the tenant's month-to-date spend after this request
+	// (or the total that caused a budget denial); zero when unbudgeted.
+	SpendUSDMonth float64
 
 	// finalizers run exactly once when the request is finalized by the
 	// accounting stage — buffered return, stream end, or panic — before

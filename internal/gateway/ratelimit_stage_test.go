@@ -35,7 +35,7 @@ func limitedServer(t *testing.T, admitter Admitter) (*Server, *[]core.CostEvent)
 		Accounting(emit, discardLogger()),
 		RequestID(),
 		Auth(nil), // dev mode
-		RateLimit(admitter, discardLogger()),
+		RateLimit(admitter, nil, discardLogger()),
 	)
 	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()}, CompletionsOptions{Logger: discardLogger()})
 	return NewServer(discardLogger(), pipeline, completions), &events

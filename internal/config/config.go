@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aalvaropc/pusaq/internal/breaker"
+	"github.com/aalvaropc/pusaq/internal/core"
 )
 
 // Defaults applied when the corresponding variable is unset.
@@ -55,6 +56,20 @@ type Route struct {
 type Price struct {
 	InputPerM  float64
 	OutputPerM float64
+}
+
+// TenantPolicy is what one tenant may do (PUSAQ_TENANT_POLICIES). A zero
+// field restricts nothing.
+type TenantPolicy struct {
+	// Models lists the concrete aliases the tenant may be served by; nil
+	// allows every alias.
+	Models []string
+	// MaxPromptChars caps message content bytes; zero means no cap.
+	MaxPromptChars int
+	// BudgetUSD is the monthly spend ceiling; zero means no budget.
+	BudgetUSD float64
+	// FailClosed rejects requests when a limit's store is unreachable.
+	FailClosed bool
 }
 
 // Upstream names one OpenAI-compatible backend. APIKey, when set
@@ -147,6 +162,9 @@ type Config struct {
 	// is required whenever a table is set.
 	Prices            map[string]Price
 	PriceTableVersion string
+	// TenantPolicies holds per-tenant policies keyed by tenant
+	// (PUSAQ_TENANT_POLICIES); tenants absent here are unrestricted.
+	TenantPolicies map[string]TenantPolicy
 	// APIKeys maps API keys to tenant names (PUSAQ_API_KEYS,
 	// "key:tenant" comma-separated). Empty means dev mode: no
 	// authentication, every request attributed to the "dev" tenant.
@@ -501,7 +519,149 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		cfg.APIKeys = keys
 	}
 
+	if v, ok := lookup("PUSAQ_TENANT_POLICIES"); ok && v != "" {
+		policies, err := parseTenantPolicies(v, cfg.Routes)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_TENANT_POLICIES: %w", err)
+		}
+		for tenant, p := range policies {
+			if !cfg.knowsTenant(tenant) {
+				return Config{}, fmt.Errorf("PUSAQ_TENANT_POLICIES: tenant %q is not named by PUSAQ_API_KEYS", tenant)
+			}
+			if p.BudgetUSD > 0 {
+				if cfg.Prices == nil {
+					return Config{}, fmt.Errorf("PUSAQ_TENANT_POLICIES: tenant %q: budget_usd requires PUSAQ_PRICES", tenant)
+				}
+				if cfg.RedisAddr == "" {
+					return Config{}, fmt.Errorf("PUSAQ_TENANT_POLICIES: tenant %q: budget_usd requires PUSAQ_REDIS_ADDR", tenant)
+				}
+			}
+			if p.FailClosed && cfg.RedisAddr == "" {
+				return Config{}, fmt.Errorf("PUSAQ_TENANT_POLICIES: tenant %q: fail_closed requires PUSAQ_REDIS_ADDR", tenant)
+			}
+		}
+		cfg.TenantPolicies = policies
+	}
+
 	return cfg, nil
+}
+
+// knowsTenant reports whether a tenant can ever be attributed: one named
+// by an API key, or the dev tenant when no keys are configured.
+func (c Config) knowsTenant(tenant string) bool {
+	if len(c.APIKeys) == 0 {
+		return tenant == core.DevTenant
+	}
+	for _, t := range c.APIKeys {
+		if t == tenant {
+			return true
+		}
+	}
+	return false
+}
+
+// HasBudgets reports whether any tenant policy sets a monthly budget.
+func (c Config) HasBudgets() bool {
+	for _, p := range c.TenantPolicies {
+		if p.BudgetUSD > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// parseTenantPolicies parses "tenant:key=value,...;tenant2:..." — tenants
+// separated by ';', fields by ',', list values by '|'.
+func parseTenantPolicies(v string, routes map[string]Route) (map[string]TenantPolicy, error) {
+	out := make(map[string]TenantPolicy)
+	for entry := range strings.SplitSeq(v, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		tenant, fields, ok := strings.Cut(entry, ":")
+		tenant = strings.TrimSpace(tenant)
+		if !ok || tenant == "" || strings.TrimSpace(fields) == "" {
+			return nil, fmt.Errorf("malformed entry %q, want tenant:key=value pairs", entry)
+		}
+		if _, dup := out[tenant]; dup {
+			return nil, fmt.Errorf("duplicate policy for tenant %q", tenant)
+		}
+		p, err := parsePolicyFields(tenant, fields, routes)
+		if err != nil {
+			return nil, err
+		}
+		out[tenant] = p
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no valid tenant:key=value entries")
+	}
+	return out, nil
+}
+
+func parsePolicyFields(tenant, fields string, routes map[string]Route) (TenantPolicy, error) {
+	var p TenantPolicy
+	seen := make(map[string]bool)
+	for f := range strings.SplitSeq(fields, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		key, val, ok := strings.Cut(f, "=")
+		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
+		if !ok || key == "" || val == "" {
+			return p, fmt.Errorf("tenant %q: malformed field %q, want key=value", tenant, f)
+		}
+		if seen[key] {
+			return p, fmt.Errorf("tenant %q: duplicate field %q", tenant, key)
+		}
+		seen[key] = true
+		switch key {
+		case "models":
+			for a := range strings.SplitSeq(val, "|") {
+				a = strings.TrimSpace(a)
+				if a == "" {
+					return p, fmt.Errorf("tenant %q: empty alias in models", tenant)
+				}
+				if a == AutoAlias {
+					return p, fmt.Errorf("tenant %q: models must list concrete aliases; %q resolves through PUSAQ_ROUTING_RULES", tenant, a)
+				}
+				if _, exists := routes[a]; !exists {
+					return p, fmt.Errorf("tenant %q: unknown alias %q", tenant, a)
+				}
+				for _, prev := range p.Models {
+					if prev == a {
+						return p, fmt.Errorf("tenant %q: duplicate alias %q", tenant, a)
+					}
+				}
+				p.Models = append(p.Models, a)
+			}
+		case "max_prompt_chars":
+			n, err := strconv.Atoi(val)
+			if err != nil || n <= 0 {
+				return p, fmt.Errorf("tenant %q: max_prompt_chars must be a positive integer, got %q", tenant, val)
+			}
+			p.MaxPromptChars = n
+		case "budget_usd":
+			n, err := strconv.ParseFloat(val, 64)
+			if err != nil || n <= 0 {
+				return p, fmt.Errorf("tenant %q: budget_usd must be a positive number, got %q", tenant, val)
+			}
+			p.BudgetUSD = n
+		case "fail_closed":
+			b, err := strconv.ParseBool(val)
+			if err != nil {
+				return p, fmt.Errorf("tenant %q: fail_closed must be true or false, got %q", tenant, val)
+			}
+			p.FailClosed = b
+		default:
+			return p, fmt.Errorf("tenant %q: unknown field %q (want models, max_prompt_chars, budget_usd, fail_closed)", tenant, key)
+		}
+	}
+	if len(seen) == 0 {
+		return p, fmt.Errorf("tenant %q: no fields", tenant)
+	}
+	return p, nil
 }
 
 // parseUpstreams parses "name=url" comma-separated backends in priority

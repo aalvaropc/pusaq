@@ -26,7 +26,9 @@ What the gateway does today:
   buffered and SSE streaming, model aliases resolved from configuration,
   `X-Pusaq-Model` on every response, normalized errors.
 - **Tenants** — API-key authentication with per-tenant cost attribution;
-  explicit dev mode when no keys are configured.
+  explicit dev mode when no keys are configured. Per-tenant policies:
+  allowed models, prompt size cap, monthly budget in dollars with a
+  cutoff, and fail-closed behavior when a limit's store is down.
 - **Distributed rate limiting** — per-tenant requests (RPM) and LLM tokens
   (TPM) as atomic Lua token buckets in Redis; TPM charges a reservation on
   admission and reconciles it exactly once when actual usage is known.
@@ -43,8 +45,8 @@ What the gateway does today:
   success, error, panic, and stream end alike; completions are priced in
   dollars against a versioned price table from configuration.
 
-Not implemented: serving from the cache, a policy filter, and multi-region
-deployment.
+Not implemented: serving from the cache, sensitive-data detection and PII
+redaction in the policy filter, and multi-region deployment.
 
 ## API
 
@@ -61,7 +63,10 @@ fast). Responses carry `X-Pusaq-Model` (the physical model served),
 `default:unknown_tag`) and `X-Pusaq-Request-Id`; the cost event records the
 same as `route_reason` and `feature_tag`. All errors share one JSON shape:
 `{"error":{"code":"...","message":"..."}}` — provider failures surface as
-`upstream_error` (502) without leaking upstream responses.
+`upstream_error` (502) without leaking upstream responses; a tenant policy
+denial is `policy_denied` (403); an exhausted monthly budget is
+`budget_exceeded` (402, with `retry_after_ms` until the next UTC month); a
+store outage for a fail-closed tenant is `store_unavailable` (503).
 
 **Rate limiting.** With `PUSAQ_REDIS_ADDR` set, each tenant gets a token
 bucket in Redis decided by one atomic Lua script shared by every replica —
@@ -70,8 +75,9 @@ concurrency (proven by test: exactly the bucket capacity admitted out of 200
 concurrent requests across two instances). Denials are 429 `rate_limited`
 with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
 the gateway **fails open** within a 250ms budget — temporarily inexact
-limits beat an outage caused by the limiter itself. Unset `PUSAQ_REDIS_ADDR`
-disables limiting with a startup warning.
+limits beat an outage caused by the limiter itself — unless the tenant's
+policy sets `fail_closed`, in which case it answers 503 `store_unavailable`.
+Unset `PUSAQ_REDIS_ADDR` disables limiting with a startup warning.
 
 Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one
 atomic store decision per request, exact across replicas. **`lease`**: each
@@ -136,6 +142,21 @@ keys configured the gateway runs in **dev mode** — no auth, everything
 attributed to the `dev` tenant, and a warning logged at startup.
 `/healthz` and `/readyz` never require credentials.
 
+**Tenant policies.** `PUSAQ_TENANT_POLICIES="tenant:key=value,...;tenant2:..."`
+gives a tenant up to four policies: `models=pusaq/fast|pusaq/best` (the
+concrete aliases it may be served by — `pusaq/auto` is checked against the
+alias it resolves to and denied rather than rerouted), `max_prompt_chars`
+(bytes of message content), `budget_usd` (monthly ceiling; spend is
+counted in Redis from `cost_usd` per completion, read before admission, and
+reset at the UTC month boundary — requests already in flight when the
+budget is reached may complete, so the overrun is bounded by their cost),
+and `fail_closed=true` (reject with 503 instead of admitting when the store
+is down). Policies are enforced after the alias is resolved and before any
+token is charged, so a denied request costs nothing. Tenants without an
+entry are unrestricted. Every entry is validated at startup; a budget
+needs `PUSAQ_PRICES` and `PUSAQ_REDIS_ADDR`. Budgeted tenants' cost events
+carry `spend_usd_month`.
+
 ## Development
 
 Requirements: Go 1.26+, Docker with Compose, golangci-lint.
@@ -171,7 +192,8 @@ limiting with a startup warning), `PUSAQ_TPM_BURST` (default = limit),
 fields; `model=usd_per_1M_input/usd_per_1M_output,...` keyed by physical
 model, every route model must be priced), `PUSAQ_PRICE_TABLE_VERSION`
 (required with `PUSAQ_PRICES`; travels on every priced event as
-`price_table_version` next to `cost_usd`).
+`price_table_version` next to `cost_usd`), `PUSAQ_TENANT_POLICIES` (unset →
+no policies; see Tenant policies above).
 
 > Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
 > containers are healthy, the firewall is blocking host→container traffic on

@@ -392,3 +392,82 @@ func TestBreakerConfigRejections(t *testing.T) {
 		}
 	}
 }
+
+func policyEnv(extra map[string]string) map[string]string {
+	env := map[string]string{
+		"PUSAQ_API_KEYS":            "k-a:tenant-a,k-b:tenant-b",
+		"PUSAQ_REDIS_ADDR":          "redis:6379",
+		"PUSAQ_PRICES":              "mock-model=0.10/0.40",
+		"PUSAQ_PRICE_TABLE_VERSION": "v1",
+	}
+	for k, v := range extra {
+		env[k] = v
+	}
+	return env
+}
+
+func TestTenantPoliciesParsed(t *testing.T) {
+	got, err := Load(lookupFrom(policyEnv(map[string]string{
+		"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/fast|pusaq/best, max_prompt_chars=8000, budget_usd=50, fail_closed=true; tenant-b:budget_usd=10",
+	})))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	want := map[string]TenantPolicy{
+		"tenant-a": {Models: []string{"pusaq/fast", "pusaq/best"}, MaxPromptChars: 8000, BudgetUSD: 50, FailClosed: true},
+		"tenant-b": {BudgetUSD: 10},
+	}
+	if !reflect.DeepEqual(got.TenantPolicies, want) {
+		t.Fatalf("policies = %+v, want %+v", got.TenantPolicies, want)
+	}
+	if !got.HasBudgets() {
+		t.Fatal("HasBudgets() = false")
+	}
+}
+
+func TestTenantPoliciesDevTenantWithoutKeys(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{"PUSAQ_TENANT_POLICIES": "dev:models=pusaq/fast,max_prompt_chars=10"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.TenantPolicies["dev"].MaxPromptChars != 10 || got.HasBudgets() {
+		t.Fatalf("policies = %+v", got.TenantPolicies)
+	}
+}
+
+func TestTenantPoliciesRejections(t *testing.T) {
+	cases := map[string]map[string]string{
+		"unknown tenant":             policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-z:budget_usd=1"}),
+		"dev tenant when keys exist": policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "dev:budget_usd=1"}),
+		"no colon":                   policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a"}),
+		"empty fields":               policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:"}),
+		"duplicate tenant":           policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=1;tenant-a:budget_usd=2"}),
+		"duplicate field":            policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=1,budget_usd=2"}),
+		"unknown field":              policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:colour=blue"}),
+		"auto in models":             policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/auto"}),
+		"unknown alias":              policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/turbo"}),
+		"empty alias":                policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/fast|"}),
+		"duplicate alias":            policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/fast|pusaq/fast"}),
+		"zero prompt cap":            policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:max_prompt_chars=0"}),
+		"non-integer prompt cap":     policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:max_prompt_chars=big"}),
+		"negative budget":            policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=-1"}),
+		"bad bool":                   policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:fail_closed=yes"}),
+		"budget without prices": {
+			"PUSAQ_API_KEYS": "k-a:tenant-a", "PUSAQ_REDIS_ADDR": "redis:6379",
+			"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=1",
+		},
+		"budget without redis": {
+			"PUSAQ_API_KEYS": "k-a:tenant-a", "PUSAQ_PRICES": "mock-model=1/1", "PUSAQ_PRICE_TABLE_VERSION": "v1",
+			"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=1",
+		},
+		"fail_closed without redis": {
+			"PUSAQ_API_KEYS":        "k-a:tenant-a",
+			"PUSAQ_TENANT_POLICIES": "tenant-a:fail_closed=true",
+		},
+	}
+	for name, env := range cases {
+		if _, err := Load(lookupFrom(env)); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+}

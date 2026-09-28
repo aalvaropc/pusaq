@@ -43,7 +43,7 @@ func RequestID() core.Stage {
 
 // DevTenant is the tenant every request is attributed to when no API keys
 // are configured (dev mode — explicit, never silent: main logs a warning).
-const DevTenant = "dev"
+const DevTenant = core.DevTenant
 
 // Auth resolves the request's tenant from its API key. With keys configured,
 // a missing or unknown key is rejected with unauthorized (401) before any
@@ -82,14 +82,24 @@ const limiterBudget = 250 * time.Millisecond
 // RateLimit rejects requests beyond the tenant's bucket with rate_limited
 // (429) and a computed retry. It runs after Auth (it keys by tenant) and
 // before any expensive work. Store failure fails OPEN with a logged warning:
-// temporarily inexact limits beat an outage caused by the limiter itself.
-func RateLimit(limiter Admitter, logger *slog.Logger) core.Stage {
+// temporarily inexact limits beat an outage caused by the limiter itself —
+// unless the tenant's policy is fail-closed, in which case the request is
+// rejected with store_unavailable (503).
+func RateLimit(limiter Admitter, policies PolicyFor, logger *slog.Logger) core.Stage {
 	return func(next core.Handler) core.Handler {
 		return func(ctx context.Context, req *core.Request) (*core.Response, error) {
 			limCtx, cancel := context.WithTimeout(ctx, limiterBudget)
 			d, err := limiter.Allow(limCtx, req.Tenant, 1)
 			cancel()
 			if err != nil {
+				if policies != nil && policies(req.Tenant).FailClosed {
+					logger.Warn("rate limiter store unavailable, failing closed",
+						slog.String("request_id", req.ID),
+						slog.String("tenant", req.Tenant),
+						slog.Any("error", err),
+					)
+					return nil, &core.Error{Code: core.CodeStoreUnavailable, Message: "rate limiter store unavailable", Err: err}
+				}
 				logger.Warn("rate limiter store unavailable, failing open",
 					slog.String("request_id", req.ID),
 					slog.String("tenant", req.Tenant),
@@ -172,6 +182,7 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 				event.ServedProvider = req.ServedProvider
 				event.Attempts = req.Attempts
 				event.Cost = req.Cost
+				event.SpendUSDMonth = req.SpendUSDMonth
 				emit(event)
 			}()
 			return next(ctx, req)
@@ -238,6 +249,7 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			ServedProvider: f.req.ServedProvider,
 			Attempts:       f.req.Attempts,
 			Cost:           f.req.Cost,
+			SpendUSDMonth:  f.req.SpendUSDMonth,
 		})
 	})
 }

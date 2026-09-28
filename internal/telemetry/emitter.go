@@ -63,6 +63,9 @@ func (s SlogSink) Write(event core.CostEvent) {
 			slog.String("price_table_version", event.Cost.TableVersion),
 		)
 	}
+	if event.SpendUSDMonth > 0 {
+		attrs = append(attrs, slog.Float64("spend_usd_month", event.SpendUSDMonth))
+	}
 	s.Logger.LogAttrs(context.Background(), slog.LevelInfo, "cost_event", attrs...)
 }
 
