@@ -16,4 +16,4 @@
 ## 4. Docs and delivery
 
 - [x] 4.1 README (Tenants bullet, "Not implemented", error list, rate-limiting sentence, "Tenant policies" paragraph, configuration list) and `docs/design.md` §4 steps 1 and 3, §9 store row.
-- [x] 4.2 Full suite `-race` green; lint + vet clean; `make up && make smoke` unchanged; manual checks of 403, 402 with `retry_after_ms`, and 503 under fail-closed; conventional commit(s) on `feat/tenant-policies`, draft PR.
+- [x] 4.2 Full suite `-race` green; lint + vet clean; `make up && make smoke` unchanged; manual checks of 403 and 503 under fail-closed (the 402 path with `retry_after_ms` and the Redis spend counter are covered by the miniredis tests; host-to-container access is blocked on this machine); conventional commit(s) on `feat/tenant-policies`, draft PR.
