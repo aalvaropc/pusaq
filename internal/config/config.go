@@ -425,7 +425,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		cfg.TPMLimit = n
 	}
 	cfg.TPMBurst = cfg.TPMLimit
-	if v, ok := lookup("PUSAQ_TPM_BURST"); ok {
+	// An empty value means "default", so an environment can declare the
+	// variable without choosing a burst (Compose profiles do this).
+	if v, ok := lookup("PUSAQ_TPM_BURST"); ok && v != "" {
 		if cfg.TPMLimit == 0 {
 			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: meaningless when PUSAQ_TPM_LIMIT is 0 (token limiting disabled)")
 		}

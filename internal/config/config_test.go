@@ -169,6 +169,11 @@ func TestLoad(t *testing.T) {
 			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 0, TPMBurst: 0, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", BreakerWindow: 20, BreakerMinSamples: 10, BreakerThreshold: 0.5, BreakerCooldown: 10 * time.Second, BreakerProbes: 3},
 		},
 		{
+			name: "empty tpm burst means default",
+			env:  map[string]string{"PUSAQ_TPM_LIMIT": "6000", "PUSAQ_TPM_BURST": ""},
+			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, BreakerWindow: 20, BreakerMinSamples: 10, BreakerThreshold: 0.5, BreakerCooldown: 10 * time.Second, BreakerProbes: 3, TPMLimit: 6000, TPMBurst: 6000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast"},
+		},
+		{
 			name:    "tpm burst with zero limit rejected",
 			env:     map[string]string{"PUSAQ_TPM_LIMIT": "0", "PUSAQ_TPM_BURST": "10"},
 			wantErr: true,

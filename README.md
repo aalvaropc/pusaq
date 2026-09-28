@@ -91,7 +91,10 @@ plus an output reservation (`max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`);
 when actual usage is known the difference is reconciled back atomically —
 on success, on error, and at stream end. Unknown usage keeps the charge.
 Every cost event records `tokens_charged` next to actual usage, so the
-estimate's error is measurable from the event stream.
+estimate's error is measurable from the event stream. Under overload the
+tokens actually consumed stay within the bucket over the window; the peak
+excess is bounded by the reservation error of the requests admitted before
+reconciliation caught up (measured, see Measurements).
 
 **Resilience.** Each upstream backend is guarded by a circuit breaker
 (closed / open / half-open). Defaults: opens on a >50% failure rate over a
@@ -166,7 +169,8 @@ disabled), `PUSAQ_RPM_LIMIT` (`60`/min per tenant), `PUSAQ_RPM_BURST`
 (default = limit), `PUSAQ_RATELIMIT_MODE` (`strict` | `lease`),
 `PUSAQ_LEASE_SIZE` (`10`, at most the burst), `PUSAQ_LEASE_TTL` (`1s`),
 `PUSAQ_TPM_LIMIT` (`100000` tokens/min; `0` disables token
-limiting with a startup warning), `PUSAQ_TPM_BURST` (default = limit),
+limiting with a startup warning), `PUSAQ_TPM_BURST` (default = limit; an
+empty value also means the default),
 `PUSAQ_TPM_RESERVE_DEFAULT` (`512`), `PUSAQ_PRICES` (unset → no cost
 fields; `model=usd_per_1M_input/usd_per_1M_output,...` keyed by physical
 model, every route model must be priced), `PUSAQ_PRICE_TABLE_VERSION`
@@ -224,6 +228,12 @@ failure, by one reproducible command, and published with its protocol in
   upstream is back, with zero client errors thanks to the fallback.
   `make breakertest` runs it (same profile plus a fallback mock; the
   primary is failed on command with `POST /admin/fail?for=<duration>`).
+- [`tpm-overrun.md`](docs/measurements/tpm-overrun.md) — with token
+  limiting on and an upstream that takes seconds to answer, how far the
+  tokens actually consumed can exceed the bucket before reconciliation
+  catches up, for an under-reserving and an over-reserving tenant.
+  `make tpmtest` runs it (same profile with token limiting on and emulated
+  upstream latency).
 
 ## Cloud
 
