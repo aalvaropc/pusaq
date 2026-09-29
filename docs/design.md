@@ -363,8 +363,15 @@ Pusaq's own regions dies. Handled by different pieces:
   signal; active synthetic probes as the safety net in quiet hours and as the
   recovery probe.
 - **Regional failover** — the global load balancer redirects *new* requests
-  when region A's readiness fails. What is Pusaq's own job: draining
-  (mark not-ready, keep serving in-flight requests through a grace period).
+  when region A's readiness fails (Cloud Run service health over serverless
+  NEGs: a region whose instances fail their readiness probe stops receiving
+  new requests). What is Pusaq's own job: draining (mark not-ready, keep
+  serving in-flight requests through a grace period), and the injection
+  knob the chaos run uses instead of deleting a service — a token-guarded
+  admin endpoint opens a not-ready window during which `/readyz` answers
+  503 and new requests are refused with `not_ready` while in-flight streams
+  finish. Every response and event names its region, so the run is read
+  back per region ([measurements](measurements/regional-failover.md)).
 - **One Redis per region, deliberately.** A global Redis would put an
   inter-region RTT in every request's hot path and couple both regions'
   availability. The price — accepted and documented — is that limits are
@@ -456,7 +463,7 @@ their protocol — including the ones that disappoint.
 |---|---|---|
 | Semantic cache savings | Replay corpus grouped by intent with paraphrases, Zipf-distributed frequencies; same requests, same order, with and without cache | Hit-rate, net $ savings, latency reduction, **FP rate against corpus labels** |
 | Limiter exactness | M replicas, N clients pushing 10× the limit ≥5 min against the mock; strict and lease modes | Accepted vs limit (± burst), max TPM overrun, p99 added per mode |
-| Regional failover | Sustained k6 against the global LB; readiness of region A forced to fail at a known instant; sequence IDs per request | Availability gap, requests redirected / recovered by retry / streams interrupted (**counted, not estimated**) |
+| Regional failover | `make chaos-run`: the two-region runtime module, sustained k6 against the global LB, region A's readiness failed at a known instant through the admin endpoint; every request tagged with the run id and answered with its region; per-region readiness probes as an independent timeline | Time until new requests are answered by the other region, longest interval without a success, first-attempt failures / recovered by one retry / failed after retry, streams complete / interrupted / refused, latency before / during / after per region, the split tenant's admissions per region (**counted, not estimated**, cross-checked against the gateways' events) |
 | Token-limit overrun | `make tpmtest`: token limiting on, emulated upstream latency, an under-reserving and an over-reserving tenant at the same rate | Σconsumed vs the bucket bound over the window, peak excess vs the stated ceiling, reservation error per request, requests in flight |
 | Breaker detection | `make breakertest`: the mock primary fails on command for a known window under steady traffic with a healthy fallback | Detection time (failure start → breaker open), recovery time (failure end → closed), probes, extra attempts, fallback-served requests, client errors (must be zero) |
 | Router savings | Mixed-task dataset with reference answers; all-best vs router; LLM-as-judge rubric verifies quality within a declared margin | Z% savings at equivalent judged quality |

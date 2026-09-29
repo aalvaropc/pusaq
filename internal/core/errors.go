@@ -40,6 +40,10 @@ const (
 	// CodeStoreUnavailable marks a request refused because a limit's store
 	// was unreachable and the tenant's policy is fail-closed.
 	CodeStoreUnavailable Code = "store_unavailable"
+	// CodeNotReady marks a request refused because this replica is inside
+	// an injected not-ready window (a failure-injection experiment); the
+	// error carries RetryAfter with the window's remaining time.
+	CodeNotReady Code = "not_ready"
 )
 
 // statusByCode maps each code to the HTTP status the transport layer renders.
@@ -55,6 +59,7 @@ var statusByCode = map[Code]int{
 	// a budget that only resets next month.
 	CodeBudgetExceeded:   http.StatusPaymentRequired,
 	CodeStoreUnavailable: http.StatusServiceUnavailable,
+	CodeNotReady:         http.StatusServiceUnavailable,
 }
 
 // Error is Pusaq's normalized error: every failure the gateway reports has a

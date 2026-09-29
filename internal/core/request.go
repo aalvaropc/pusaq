@@ -43,6 +43,10 @@ type Request struct {
 	// empty when absent; RouteReason says how the alias was resolved.
 	FeatureTag  string
 	RouteReason string
+	// RunID is the experiment run the client declared (metadata.run_id),
+	// empty when absent; it tags the cost event so a run is auditable from
+	// the log alone.
+	RunID string
 	// ServedModel is the physical upstream model that handled the request.
 	ServedModel string
 	// ServedProvider is the upstream backend that actually answered

@@ -26,7 +26,8 @@ x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_UPSTREAMS: mock=http://mock-lt:9090,backup=http://mock-lt-backup:9090
   PUSAQ_ROUTES: pusaq/fast=mock-exactness,pusaq/best=mock-neighbor
   PUSAQ_ROUTING_RULES: toll=pusaq/best,default=pusaq/fast
-  PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll
+  PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll,chaos-main:tenant-main,chaos-stream:tenant-stream,chaos-split:tenant-split
+  PUSAQ_ADMIN_TOKEN: ${LOADTEST_ADMIN_TOKEN:-local-chaos-token-0123456789}
   PUSAQ_RPM_LIMIT: ${LOADTEST_RPM:-600}
   PUSAQ_RPM_BURST: ${LOADTEST_BURST:-100}
   PUSAQ_RATELIMIT_MODE: ${LOADTEST_MODE:-strict}
@@ -93,11 +94,13 @@ services:
     <<: *pusaq-loadtest
     environment:
       <<: *pusaq-loadtest-env
+      PUSAQ_REGION: local-a
 
   pusaq-b:
     <<: *pusaq-loadtest
     environment:
       <<: *pusaq-loadtest-env
+      PUSAQ_REGION: local-b
 
   # Same image and settings with limiting disabled: the control arm for the
   # limiter's latency toll.
@@ -120,7 +123,7 @@ services:
       context: .
       target: mockprovider
     profiles: [loadtest]
-    command: ["--addr", ":9090", "--latency-p50", "${LOADTEST_MOCK_LATENCY:-0}", "--latency-p99", "${LOADTEST_MOCK_LATENCY:-0}", "--error-rate", "0"]
+    command: ["--addr", ":9090", "--latency-p50", "${LOADTEST_MOCK_LATENCY:-0}", "--latency-p99", "${LOADTEST_MOCK_LATENCY:-0}", "--error-rate", "0", "--stream-chunk-delay", "${LOADTEST_MOCK_CHUNK_DELAY:-10ms}"]
 
   # Fallback backend for the breaker run: the primary is made to fail on
   # command (POST /admin/fail) and traffic must keep flowing through here.
@@ -173,6 +176,16 @@ services:
       TPM_LIMIT: ${LOADTEST_TPM_LIMIT:-0}
       TPM_BURST: ${LOADTEST_TPM_BURST:-}
       TPM_RPS: ${TPM_RPS:-20}
+      GATEWAY_URLS: '{"local-a":"http://pusaq-a:8080","local-b":"http://pusaq-b:8080"}'
+      ADMIN_TOKEN: ${LOADTEST_ADMIN_TOKEN:-local-chaos-token-0123456789}
+      REGION_A: local-a
+      EXPERIMENT: ${CHAOS_EXPERIMENT:-region-fail}
+      CHAOS_QPS: ${CHAOS_QPS:-8}
+      CHAOS_STREAM_QPS: ${CHAOS_STREAM_QPS:-2}
+      CHAOS_SPLIT_QPS: ${CHAOS_SPLIT_QPS:-15}
+      CHAOS_WARMUP: ${CHAOS_WARMUP:-60s}
+      CHAOS_FAIL_FOR: ${CHAOS_FAIL_FOR:-60s}
+      CHAOS_DURATION: ${CHAOS_DURATION:-300s}
       TPM_DURATION: ${TPM_DURATION:-60s}
       API_KEY_A: lt-a
       API_KEY_B: lt-b

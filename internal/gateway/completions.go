@@ -100,6 +100,8 @@ type completionRequest struct {
 	MaxTokens int                `json:"max_tokens"`
 	Stream    bool               `json:"stream"`
 	// Metadata is the OpenAI metadata map; feature_tag drives the router.
+	// run_id is read by the transport layer before admission (see
+	// runIDFromPayload) so every event of the request carries it.
 	Metadata map[string]any `json:"metadata"`
 }
 
@@ -273,7 +275,6 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		if err != nil {
 			return nil, err
 		}
-
 		tag, err := featureTag(cr)
 		if err != nil {
 			return nil, err

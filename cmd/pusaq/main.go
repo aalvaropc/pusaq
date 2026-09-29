@@ -50,8 +50,14 @@ func run(logger *slog.Logger) error {
 		logger.Warn("authentication disabled: no PUSAQ_API_KEYS configured, all requests attributed to the dev tenant")
 	}
 
+	// Every event carries this replica's region label, so a multi-region
+	// run can be read back per region from the event stream alone.
+	emit := func(e core.CostEvent) {
+		e.Region = cfg.Region
+		emitter.Emit(e)
+	}
 	stages := []core.Stage{
-		gateway.Accounting(emitter.Emit, logger),
+		gateway.Accounting(emit, logger),
 		gateway.RequestID(),
 		gateway.Auth(cfg.APIKeys),
 	}
@@ -217,7 +223,13 @@ func run(logger *slog.Logger) error {
 	}
 	completions := gateway.CompletionsHandler(routes, providers, completionsOpts)
 
-	srv := gateway.NewServer(logger, pipeline, completions)
+	srv := gateway.NewServer(logger, pipeline, completions,
+		gateway.WithRegion(cfg.Region),
+		gateway.WithAdminToken(cfg.AdminToken),
+	)
+	if cfg.AdminToken != "" {
+		logger.Warn("admin endpoints enabled: readiness can be failed on purpose with the admin token")
+	}
 
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
@@ -229,7 +241,7 @@ func run(logger *slog.Logger) error {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("gateway listening", slog.String("addr", cfg.Addr))
+		logger.Info("gateway listening", slog.String("addr", cfg.Addr), slog.String("region", cfg.Region))
 		serveErr <- httpServer.ListenAndServe()
 	}()
 	srv.SetReady(true)

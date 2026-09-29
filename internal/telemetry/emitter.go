@@ -48,6 +48,12 @@ func (s SlogSink) Write(event core.CostEvent) {
 	if event.FeatureTag != "" {
 		attrs = append(attrs, slog.String("feature_tag", event.FeatureTag))
 	}
+	if event.RunID != "" {
+		attrs = append(attrs, slog.String("run_id", event.RunID))
+	}
+	if event.Region != "" {
+		attrs = append(attrs, slog.String("region", event.Region))
+	}
 	if event.TokensCharged > 0 {
 		attrs = append(attrs, slog.Int("tokens_charged", event.TokensCharged))
 	}

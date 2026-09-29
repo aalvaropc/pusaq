@@ -476,3 +476,38 @@ func TestTenantPoliciesRejections(t *testing.T) {
 		}
 	}
 }
+
+func TestRegionAndAdminTokenLoaded(t *testing.T) {
+	got, err := Load(lookupFrom(map[string]string{
+		"PUSAQ_REGION":      " us-east1 ",
+		"PUSAQ_ADMIN_TOKEN": "0123456789abcdef",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.Region != "us-east1" || got.AdminToken != "0123456789abcdef" {
+		t.Fatalf("Region/AdminToken = %q/%q", got.Region, got.AdminToken)
+	}
+	plain, err := Load(lookupFrom(map[string]string{}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if plain.Region != "" || plain.AdminToken != "" {
+		t.Fatalf("defaults = %q/%q, want empty (unlabeled, no admin endpoints)", plain.Region, plain.AdminToken)
+	}
+}
+
+func TestRegionAndAdminTokenRejections(t *testing.T) {
+	for _, env := range []map[string]string{
+		{"PUSAQ_REGION": "us east1"},
+		{"PUSAQ_REGION": "us/east1"},
+		{"PUSAQ_REGION": "   "},
+		{"PUSAQ_ADMIN_TOKEN": "   "},
+		{"PUSAQ_ADMIN_TOKEN": "short"},
+		{"PUSAQ_ADMIN_TOKEN": "has whitespace in it"},
+	} {
+		if _, err := Load(lookupFrom(env)); err == nil {
+			t.Fatalf("env %v accepted, want an error", env)
+		}
+	}
+}

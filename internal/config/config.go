@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,14 @@ const (
 	DefaultLeaseSize       = 10
 	DefaultLeaseTTL        = 1 * time.Second
 )
+
+// MinAdminTokenLen is the shortest PUSAQ_ADMIN_TOKEN accepted: the token
+// guards failure injection on a reachable service, so it must not be trivial.
+const MinAdminTokenLen = 16
+
+// regionLabel is the shape PUSAQ_REGION must have: header-safe and
+// log-safe (a Cloud Run region name, or any short label locally).
+var regionLabel = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // Rate-limit modes.
 const (
@@ -142,6 +151,13 @@ type Config struct {
 	// TelemetryBuffer is the cost-event buffer capacity
 	// (PUSAQ_TELEMETRY_BUFFER); overflow drops events.
 	TelemetryBuffer int
+	// Region labels this replica's region in cost events and in the
+	// X-Pusaq-Region response header (PUSAQ_REGION); empty means unlabeled.
+	Region string
+	// AdminToken enables the admin endpoints that failure-injection
+	// experiments use, as the bearer token they require (PUSAQ_ADMIN_TOKEN);
+	// empty means the endpoints are not served at all.
+	AdminToken string
 	// Upstreams are the OpenAI-compatible backends in priority order:
 	// the first is the primary for all aliases, the rest are fallbacks
 	// (PUSAQ_UPSTREAMS, "name=url" comma-separated).
@@ -272,6 +288,24 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_TELEMETRY_BUFFER: must be positive, got %d", n)
 		}
 		cfg.TelemetryBuffer = n
+	}
+
+	if v, ok := lookup("PUSAQ_REGION"); ok && v != "" {
+		v = strings.TrimSpace(v)
+		if !regionLabel.MatchString(v) {
+			return Config{}, fmt.Errorf("PUSAQ_REGION: must be a label of letters, digits, '.', '_' or '-', got %q", v)
+		}
+		cfg.Region = v
+	}
+
+	if v, ok := lookup("PUSAQ_ADMIN_TOKEN"); ok && v != "" {
+		if strings.TrimSpace(v) != v || strings.ContainsAny(v, " \t\r\n") {
+			return Config{}, fmt.Errorf("PUSAQ_ADMIN_TOKEN: must not contain whitespace")
+		}
+		if len(v) < MinAdminTokenLen {
+			return Config{}, fmt.Errorf("PUSAQ_ADMIN_TOKEN: must be at least %d characters", MinAdminTokenLen)
+		}
+		cfg.AdminToken = v
 	}
 
 	if v, ok := lookup("PUSAQ_UPSTREAMS"); ok && v != "" {
