@@ -54,12 +54,17 @@ A rate-limited request SHALL be rejected with the normalized error code `rate_li
 
 ### Requirement: Store failure degrades open
 
-If the limiter's backing store is unreachable or errors, the gateway SHALL admit the request (fail-open) and log the degradation — temporarily inexact limits are preferred over a total outage caused by the limiter itself. Rate limiting disabled by configuration SHALL be announced with a startup warning, never silent.
+If the limiter's backing store is unreachable or errors, the gateway SHALL admit the request (fail-open) and log the degradation — temporarily inexact limits are preferred over a total outage caused by the limiter itself — unless the tenant's policy sets `fail_closed`, in which case the request SHALL be rejected with 503 `store_unavailable` and no provider called. Rate limiting disabled by configuration SHALL be announced with a startup warning, never silent.
 
 #### Scenario: Redis outage does not reject traffic
 
 - **WHEN** the backing store is down and a request arrives
 - **THEN** the request is admitted and the degradation is logged
+
+#### Scenario: Fail-closed tenant is rejected during an outage
+
+- **WHEN** the backing store is down and a request arrives from a tenant whose policy sets `fail_closed`
+- **THEN** the response is 503 `store_unavailable`, no provider is called, and the degradation is logged
 
 #### Scenario: Disabled limiting is explicit
 
@@ -68,7 +73,7 @@ If the limiter's backing store is unreachable or errors, the gateway SHALL admit
 
 ### Requirement: Token-based limits with reservation and reconciliation
 
-With rate limiting enabled, the gateway SHALL additionally limit each tenant by LLM tokens per minute unless token limiting is explicitly disabled by configuration. After the request's model is resolved — and only then — the gateway SHALL atomically charge the tenant's token bucket with the request's input-token estimate plus an output reservation (the request's `max_tokens` when present, a configured default otherwise). When the request's actual usage becomes known, the gateway SHALL atomically reconcile the difference between charged and actual back into the bucket. Reconciliation SHALL happen exactly once per charged request — on success, on error, and at the end of a streamed response. When actual usage never becomes known, the full charge SHALL stand.
+With rate limiting enabled, the gateway SHALL additionally limit each tenant by LLM tokens per minute unless token limiting is explicitly disabled by configuration. After the request's model is resolved — and only then — the gateway SHALL atomically charge the tenant's token bucket with the request's input-token estimate plus an output reservation (the request's `max_tokens` when present, a configured default otherwise). When the request's actual usage becomes known, the gateway SHALL atomically reconcile the difference between charged and actual back into the bucket. Reconciliation SHALL happen exactly once per charged request — on success, on error, and at the end of a streamed response. When actual usage never becomes known, the full charge SHALL stand. Under sustained overload, the tokens actually consumed by admitted requests SHALL stay within the bucket bound over the window, and the excess at any instant SHALL be bounded by the reservation error of requests admitted before reconciliation caught up — at most the burst capacity times the ratio of under-reservation; a tenant that over-reserves SHALL show no excess. This SHALL be measurable by one reproducible command whose results are published with their protocol.
 
 #### Scenario: Token budget exhausted
 
@@ -94,6 +99,11 @@ With rate limiting enabled, the gateway SHALL additionally limit each tenant by 
 
 - **WHEN** the token limit is configured as zero
 - **THEN** no request is charged or rejected by the token limit, request limiting still applies, and the gateway logs a warning at startup that token limiting is disabled
+
+#### Scenario: Token consumption under overload stays within the bound, measured
+
+- **WHEN** a tenant with a full bucket of capacity B and refill r offers requests above its token rate for a window T against an upstream with a fixed usage per request, charging less than that usage on admission — and, in a second arm, charging more
+- **THEN** the tokens consumed over the window are at most `B + r·(T + ε)`, the peak excess in the under-reserving arm is at most `B × (actual − charged) / charged`, the over-reserving arm shows no excess, and no reconciliation fails
 
 ### Requirement: Request limits and token limits are independent dimensions
 
