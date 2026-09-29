@@ -30,6 +30,37 @@ const RegionHeader = "X-Pusaq-Region"
 // never leave a region refusing traffic indefinitely.
 const maxInjectedWindow = time.Hour
 
+// maxRunIDLen bounds metadata.run_id: a label, not a payload.
+const maxRunIDLen = 64
+
+// runIDFromPayload reads metadata.run_id before the request is admitted, so
+// every cost event of the request — including a rejection by an early stage
+// such as the rate limiter — carries the run it belongs to. Absent means
+// untagged; a non-string or oversized value is a client error. A body that
+// is not JSON at all is left for the operation to report.
+func runIDFromPayload(body []byte) (string, error) {
+	var envelope struct {
+		Metadata struct {
+			RunID json.RawMessage `json:"run_id"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return "", nil
+	}
+	raw := envelope.Metadata.RunID
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var id string
+	if err := json.Unmarshal(raw, &id); err != nil {
+		return "", core.NewError(core.CodeInvalidRequest, "metadata.run_id must be a string")
+	}
+	if len(id) > maxRunIDLen {
+		return "", core.Errorf(core.CodeInvalidRequest, "metadata.run_id must be at most %d characters", maxRunIDLen)
+	}
+	return id, nil
+}
+
 // Server wires the pipeline into an http.Handler and controls readiness.
 type Server struct {
 	logger   *slog.Logger
@@ -212,7 +243,13 @@ func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler 
 			return
 		}
 
-		req := &core.Request{ArrivedAt: time.Now().UTC(), Op: op, Payload: body}
+		runID, err := runIDFromPayload(body)
+		if err != nil {
+			s.writeError(w, "", err.(*core.Error))
+			return
+		}
+
+		req := &core.Request{ArrivedAt: time.Now().UTC(), Op: op, Payload: body, RunID: runID}
 		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 			req.APIKey = strings.TrimSpace(token)
 		}

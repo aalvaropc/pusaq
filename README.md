@@ -46,7 +46,9 @@ What the gateway does today:
   dollars against a versioned price table from configuration.
 
 Not implemented: serving from the cache, sensitive-data detection and PII
-redaction in the policy filter, and multi-region deployment.
+redaction in the policy filter, and a standing multi-region deployment (the
+two-region runtime module exists for measurement runs only and is destroyed
+after each one).
 
 ## API
 
@@ -60,13 +62,19 @@ a final usage chunk, then `data: [DONE]`. The `model` field takes an alias:
 `classify`/`extract` → fast, `reason`/`code` → best, everything else →
 fast). Responses carry `X-Pusaq-Model` (the physical model served),
 `X-Pusaq-Route-Reason` (`direct`, `rule:<tag>`, `default:untagged`, or
-`default:unknown_tag`) and `X-Pusaq-Request-Id`; the cost event records the
-same as `route_reason` and `feature_tag`. All errors share one JSON shape:
-`{"error":{"code":"...","message":"..."}}` — provider failures surface as
-`upstream_error` (502) without leaking upstream responses; a tenant policy
-denial is `policy_denied` (403); an exhausted monthly budget is
-`budget_exceeded` (402, with `retry_after_ms` until the next UTC month); a
-store outage for a fail-closed tenant is `store_unavailable` (503).
+`default:unknown_tag`), `X-Pusaq-Request-Id`, and — when the replica is
+labeled with `PUSAQ_REGION` — `X-Pusaq-Region`; the cost event records the
+same as `route_reason`, `feature_tag`, and `region`. A request may declare
+`metadata.run_id` (a string of at most 64 characters), read before
+admission and recorded on its cost event as `run_id` — also when the rate
+limiter rejects it — so a measurement run can be read back from the events.
+All errors share one JSON shape: `{"error":{"code":"...","message":"..."}}`
+— provider failures surface as `upstream_error` (502) without leaking
+upstream responses; a tenant policy denial is `policy_denied` (403); an
+exhausted monthly budget is `budget_exceeded` (402, with `retry_after_ms`
+until the next UTC month); a store outage for a fail-closed tenant is
+`store_unavailable` (503); a replica inside an injected not-ready window
+answers `not_ready` (503, with `Retry-After`).
 
 **Rate limiting.** With `PUSAQ_REDIS_ADDR` set, each tenant gets a token
 bucket in Redis decided by one atomic Lua script shared by every replica —
@@ -178,10 +186,19 @@ make down    # stop local environment
 Every request through the pipeline emits one `cost_event` JSON line on
 stdout — success, error, or panic — including requested/served model and
 token usage for completions. `GET /healthz` is liveness; `GET /readyz` is
-readiness and turns 503 during the drain window on SIGTERM.
+readiness and turns 503 during the drain window on SIGTERM. With
+`PUSAQ_ADMIN_TOKEN` set, `POST /admin/readiness?state=down&for=<duration>`
+(bearer token) fails readiness on purpose for that long — `/readyz` answers
+503 and new requests are refused with `not_ready` while in-flight requests
+and streams finish; `state=up` ends it early. It is the failure-injection
+knob chaos runs use instead of deleting a service; each action is one
+`readiness_window` log record.
 
 Configuration (env): `PUSAQ_ADDR` (default `:8080`), `PUSAQ_DRAIN_DELAY`
 (`1s`), `PUSAQ_SHUTDOWN_GRACE` (`10s`), `PUSAQ_TELEMETRY_BUFFER` (`1024`),
+`PUSAQ_REGION` (unset → unlabeled; a label of letters, digits, `.`, `_`,
+`-`), `PUSAQ_ADMIN_TOKEN` (unset → no admin endpoints; at least 16
+characters, no whitespace),
 `PUSAQ_UPSTREAMS` (`mock=http://localhost:9090`), `PUSAQ_UPSTREAM_TIMEOUT` (`30s`),
 `PUSAQ_ROUTES` (`alias=model,...` for `pusaq/fast` and `pusaq/best`),
 `PUSAQ_ROUTING_RULES` (`tag=alias,...,default=alias`; replaces the default
@@ -284,6 +301,32 @@ the Terraform outputs. From then on every push to `main` publishes
 `pusaq` and `mockprovider` images tagged with the commit SHA and `main`
 ([`release-image.yml`](.github/workflows/release-image.yml)). CI checks
 Terraform formatting and validity without credentials.
+
+The **runtime module** ([`infra/terraform/runtime/`](infra/terraform/runtime/))
+is the two-region deployment a failover measurement runs against, and it
+exists only for that run: the gateway in two Cloud Run regions (one
+instance each, readiness probe on `/readyz`, Direct VPC egress), one
+Memorystore Redis per region, the mock provider per region on internal
+ingress, and a global external Application Load Balancer over serverless
+NEGs that follows Cloud Run service health — the balancer stops sending new
+requests to a region whose instances fail their readiness probe. Plain HTTP
+on a global address, throwaway API keys, a generated admin token; nothing
+here is a standing deployment.
+
+```sh
+cp infra/terraform/runtime/terraform.tfvars.example infra/terraform/runtime/terraform.tfvars   # pin the image SHA
+make runtime-init && make runtime-plan && make runtime-apply       # ~10 min
+make chaos-run CHAOS_EXPERIMENT=none                               # control run
+make chaos-run                                                     # fail region A's readiness under load
+make runtime-destroy                                               # the same day
+```
+
+`make chaos-run` drives [`loadtest/chaos.js`](loadtest/chaos.js) with k6 in
+Docker from the machine it runs on, collects the gateways' events from Cloud
+Logging ([`fetch-events.sh`](loadtest/fetch-events.sh)), and computes the
+numbers ([`verify-chaos.sh`](loadtest/verify-chaos.sh)); `make chaos-local`
+runs the same harness on the Compose profile at no cost (nginx has no health
+checks there, so it checks the plumbing, not the failover).
 
 ## Stack
 

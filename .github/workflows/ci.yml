@@ -42,3 +42,5 @@ jobs:
       - run: terraform fmt -check -recursive -diff infra/terraform
       - run: terraform -chdir=infra/terraform/foundation init -backend=false -input=false
       - run: terraform -chdir=infra/terraform/foundation validate
+      - run: terraform -chdir=infra/terraform/runtime init -backend=false -input=false
+      - run: terraform -chdir=infra/terraform/runtime validate

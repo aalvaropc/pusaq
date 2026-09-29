@@ -286,7 +286,29 @@ func TestRunIDIsValidated(t *testing.T) {
 			t.Fatalf("payload %s: status %d body %s", payload, rec.Code, rec.Body.String())
 		}
 	}
-	if len(*events) != 2 {
-		t.Fatalf("events = %d, want one error event per rejected request", len(*events))
+	// Rejected before admission, like an oversized body: no cost event.
+	if len(*events) != 0 {
+		t.Fatalf("events = %d, want none for pre-admission rejections", len(*events))
+	}
+}
+
+func TestRunIDPresentWhenAnEarlyStageRejects(t *testing.T) {
+	var events []core.CostEvent
+	emit := func(e core.CostEvent) { events = append(events, e) }
+	rejecting := core.Stage(func(_ core.Handler) core.Handler {
+		return func(_ context.Context, _ *core.Request) (*core.Response, error) {
+			return nil, core.NewError(core.CodeRateLimited, "rejected before the handler")
+		}
+	})
+	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID(), rejecting)
+	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()}, CompletionsOptions{Logger: discardLogger()})
+	s := NewServer(discardLogger(), pipeline, completions)
+	s.SetReady(true)
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"pusaq/fast","metadata":{"run_id":"early"},"messages":[{"role":"user","content":"x"}]}`)))
+	if rec.Code != http.StatusTooManyRequests || len(events) != 1 || events[0].RunID != "early" {
+		t.Fatalf("status %d, events %+v: want the run id on the early rejection's event", rec.Code, events)
 	}
 }

@@ -99,29 +99,10 @@ type completionRequest struct {
 	Messages  []provider.Message `json:"messages"`
 	MaxTokens int                `json:"max_tokens"`
 	Stream    bool               `json:"stream"`
-	// Metadata is the OpenAI metadata map; feature_tag drives the router
-	// and run_id tags the cost event for measurement runs.
+	// Metadata is the OpenAI metadata map; feature_tag drives the router.
+	// run_id is read by the transport layer before admission (see
+	// runIDFromPayload) so every event of the request carries it.
 	Metadata map[string]any `json:"metadata"`
-}
-
-// maxRunIDLen bounds metadata.run_id: a label, not a payload.
-const maxRunIDLen = 64
-
-// runID extracts metadata.run_id: absent means untagged; any non-string or
-// oversized value is a client error.
-func runID(cr completionRequest) (string, error) {
-	v, ok := cr.Metadata["run_id"]
-	if !ok || v == nil {
-		return "", nil
-	}
-	s, ok := v.(string)
-	if !ok {
-		return "", core.NewError(core.CodeInvalidRequest, "metadata.run_id must be a string")
-	}
-	if len(s) > maxRunIDLen {
-		return "", core.Errorf(core.CodeInvalidRequest, "metadata.run_id must be at most %d characters", maxRunIDLen)
-	}
-	return s, nil
 }
 
 // featureTag extracts metadata.feature_tag: absent means untagged, any
@@ -294,14 +275,6 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		if err != nil {
 			return nil, err
 		}
-		// The run id is recorded first so every later failure of this
-		// request is still attributable to its run.
-		rid, err := runID(cr)
-		if err != nil {
-			return nil, err
-		}
-		req.RunID = rid
-
 		tag, err := featureTag(cr)
 		if err != nil {
 			return nil, err
