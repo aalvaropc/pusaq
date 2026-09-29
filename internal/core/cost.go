@@ -46,6 +46,9 @@ type CostEvent struct {
 	// Cost is the request's price against the configured table; zero
 	// (and omitted) when no table is configured or usage is unknown.
 	Cost Cost `json:"cost,omitzero"`
+	// SpendUSDMonth is the tenant's month-to-date spend for budgeted
+	// tenants: the total after this request, or the total that denied it.
+	SpendUSDMonth float64 `json:"spend_usd_month,omitempty"`
 }
 
 // Cost is a priced usage: dollars and the version of the table that

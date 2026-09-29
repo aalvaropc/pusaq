@@ -175,16 +175,19 @@ cost.
 ## 4. The path of a request
 
 1. **Authentication.** The API key resolves the tenant and loads its policy
-   (limits, allowed models, flags). Example policy: team `support`,
-   100 requests/min, $30/month budget, fast+standard models, cache enabled.
-   Without a policy, nothing else runs.
+   (allowed models, prompt cap, monthly budget, fail-closed flag —
+   `PUSAQ_TENANT_POLICIES`). Example policy: team `support`, $30/month
+   budget, fast+best models, fail-closed. A tenant without a policy is
+   unrestricted.
 2. **Request rate limit (RPM).** One atomic Lua round-trip to Redis decides.
    Rejection = Pusaq's own 429 with `retry_after` computed from the bucket
    state — the gateway speaks to its clients in the same language providers
    speak to it.
-3. **Policy filter.** Allowed models, max prompt size, remaining budget,
-   presence of sensitive data, cacheability. Basic injection heuristics and
-   PII redaction before anything is cached or logged. (Deliberately *not*
+3. **Policy filter.** Allowed models (checked on the resolved alias, so a
+   `pusaq/auto` request is denied rather than rerouted), max prompt size,
+   remaining monthly budget — enforced after alias resolution and before
+   the token charge, so a denial costs nothing. Not built: sensitive-data
+   detection, PII redaction, injection heuristics. (Deliberately *not*
    called a "prompt firewall" — regexes cannot promise that.)
 4. **Semantic cache.** Prompt embedding → nearest neighbor → if similarity ≥ τ
    and the entry is cacheable, immediate response (recorded as a hit with the
@@ -465,6 +468,6 @@ more than an inflated 80%.
 |---|---|
 | Semantic cache hit-rate disappoints (traffic without semantic repetition) | Zipf-realistic replay, declared; report hit-rate sensitivity to repetition skew. "The cache only pays with traffic this repetitive" is a publishable finding, not a failure |
 | Badly calibrated τ serves wrong answers | Shadow mode first; τ chosen for precision ≥ 0.99, never for hit-rate; FP rate always published |
-| Redis partition/outage vs limiter exactness | Documented degraded mode: **fail-open** with a conservative local limit (`limit/M` per replica) by default — a gateway that rejects everything because its semaphore died trades a cost problem for an availability outage; per-tenant `fail_closed` flag for hard budgets |
+| Redis partition/outage vs limiter exactness | Documented degraded mode: **fail-open** by default — a gateway that rejects everything because its semaphore died trades a cost problem for an availability outage; the per-tenant `fail_closed` policy rejects with 503 instead, for tenants with hard budgets |
 | Multi-region doubles deploy friction | Terraform from day one; one region-parameterized definition; no load run starts without clean `apply`/`destroy` cycles |
 | Scope creep (more providers, UI, queues) | Mechanical gate: the headline numbers must be captured and script-reproducible before any new feature is considered |

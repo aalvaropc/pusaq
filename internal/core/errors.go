@@ -31,6 +31,15 @@ const (
 	// before completion. Accounting-only: nothing is written to a gone
 	// client.
 	CodeStreamInterrupted Code = "stream_interrupted"
+	// CodePolicyDenied marks a request the tenant's policy forbids (model
+	// not allowed, prompt too large).
+	CodePolicyDenied Code = "policy_denied"
+	// CodeBudgetExceeded marks a request refused because the tenant's
+	// monthly budget is exhausted; RetryAfter points at the next month.
+	CodeBudgetExceeded Code = "budget_exceeded"
+	// CodeStoreUnavailable marks a request refused because a limit's store
+	// was unreachable and the tenant's policy is fail-closed.
+	CodeStoreUnavailable Code = "store_unavailable"
 )
 
 // statusByCode maps each code to the HTTP status the transport layer renders.
@@ -41,6 +50,11 @@ var statusByCode = map[Code]int{
 	CodeNotFound:       http.StatusNotFound,
 	CodeInternal:       http.StatusInternalServerError,
 	CodeUpstream:       http.StatusBadGateway,
+	CodePolicyDenied:   http.StatusForbidden,
+	// 402 rather than 429: SDKs retry 429 with backoff, which is wrong for
+	// a budget that only resets next month.
+	CodeBudgetExceeded:   http.StatusPaymentRequired,
+	CodeStoreUnavailable: http.StatusServiceUnavailable,
 }
 
 // Error is Pusaq's normalized error: every failure the gateway reports has a

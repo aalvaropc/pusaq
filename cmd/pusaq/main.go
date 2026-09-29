@@ -23,6 +23,7 @@ import (
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
 	"github.com/aalvaropc/pusaq/internal/semcache"
+	"github.com/aalvaropc/pusaq/internal/spend"
 	"github.com/aalvaropc/pusaq/internal/telemetry"
 
 	"github.com/redis/go-redis/v9"
@@ -57,6 +58,28 @@ func run(logger *slog.Logger) error {
 	completionsOpts := gateway.CompletionsOptions{
 		ReserveDefault: cfg.TPMReserveDefault,
 		Logger:         logger,
+	}
+
+	// Per-tenant policies: a lookup over a table built once at startup.
+	var policies gateway.PolicyFor
+	if len(cfg.TenantPolicies) > 0 {
+		table := make(map[string]gateway.Policy, len(cfg.TenantPolicies))
+		for tenant, p := range cfg.TenantPolicies {
+			gp := gateway.Policy{MaxPromptChars: p.MaxPromptChars, BudgetUSD: p.BudgetUSD, FailClosed: p.FailClosed}
+			if p.Models != nil {
+				gp.Models = make(map[string]bool, len(p.Models))
+				for _, a := range p.Models {
+					gp.Models[a] = true
+				}
+			}
+			table[tenant] = gp
+		}
+		policies = func(tenant string) gateway.Policy { return table[tenant] }
+		completionsOpts.Policies = policies
+		logger.Info("tenant policies loaded",
+			slog.Int("tenants", len(table)),
+			slog.Bool("budgets", cfg.HasBudgets()),
+		)
 	}
 
 	var shadow *semcache.Shadow
@@ -96,7 +119,11 @@ func run(logger *slog.Logger) error {
 			leased = ratelimit.NewLeased(rpm, cfg.LeaseSize, cfg.LeaseTTL)
 			admitter = leased
 		}
-		stages = append(stages, gateway.RateLimit(admitter, logger))
+		stages = append(stages, gateway.RateLimit(admitter, policies, logger))
+		if cfg.HasBudgets() {
+			completionsOpts.Spend = spend.New(client)
+			logger.Info("tenant budgets enabled: monthly spend counted in the store")
+		}
 		if cfg.TPMLimit > 0 {
 			tpm, err := ratelimit.New(client, "tpm", ratelimit.Limits{
 				Burst: cfg.TPMBurst,

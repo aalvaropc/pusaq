@@ -170,7 +170,11 @@ type CompletionsOptions struct {
 	Prices *pricing.Table
 	// Rules resolve AutoAlias; a zero value makes auto requests fail as
 	// unknown models.
-	Rules  RoutingRules
+	Rules RoutingRules
+	// Policies resolves per-tenant policies; nil means no policies.
+	Policies PolicyFor
+	// Spend tracks monthly spend for budgeted tenants; nil disables budgets.
+	Spend  SpendCounter
 	Logger *slog.Logger
 }
 
@@ -285,6 +289,12 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		req.RouteReason = reason
 		priceOnFinalize(req, opts.Prices)
 
+		// Policy runs after the alias is known and before anything is
+		// charged: a denied request costs the tenant nothing.
+		if err := applyPolicy(ctx, req, cr, alias, opts); err != nil {
+			return nil, err
+		}
+
 		// TPM is charged once, before any backend attempt: the model
 		// contract is identical across the fallback chain.
 		if err := chargeTokens(ctx, req, cr, opts); err != nil {
@@ -347,6 +357,14 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 	d, err := opts.Tokens.Allow(limCtx, req.Tenant, float64(charged))
 	cancel()
 	if err != nil {
+		if opts.policyFor(req.Tenant).FailClosed {
+			opts.Logger.Warn("token limiter store unavailable, failing closed",
+				slog.String("request_id", req.ID),
+				slog.String("tenant", req.Tenant),
+				slog.Any("error", err),
+			)
+			return &core.Error{Code: core.CodeStoreUnavailable, Message: "token limiter store unavailable", Err: err}
+		}
 		opts.Logger.Warn("token limiter store unavailable, failing open",
 			slog.String("request_id", req.ID),
 			slog.String("tenant", req.Tenant),
