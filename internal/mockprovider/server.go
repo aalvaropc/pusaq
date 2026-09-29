@@ -25,7 +25,15 @@ type Options struct {
 	LatencyP99 time.Duration
 	// ErrorRate is the probability [0,1] of responding 500 instead of 200.
 	ErrorRate float64
+	// StreamChunkDelay spaces the chunks of a streamed completion, so a
+	// stream can be made to last long enough to be in flight when an
+	// experiment injects a failure. Zero means the default.
+	StreamChunkDelay time.Duration
 }
+
+// defaultStreamChunkDelay keeps streaming observable without making local
+// runs slow.
+const defaultStreamChunkDelay = 10 * time.Millisecond
 
 // Validate rejects meaningless configurations.
 func (o Options) Validate() error {
@@ -37,6 +45,9 @@ func (o Options) Validate() error {
 	}
 	if o.ErrorRate < 0 || o.ErrorRate > 1 {
 		return fmt.Errorf("error-rate must be in [0,1], got %g", o.ErrorRate)
+	}
+	if o.StreamChunkDelay < 0 {
+		return fmt.Errorf("stream-chunk-delay must be non-negative, got %s", o.StreamChunkDelay)
 	}
 	return nil
 }
@@ -78,6 +89,9 @@ type Server struct {
 func NewServer(logger *slog.Logger, opts Options) (*Server, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
+	}
+	if opts.StreamChunkDelay == 0 {
+		opts.StreamChunkDelay = defaultStreamChunkDelay
 	}
 	s := &Server{
 		opts:    opts,
@@ -286,7 +300,7 @@ func (s *Server) streamCompletion(w http.ResponseWriter, model string) {
 			finish = "stop"
 		}
 		writeEvent(chunk(delta, finish))
-		s.sleep(interChunkDelay)
+		s.sleep(s.opts.StreamChunkDelay)
 	}
 
 	usage, _ := json.Marshal(map[string]any{
@@ -299,9 +313,6 @@ func (s *Server) streamCompletion(w http.ResponseWriter, model string) {
 	writeEvent(string(usage))
 	writeEvent("[DONE]")
 }
-
-// interChunkDelay spaces streamed chunks so streaming is observable.
-const interChunkDelay = 10 * time.Millisecond
 
 // nilIfEmpty renders OpenAI's null finish_reason for non-final chunks.
 func nilIfEmpty(s string) any {

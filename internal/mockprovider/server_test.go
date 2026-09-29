@@ -352,3 +352,40 @@ func TestFailureWindowRejectsBadDuration(t *testing.T) {
 		t.Fatal("a rejected request opened a window")
 	}
 }
+
+func TestStreamChunkDelayIsConfigurable(t *testing.T) {
+	s, err := NewServer(discardLogger(), Options{StreamChunkDelay: 250 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var slept []time.Duration
+	s.sleep = func(d time.Duration) { slept = append(slept, d) }
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"mock-model","messages":[{"role":"user","content":"x"}],"stream":true}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var chunkSleeps int
+	for _, d := range slept {
+		if d == 0 {
+			continue // the zero-latency sample before the first byte
+		}
+		if d != 250*time.Millisecond {
+			t.Fatalf("chunk sleep = %s, want 250ms", d)
+		}
+		chunkSleeps++
+	}
+	if chunkSleeps == 0 {
+		t.Fatal("no chunk sleeps observed")
+	}
+
+	if _, err := NewServer(discardLogger(), Options{StreamChunkDelay: -1}); err == nil {
+		t.Fatal("negative chunk delay accepted")
+	}
+	def, _ := NewServer(discardLogger(), Options{})
+	if def.opts.StreamChunkDelay != defaultStreamChunkDelay {
+		t.Fatalf("default chunk delay = %s, want %s", def.opts.StreamChunkDelay, defaultStreamChunkDelay)
+	}
+}

@@ -35,6 +35,11 @@ type CostEvent struct {
 	// how the requested alias resolved (direct, rule:<tag>, default:…).
 	FeatureTag  string `json:"feature_tag,omitempty"`
 	RouteReason string `json:"route_reason,omitempty"`
+	// RunID is the client-declared experiment run (metadata.run_id);
+	// Region labels the replica's region (PUSAQ_REGION). Both are empty
+	// when unset and let a measurement run be read back from the events.
+	RunID  string `json:"run_id,omitempty"`
+	Region string `json:"region,omitempty"`
 	// ServedProvider names the backend that answered (after fallback);
 	// Attempts counts backend attempts, so failover is observable.
 	ServedProvider string `json:"served_provider,omitempty"`

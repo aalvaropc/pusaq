@@ -31,12 +31,14 @@ func run(logger *slog.Logger) error {
 	latencyP50 := flag.Duration("latency-p50", 0, "median response latency (e.g. 200ms)")
 	latencyP99 := flag.Duration("latency-p99", 0, "tail response latency (e.g. 2s)")
 	errorRate := flag.Float64("error-rate", 0, "probability [0,1] of responding 500")
+	chunkDelay := flag.Duration("stream-chunk-delay", 10*time.Millisecond, "delay between streamed chunks (e.g. 200ms)")
 	flag.Parse()
 
 	srv, err := mockprovider.NewServer(logger, mockprovider.Options{
-		LatencyP50: *latencyP50,
-		LatencyP99: *latencyP99,
-		ErrorRate:  *errorRate,
+		LatencyP50:       *latencyP50,
+		LatencyP99:       *latencyP99,
+		ErrorRate:        *errorRate,
+		StreamChunkDelay: *chunkDelay,
 	})
 	if err != nil {
 		return err
@@ -54,6 +56,7 @@ func run(logger *slog.Logger) error {
 			slog.Duration("latency_p50", *latencyP50),
 			slog.Duration("latency_p99", *latencyP99),
 			slog.Float64("error_rate", *errorRate),
+			slog.Duration("stream_chunk_delay", *chunkDelay),
 		)
 		serveErr <- httpServer.ListenAndServe()
 	}()
