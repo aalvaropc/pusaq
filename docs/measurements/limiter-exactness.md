@@ -65,7 +65,8 @@ router under load (a wrong `X-Pusaq-Route-Reason` fails the run) and shares
 the mock's second physical model with the neighbor tenant; only the
 overload tenant's model is isolated.
 
-Token limiting is disabled for this profile (`PUSAQ_TPM_LIMIT=0`) so the
+Token limiting is disabled for this profile (`PUSAQ_TPM_LIMIT=0`; `make
+tpmtest` is the run that turns it on, see `tpm-overrun.md`) so the
 measured toll is the request limiter's alone; with it on, every admitted
 request would pay a second script call plus a reconciliation call.
 

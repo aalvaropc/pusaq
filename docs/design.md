@@ -267,13 +267,17 @@ RPM protects infrastructure; invoices and provider quotas are measured in
 costs more than one doing 1,000 short ones. Pusaq limits both.
 
 The non-trivial part: output tokens are unknown until the response ends. The
-design: **reserve on admission** (input tokens + an output estimate from a
-historical percentile with a floor — not always `max_tokens`, which strangles
-throughput), **reconcile on completion** (return the difference, another
-atomic Lua script). Reservations carry a TTL so a request that dies mid-flight
-never leaves tokens deducted forever, and reconciliation lives in a
-`defer`/`finally`. The maximum observed overrun is reported as part of the
-exactness metric.
+design: **reserve on admission** (an input-token estimate plus an output
+reservation — the request's `max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`
+when absent), **reconcile on completion** (return the difference, another
+atomic Lua script) in a finalizer that runs on success, error, and stream
+end alike. A request whose usage never becomes known keeps its full charge;
+idle buckets expire with the bucket's TTL. Between admission and
+reconciliation the bucket is wrong by the reservation error, so a tenant
+that under-reserves can consume more than its bucket allows before the
+correction lands: the window total still stays within the bound, and the
+peak excess is bounded by the burst's worth of under-reserved admissions —
+measured, not asserted ([measurements](measurements/tpm-overrun.md)).
 
 ### 5.4 Semantic cache
 
@@ -453,6 +457,7 @@ their protocol — including the ones that disappoint.
 | Semantic cache savings | Replay corpus grouped by intent with paraphrases, Zipf-distributed frequencies; same requests, same order, with and without cache | Hit-rate, net $ savings, latency reduction, **FP rate against corpus labels** |
 | Limiter exactness | M replicas, N clients pushing 10× the limit ≥5 min against the mock; strict and lease modes | Accepted vs limit (± burst), max TPM overrun, p99 added per mode |
 | Regional failover | Sustained k6 against the global LB; readiness of region A forced to fail at a known instant; sequence IDs per request | Availability gap, requests redirected / recovered by retry / streams interrupted (**counted, not estimated**) |
+| Token-limit overrun | `make tpmtest`: token limiting on, emulated upstream latency, an under-reserving and an over-reserving tenant at the same rate | Σconsumed vs the bucket bound over the window, peak excess vs the stated ceiling, reservation error per request, requests in flight |
 | Breaker detection | `make breakertest`: the mock primary fails on command for a known window under steady traffic with a healthy fallback | Detection time (failure start → breaker open), recovery time (failure end → closed), probes, extra attempts, fallback-served requests, client errors (must be zero) |
 | Router savings | Mixed-task dataset with reference answers; all-best vs router; LLM-as-judge rubric verifies quality within a declared margin | Z% savings at equivalent judged quality |
 

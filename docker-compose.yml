@@ -32,7 +32,8 @@ x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_RATELIMIT_MODE: ${LOADTEST_MODE:-strict}
   PUSAQ_LEASE_SIZE: ${LOADTEST_LEASE_SIZE:-10}
   PUSAQ_LEASE_TTL: 1s
-  PUSAQ_TPM_LIMIT: "0"
+  PUSAQ_TPM_LIMIT: ${LOADTEST_TPM_LIMIT:-0}
+  PUSAQ_TPM_BURST: ${LOADTEST_TPM_BURST:-}
   PUSAQ_CACHE_MODE: "off"
   PUSAQ_TELEMETRY_BUFFER: "65536"
   PUSAQ_DRAIN_DELAY: 0s
@@ -112,12 +113,14 @@ services:
       <<: *pusaq-loadtest-env
       PUSAQ_REDIS_ADDR: ""
 
+  # Latency is 0 for the limiter and breaker runs; the token-overrun run
+  # emulates LLM latency so requests overlap in flight.
   mock-lt:
     build:
       context: .
       target: mockprovider
     profiles: [loadtest]
-    command: ["--addr", ":9090", "--latency-p50", "0", "--latency-p99", "0", "--error-rate", "0"]
+    command: ["--addr", ":9090", "--latency-p50", "${LOADTEST_MOCK_LATENCY:-0}", "--latency-p99", "${LOADTEST_MOCK_LATENCY:-0}", "--error-rate", "0"]
 
   # Fallback backend for the breaker run: the primary is made to fail on
   # command (POST /admin/fail) and traffic must keep flowing through here.
@@ -167,6 +170,10 @@ services:
       BREAKER_WARMUP: ${BREAKER_WARMUP:-20s}
       BREAKER_FAIL_FOR: ${BREAKER_FAIL_FOR:-5s}
       BREAKER_DURATION: ${BREAKER_DURATION:-45s}
+      TPM_LIMIT: ${LOADTEST_TPM_LIMIT:-0}
+      TPM_BURST: ${LOADTEST_TPM_BURST:-}
+      TPM_RPS: ${TPM_RPS:-20}
+      TPM_DURATION: ${TPM_DURATION:-60s}
       API_KEY_A: lt-a
       API_KEY_B: lt-b
       API_KEY_TOLL: lt-c

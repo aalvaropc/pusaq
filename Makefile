@@ -14,16 +14,30 @@ BREAKER_RPS ?= 8
 BREAKER_WARMUP ?= 20s
 BREAKER_FAIL_FOR ?= 5s
 BREAKER_DURATION ?= 45s
+# Token-limit overrun run: token limiting on, emulated upstream latency,
+# request limit raised so it never interferes (20 rps per arm).
+TPM_LIMIT ?= 6000
+TPM_BURST ?= 1000
+TPM_RPS ?= 20
+TPM_DURATION ?= 60s
+TPM_RPM ?= 6000
+TPM_RPM_BURST ?= 1000
+TPM_MOCK_LATENCY ?= 2s
+# Profile-wide knobs the other runs leave at their defaults.
+LOADTEST_TPM_LIMIT ?= 0
+LOADTEST_TPM_BURST ?=
+LOADTEST_MOCK_LATENCY ?= 0
 RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 export LOADTEST_RPM LOADTEST_BURST LOADTEST_DURATION LOADTEST_RATE_MULT LOADTEST_TOLL_RPS LOADTEST_TOLL_DURATION LOADTEST_MODE LOADTEST_LEASE_SIZE \
-       BREAKER_RPS BREAKER_WARMUP BREAKER_FAIL_FOR BREAKER_DURATION RUN_ID
+       BREAKER_RPS BREAKER_WARMUP BREAKER_FAIL_FOR BREAKER_DURATION \
+       LOADTEST_TPM_LIMIT LOADTEST_TPM_BURST LOADTEST_MOCK_LATENCY TPM_RPS TPM_DURATION RUN_ID
 
 # Cloud foundation (Terraform). The state bucket exists already; its name is
 # passed at init time so it is never hardcoded in the configuration.
 TF_STATE_BUCKET ?= aalvaropc-tfstate
 TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
 
-.PHONY: help up down run mock test lint tidy smoke calibrate loadtest loadtest-down breakertest \
+.PHONY: help up down run mock test lint tidy smoke calibrate loadtest loadtest-down breakertest tpmtest \
         infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate
 
 help: ## List available targets
@@ -74,6 +88,18 @@ breakertest: ## Breaker detection/recovery run: primary mock fails on command, k
 	docker compose exec -T redis redis-cli FLUSHALL
 	docker compose --profile loadtest run --rm --user "$$(id -u):$$(id -g)" k6 run breaker.js
 	./loadtest/verify-breaker.sh $(RUN_ID)
+
+tpmtest: LOADTEST_TPM_LIMIT = $(TPM_LIMIT)
+tpmtest: LOADTEST_TPM_BURST = $(TPM_BURST)
+tpmtest: LOADTEST_RPM = $(TPM_RPM)
+tpmtest: LOADTEST_BURST = $(TPM_RPM_BURST)
+tpmtest: LOADTEST_MOCK_LATENCY = $(TPM_MOCK_LATENCY)
+tpmtest: ## Token-limit overrun run: under- and over-reserving tenants against an emulated-latency mock
+	docker compose --profile loadtest up -d --build --force-recreate \
+		pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b mock-lt mock-lt-backup lb
+	docker compose exec -T redis redis-cli FLUSHALL
+	docker compose --profile loadtest run --rm --user "$$(id -u):$$(id -g)" k6 run tpm.js
+	./loadtest/verify-tpm.sh $(RUN_ID)
 
 loadtest-down: ## Stop the load-test profile
 	docker compose --profile loadtest down --remove-orphans
