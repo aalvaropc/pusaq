@@ -70,8 +70,19 @@ func run(logger *slog.Logger) error {
 	var policies gateway.PolicyFor
 	if len(cfg.TenantPolicies) > 0 {
 		table := make(map[string]gateway.Policy, len(cfg.TenantPolicies))
+		blocking := 0
 		for tenant, p := range cfg.TenantPolicies {
-			gp := gateway.Policy{MaxPromptChars: p.MaxPromptChars, BudgetUSD: p.BudgetUSD, FailClosed: p.FailClosed}
+			gp := gateway.Policy{
+				MaxPromptChars: p.MaxPromptChars,
+				BudgetUSD:      p.BudgetUSD,
+				FailClosed:     p.FailClosed,
+				BlockSensitive: p.Sensitive == "block",
+				BlockInjection: p.Injection == "block",
+				CacheOff:       p.CacheOff,
+			}
+			if gp.BlockSensitive || gp.BlockInjection {
+				blocking++
+			}
 			if p.Models != nil {
 				gp.Models = make(map[string]bool, len(p.Models))
 				for _, a := range p.Models {
@@ -85,6 +96,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("tenant policies loaded",
 			slog.Int("tenants", len(table)),
 			slog.Bool("budgets", cfg.HasBudgets()),
+			slog.Int("blocking_content_rules", blocking),
 		)
 	}
 

@@ -185,10 +185,16 @@ cost.
    speak to it.
 3. **Policy filter.** Allowed models (checked on the resolved alias, so a
    `pusaq/auto` request is denied rather than rerouted), max prompt size,
-   remaining monthly budget — enforced after alias resolution and before
-   the token charge, so a denial costs nothing. Not built: sensitive-data
-   detection, PII redaction, injection heuristics. (Deliberately *not*
-   called a "prompt firewall" — regexes cannot promise that.)
+   content rules, remaining monthly budget — enforced after alias
+   resolution and before the token charge, so a denial costs nothing. The
+   content rules are measured heuristics (regex, checksums, cue words;
+   [measurements](measurements/content-rules.md)) that flag personal data
+   and secrets, instruction-override phrasing, and time-dependent
+   questions; the kinds matched go on the cost event, a tenant may block
+   on them, and a flagged prompt never reaches the cache. Not built:
+   rewriting or masking content, outbound secret scanning of responses.
+   (Deliberately *not* called a "prompt firewall" — regexes cannot promise
+   that.)
 4. **Semantic cache.** Prompt embedding → nearest neighbor → if similarity ≥ τ
    and the entry is cacheable, immediate response (recorded as a hit with the
    avoided cost). Miss → continue.
@@ -311,7 +317,10 @@ explicit namespace purge, LRU size cap.
 
 **What is never cached:** prompts with personal/session context, temporal
 prompts ("today's dollar rate"), multi-turn conversations (turn N depends on
-N−1), high-temperature creative generation.
+N−1), high-temperature creative generation. The policy filter decides this
+once per request (content rules, shape, an explicit temperature above 0.7,
+a tenant's opt-out) and records the single reason on the cost event as
+`cache_skip`, so what the cache never saw is auditable next to what it did.
 
 **The business metric** is a subtraction, not a percentage:
 `net savings = (hits × avoided model cost) − (all requests × embedding cost) − index infra cost`.
@@ -467,6 +476,7 @@ their protocol — including the ones that disappoint.
 | Token-limit overrun | `make tpmtest`: token limiting on, emulated upstream latency, an under-reserving and an over-reserving tenant at the same rate | Σconsumed vs the bucket bound over the window, peak excess vs the stated ceiling, reservation error per request, requests in flight |
 | Breaker detection | `make breakertest`: the mock primary fails on command for a known window under steady traffic with a healthy fallback | Detection time (failure start → breaker open), recovery time (failure end → closed), probes, extra attempts, fallback-served requests, client errors (must be zero) |
 | Router savings | Mixed-task dataset with reference answers; all-best vs router; LLM-as-judge rubric verifies quality within a declared margin | Z% savings at equivalent judged quality |
+| Content rules | `go test -v -run TestContentRulesCorpus ./internal/policy`: the policy filter's sensitive-data, injection and temporal rules against a labeled EN/ES corpus with hard negatives | Precision and recall per family against published floors the suite enforces; every miss and false alarm listed |
 
 Experiment rules: hypothesis written before running; every run tagged with an
 auditable `run_id` in the cost log; limiter/failover runs hit the mock

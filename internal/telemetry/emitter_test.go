@@ -157,3 +157,21 @@ func TestSlogSinkWritesRoutingFields(t *testing.T) {
 		t.Fatalf("line = %v, want route_reason and feature_tag", line)
 	}
 }
+
+func TestSlogSinkWritesPolicyFlagsAndCacheSkip(t *testing.T) {
+	var buf bytes.Buffer
+	sink := SlogSink{Logger: slog.New(slog.NewJSONHandler(&buf, nil))}
+	sink.Write(core.CostEvent{RequestID: "r1", Op: "chat.completions", Outcome: core.OutcomeSuccess,
+		PolicyFlags: []string{"pii:email", "temporal:now"}, CacheSkip: "sensitive"})
+	sink.Write(core.CostEvent{RequestID: "r2", Op: "chat.completions", Outcome: core.OutcomeSuccess})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d", len(lines))
+	}
+	if !strings.Contains(lines[0], `"policy_flags":"pii:email,temporal:now"`) || !strings.Contains(lines[0], `"cache_skip":"sensitive"`) {
+		t.Fatalf("flags missing from %s", lines[0])
+	}
+	if strings.Contains(lines[1], "policy_flags") || strings.Contains(lines[1], "cache_skip") {
+		t.Fatalf("empty flags rendered in %s", lines[1])
+	}
+}

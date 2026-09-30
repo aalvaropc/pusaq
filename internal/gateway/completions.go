@@ -98,7 +98,10 @@ type completionRequest struct {
 	Model     string             `json:"model"`
 	Messages  []provider.Message `json:"messages"`
 	MaxTokens int                `json:"max_tokens"`
-	Stream    bool               `json:"stream"`
+	// Temperature is forwarded as sent; a pointer keeps an explicit 0 and
+	// tells an omitted value apart (the provider default).
+	Temperature *float64 `json:"temperature"`
+	Stream      bool     `json:"stream"`
 	// Metadata is the OpenAI metadata map; feature_tag drives the router.
 	// run_id is read by the transport layer before admission (see
 	// runIDFromPayload) so every event of the request carries it.
@@ -198,44 +201,12 @@ func priceOnFinalize(req *core.Request, prices *pricing.Table) {
 	})
 }
 
-// cacheable reports whether a request is structurally eligible for the
-// semantic cache (docs/design.md §5.4): exactly one user message, optionally preceded by
-// system messages. Multi-turn is never cacheable. It returns the system
-// prompt (namespace material) and the user content (the embedded text).
-func cacheable(messages []provider.Message) (systemPrompt, userContent string, ok bool) {
-	users := 0
-	var sys strings.Builder
-	for _, m := range messages {
-		switch m.Role {
-		case "system":
-			if users > 0 {
-				return "", "", false // system after user: not the simple shape
-			}
-			sys.WriteString(m.Content)
-			sys.WriteByte('\n')
-		case "user":
-			users++
-			userContent = m.Content
-		default:
-			return "", "", false // assistant/tool turns: multi-turn
-		}
-	}
-	if users != 1 {
-		return "", "", false
-	}
-	return sys.String(), userContent, true
-}
-
 // offerShadow registers a finalizer that enqueues a shadow sample once the
 // request has fully finished (buffered return or stream end) — the hot path
 // does nothing but this registration. completed gates the offer: a stream
 // that died mid-way must never be inserted as a cacheable observation.
-func offerShadow(req *core.Request, cr completionRequest, opts CompletionsOptions, completed func() bool, fingerprint func() string) {
-	if opts.Shadow == nil {
-		return
-	}
-	systemPrompt, userContent, ok := cacheable(cr.Messages)
-	if !ok {
+func offerShadow(req *core.Request, shape cacheShape, opts CompletionsOptions, completed func() bool, fingerprint func() string) {
+	if opts.Shadow == nil || req.CacheSkip != "" {
 		return
 	}
 	tenant, model, id := req.Tenant, req.ServedModel, req.ID
@@ -245,11 +216,22 @@ func offerShadow(req *core.Request, cr completionRequest, opts CompletionsOption
 		}
 		opts.Shadow.Offer(semcache.Sample{
 			RequestID:   id,
-			Namespace:   semcache.Namespace(tenant, model, systemPrompt),
-			Prompt:      userContent,
+			Namespace:   semcache.Namespace(tenant, model, shape.SystemPrompt, shape.Temperature),
+			Prompt:      shape.UserContent,
 			Fingerprint: fingerprint(),
 		})
 	})
+}
+
+// upstreamRequest is the one place the client's request becomes the
+// provider's, so the buffered and streaming paths cannot drift apart.
+func upstreamRequest(cr completionRequest, route Route) provider.ChatRequest {
+	return provider.ChatRequest{
+		Model:       route.Model,
+		Messages:    cr.Messages,
+		MaxTokens:   cr.MaxTokens,
+		Temperature: cr.Temperature,
+	}
 }
 
 // always is the completed-gate for buffered successes.
@@ -291,10 +273,14 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		priceOnFinalize(req, opts.Prices)
 
 		// Policy runs after the alias is known and before anything is
-		// charged: a denied request costs the tenant nothing.
-		if err := applyPolicy(ctx, req, cr, alias, opts); err != nil {
+		// charged: a denied request costs the tenant nothing. Its content
+		// flags then decide, once, whether the cache may see the request.
+		flags, err := applyPolicy(ctx, req, cr, alias, opts)
+		if err != nil {
 			return nil, err
 		}
+		shape, skip := cacheEligibility(cr, opts.policyFor(req.Tenant), flags)
+		req.CacheSkip = skip
 
 		// TPM is charged once, before any backend attempt: the model
 		// contract is identical across the fallback chain.
@@ -303,7 +289,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		}
 
 		if cr.Stream {
-			return streamCompletion(ctx, providers, req, cr, route, opts)
+			return streamCompletion(ctx, providers, req, cr, shape, route, opts)
 		}
 
 		upstream, err := completeWithFallback(ctx, providers, req, cr, route, opts)
@@ -316,7 +302,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		for _, c := range upstream.Choices {
 			content.WriteString(c.Message.Content)
 		}
-		offerShadow(req, cr, opts, always, func() string { return semcache.Fingerprint(content.String()) })
+		offerShadow(req, shape, opts, always, func() string { return semcache.Fingerprint(content.String()) })
 
 		body, err := json.Marshal(completionResponse{
 			ID:      upstream.ID,
@@ -411,11 +397,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 // from the first success. Non-upstream errors stop the chain — they are not
 // the backend's fault.
 func completeWithFallback(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, route Route, opts CompletionsOptions) (provider.ChatResponse, error) {
-	chatReq := provider.ChatRequest{
-		Model:     route.Model,
-		Messages:  cr.Messages,
-		MaxTokens: cr.MaxTokens,
-	}
+	chatReq := upstreamRequest(cr, route)
 	var lastErr error
 	for _, backend := range route.backends() {
 		p, ok := providers[backend]
@@ -454,12 +436,8 @@ func completeWithFallback(ctx context.Context, providers map[string]provider.Pro
 // fallback: backend failures before a stream exists walk the chain; once a
 // stream has begun, mid-stream failures end it with the usual accounting —
 // a started stream is never silently restarted.
-func streamCompletion(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, route Route, opts CompletionsOptions) (*core.Response, error) {
-	chatReq := provider.ChatRequest{
-		Model:     route.Model,
-		Messages:  cr.Messages,
-		MaxTokens: cr.MaxTokens,
-	}
+func streamCompletion(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, shape cacheShape, route Route, opts CompletionsOptions) (*core.Response, error) {
+	chatReq := upstreamRequest(cr, route)
 	var upstream io.ReadCloser
 	var lastErr error
 	for _, backend := range route.backends() {
@@ -498,7 +476,7 @@ func streamCompletion(ctx context.Context, providers map[string]provider.Provide
 	}
 
 	scanner := &usageScanningStream{inner: upstream, req: req}
-	offerShadow(req, cr, opts, scanner.completed, scanner.contentFingerprint)
+	offerShadow(req, shape, opts, scanner.completed, scanner.contentFingerprint)
 
 	resp := &core.Response{
 		Status: http.StatusOK,

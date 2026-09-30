@@ -28,7 +28,14 @@ What the gateway does today:
 - **Tenants** — API-key authentication with per-tenant cost attribution;
   explicit dev mode when no keys are configured. Per-tenant policies:
   allowed models, prompt size cap, monthly budget in dollars with a
-  cutoff, and fail-closed behavior when a limit's store is down.
+  cutoff, fail-closed behavior when a limit's store is down, an action
+  (log or block) for sensitive data and instruction-override phrasing,
+  and a cache opt-out.
+- **Policy filter content rules** — measured heuristics flag personal
+  data and secrets, instruction-override phrasing (EN/ES), and
+  time-dependent questions on every request; the kinds matched go on the
+  cost event, tenants may block on them, and flagged prompts never enter
+  the cache. A policy filter, not a firewall.
 - **Distributed rate limiting** — per-tenant requests (RPM) and LLM tokens
   (TPM) as atomic Lua token buckets in Redis; TPM charges a reservation on
   admission and reconciles it exactly once when actual usage is known.
@@ -45,15 +52,19 @@ What the gateway does today:
   success, error, panic, and stream end alike; completions are priced in
   dollars against a versioned price table from configuration.
 
-Not implemented: serving from the cache, sensitive-data detection and PII
-redaction in the policy filter, and a standing multi-region deployment (the
-two-region runtime module exists for measurement runs only and is destroyed
-after each one).
+Not implemented: serving from the cache, rewriting or masking flagged
+content (the gateway never logs prompt text and the cache never sees
+flagged prompts, so there is nothing to mask yet), outbound secret scanning
+of responses, and a standing multi-region deployment (the two-region
+runtime module exists for measurement runs only and is destroyed after each
+one).
 
 ## API
 
 `POST /v1/chat/completions` — OpenAI request subset (`model`, `messages`,
-`max_tokens`, `stream`). With `"stream": true` the response is Server-Sent
+`max_tokens`, `temperature`, `stream`, `metadata`). `temperature` is
+forwarded to the provider exactly as sent (an explicit 0 included) and is
+part of the cache key. With `"stream": true` the response is Server-Sent
 Events: `chat.completion.chunk` deltas passed through from the provider,
 a final usage chunk, then `data: [DONE]`. The `model` field takes an alias:
 `pusaq/fast` and `pusaq/best` resolve to physical models in configuration;
@@ -125,9 +136,10 @@ records `served_provider` and `attempts`. Backends come from
 `PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
 
 **Semantic cache (shadow mode).** `PUSAQ_CACHE_MODE=shadow` turns on the
-measurement instrument: eligible completions (single-turn) are evaluated
+measurement instrument: eligible completions are evaluated
 asynchronously — embed, nearest-neighbor within an exhaustive namespace
-(tenant | served model | system prompt), record, insert — without ever
+(tenant | served model | system prompt | temperature | rules version),
+record, insert — without ever
 serving a cached answer and without touching request latency (bounded
 workers; saturation drops are counted). Every `cache_shadow` record carries
 `best_similarity` plus both response fingerprints, so precision/recall for
@@ -135,7 +147,12 @@ any τ is computable offline from the log stream alone; `PUSAQ_CACHE_TAU`
 (default 0.95) only labels records. Embedders: `local` (deterministic,
 $0 — measures the machinery, not paraphrase quality) or
 `openai:<upstream>` + `PUSAQ_EMBED_MODEL` for real embeddings. Published
-numbers must say which embedder produced them.
+numbers must say which embedder produced them. Eligibility is decided once
+per request and the reason a request was kept out travels on its cost
+event as `cache_skip`: `tenant_off` (policy `cache=off`), `multi_turn`,
+`sensitive`, `injection`, `temporal` (content rules, below), or
+`temperature` (an explicit value above 0.7); an omitted temperature is
+eligible under its own key.
 
 **Calibrating τ.** The threshold is never a judgment call: `make calibrate`
 sweeps a labeled pair dataset (equivalent vs trap pairs) with the same
@@ -154,19 +171,35 @@ attributed to the `dev` tenant, and a warning logged at startup.
 `/healthz` and `/readyz` never require credentials.
 
 **Tenant policies.** `PUSAQ_TENANT_POLICIES="tenant:key=value,...;tenant2:..."`
-gives a tenant up to four policies: `models=pusaq/fast|pusaq/best` (the
+gives a tenant up to seven policies: `models=pusaq/fast|pusaq/best` (the
 concrete aliases it may be served by — `pusaq/auto` is checked against the
 alias it resolves to and denied rather than rerouted), `max_prompt_chars`
 (bytes of message content), `budget_usd` (monthly ceiling; spend is
 counted in Redis from `cost_usd` per completion, read before admission, and
 reset at the UTC month boundary — requests already in flight when the
 budget is reached may complete, so the overrun is bounded by their cost),
-and `fail_closed=true` (reject with 503 instead of admitting when the store
-is down). Policies are enforced after the alias is resolved and before any
-token is charged, so a denied request costs nothing. Tenants without an
-entry are unrestricted. Every entry is validated at startup; a budget
-needs `PUSAQ_PRICES` and `PUSAQ_REDIS_ADDR`. Budgeted tenants' cost events
-carry `spend_usd_month`.
+`fail_closed=true` (reject with 503 instead of admitting when the store
+is down), `sensitive=log|block` and `injection=log|block` (what a content
+rule match does: flag the event, the default, or answer 403), and
+`cache=on|off` (keep the tenant out of the semantic cache). Policies are
+enforced after the alias is resolved and before any token is charged, so a
+denied request costs nothing. Tenants without an entry are unrestricted.
+Every entry is validated at startup; a budget needs `PUSAQ_PRICES` and
+`PUSAQ_REDIS_ADDR`. Budgeted tenants' cost events carry `spend_usd_month`.
+
+**Content rules.** Every request's messages are classified by the policy
+filter's content rules — personal data and secrets (`pii:email`,
+`pii:phone`, `pii:card` with Luhn, `pii:iban` with mod-97, `secret:*`),
+instruction-override phrasing in English and Spanish (`injection:*`), and
+time-dependence cues (`temporal:*`) — and the kinds matched go on the cost
+event as `policy_flags`, never the content. Sensitive data is scanned in
+every message; injection and temporal rules skip the system prompt, where
+applications legitimately set personas and today's date. A match keeps the
+prompt out of the cache and, when the tenant's policy says `block`, denies
+the request with 403 `policy_denied` naming the kinds. The rules are regex
+and keyword heuristics with stated limits, measured on a labeled corpus
+([content-rules.md](docs/measurements/content-rules.md)); the suite fails
+below the published precision/recall floors.
 
 ## Development
 
@@ -273,6 +306,11 @@ failure, by one reproducible command, and published with its protocol in
   catches up, for an under-reserving and an over-reserving tenant.
   `make tpmtest` runs it (same profile with token limiting on and emulated
   upstream latency).
+- [`content-rules.md`](docs/measurements/content-rules.md) — precision and
+  recall of the policy filter's content rules (sensitive data, injection
+  phrasing, temporal cues) on a 176-row labeled EN/ES corpus with hard
+  negatives, against floors the test suite enforces
+  (`go test -v -run TestContentRulesCorpus ./internal/policy`).
 
 ## Cloud
 

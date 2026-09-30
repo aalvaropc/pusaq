@@ -133,15 +133,21 @@ func (s *Shadow) evaluate(sample Sample) {
 	})
 }
 
+// PolicyVersion names the generation of eligibility rules entries were
+// inserted under. It is part of the namespace: when the rules change, old
+// entries must not be neighbors of new lookups.
+const PolicyVersion = "v1"
+
 // Namespace derives the cache namespace per constitution rule 2: tenant,
-// served physical model, and system-prompt content, with explicit
-// placeholders for fields the API subset does not carry yet (tools,
-// response format, temperature, policy version) so the derivation extends
-// mechanically. Language is content, not configuration: it lives in the
-// embedding space.
-func Namespace(tenant, servedModel, systemPrompt string) string {
+// served physical model, system-prompt content, the request's temperature
+// (formatted, or "none" when the client omitted it — the provider default
+// is a distinct key from any explicit value), and the policy version, with
+// explicit placeholders for fields the API subset does not carry yet
+// (tools, response format) so the derivation extends mechanically.
+// Language is content, not configuration: it lives in the embedding space.
+func Namespace(tenant, servedModel, systemPrompt, temperature string) string {
 	h := sha256.New()
-	for _, part := range []string{tenant, servedModel, systemPrompt, "tools=none", "format=none", "temp=none", "policy=v0"} {
+	for _, part := range []string{tenant, servedModel, systemPrompt, "tools=none", "format=none", "temp=" + temperature, "policy=" + PolicyVersion} {
 		_, _ = h.Write([]byte(part))
 		_, _ = h.Write([]byte{0})
 	}
