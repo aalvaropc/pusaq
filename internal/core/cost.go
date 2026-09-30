@@ -40,6 +40,12 @@ type CostEvent struct {
 	// when unset and let a measurement run be read back from the events.
 	RunID  string `json:"run_id,omitempty"`
 	Region string `json:"region,omitempty"`
+	// PolicyFlags are the content-rule kinds matched (never the content);
+	// CacheSkip is the first reason the cache could not see the request,
+	// empty when it was eligible. Together they make the policy filter's
+	// decisions auditable per request.
+	PolicyFlags []string `json:"policy_flags,omitempty"`
+	CacheSkip   string   `json:"cache_skip,omitempty"`
 	// ServedProvider names the backend that answered (after fallback);
 	// Attempts counts backend attempts, so failover is observable.
 	ServedProvider string `json:"served_provider,omitempty"`

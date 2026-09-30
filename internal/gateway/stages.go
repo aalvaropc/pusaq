@@ -152,6 +152,8 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					FeatureTag:     req.FeatureTag,
 					RouteReason:    req.RouteReason,
 					RunID:          req.RunID,
+					PolicyFlags:    req.PolicyFlags,
+					CacheSkip:      req.CacheSkip,
 					Usage:          req.Usage,
 				}
 				if r := recover(); r != nil {
@@ -246,6 +248,8 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			FeatureTag:     f.req.FeatureTag,
 			RouteReason:    f.req.RouteReason,
 			RunID:          f.req.RunID,
+			PolicyFlags:    f.req.PolicyFlags,
+			CacheSkip:      f.req.CacheSkip,
 			Usage:          f.req.Usage,
 			TokensCharged:  f.req.TokensCharged,
 			ServedProvider: f.req.ServedProvider,

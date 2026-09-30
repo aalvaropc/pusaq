@@ -413,13 +413,13 @@ func policyEnv(extra map[string]string) map[string]string {
 
 func TestTenantPoliciesParsed(t *testing.T) {
 	got, err := Load(lookupFrom(policyEnv(map[string]string{
-		"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/fast|pusaq/best, max_prompt_chars=8000, budget_usd=50, fail_closed=true; tenant-b:budget_usd=10",
+		"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/fast|pusaq/best, max_prompt_chars=8000, budget_usd=50, fail_closed=true, sensitive=block, injection=log, cache=off; tenant-b:budget_usd=10, cache=on",
 	})))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
 	want := map[string]TenantPolicy{
-		"tenant-a": {Models: []string{"pusaq/fast", "pusaq/best"}, MaxPromptChars: 8000, BudgetUSD: 50, FailClosed: true},
+		"tenant-a": {Models: []string{"pusaq/fast", "pusaq/best"}, MaxPromptChars: 8000, BudgetUSD: 50, FailClosed: true, Sensitive: "block", Injection: "log", CacheOff: true},
 		"tenant-b": {BudgetUSD: 10},
 	}
 	if !reflect.DeepEqual(got.TenantPolicies, want) {
@@ -457,6 +457,9 @@ func TestTenantPoliciesRejections(t *testing.T) {
 		"non-integer prompt cap":     policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:max_prompt_chars=big"}),
 		"negative budget":            policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=-1"}),
 		"bad bool":                   policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:fail_closed=yes"}),
+		"bad sensitive action":       policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:sensitive=deny"}),
+		"bad injection action":       policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:injection=true"}),
+		"bad cache value":            policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:cache=shadow"}),
 		"budget without prices": {
 			"PUSAQ_API_KEYS": "k-a:tenant-a", "PUSAQ_REDIS_ADDR": "redis:6379",
 			"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=1",

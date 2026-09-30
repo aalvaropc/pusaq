@@ -79,6 +79,12 @@ type TenantPolicy struct {
 	BudgetUSD float64
 	// FailClosed rejects requests when a limit's store is unreachable.
 	FailClosed bool
+	// Sensitive and Injection choose what the content rules do when they
+	// match: "log" (default: flag the cost event) or "block" (403).
+	Sensitive string
+	Injection string
+	// CacheOff keeps every request of the tenant out of the semantic cache.
+	CacheOff bool
 }
 
 // Upstream names one OpenAI-compatible backend. APIKey, when set
@@ -690,8 +696,22 @@ func parsePolicyFields(tenant, fields string, routes map[string]Route) (TenantPo
 				return p, fmt.Errorf("tenant %q: fail_closed must be true or false, got %q", tenant, val)
 			}
 			p.FailClosed = b
+		case "sensitive", "injection":
+			if val != "log" && val != "block" {
+				return p, fmt.Errorf("tenant %q: %s must be log or block, got %q", tenant, key, val)
+			}
+			if key == "sensitive" {
+				p.Sensitive = val
+			} else {
+				p.Injection = val
+			}
+		case "cache":
+			if val != "on" && val != "off" {
+				return p, fmt.Errorf("tenant %q: cache must be on or off, got %q", tenant, val)
+			}
+			p.CacheOff = val == "off"
 		default:
-			return p, fmt.Errorf("tenant %q: unknown field %q (want models, max_prompt_chars, budget_usd, fail_closed)", tenant, key)
+			return p, fmt.Errorf("tenant %q: unknown field %q (want models, max_prompt_chars, budget_usd, fail_closed, sensitive, injection, cache)", tenant, key)
 		}
 	}
 	if len(seen) == 0 {

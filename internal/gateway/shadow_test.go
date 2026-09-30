@@ -57,7 +57,7 @@ func TestShadowOfferedForBufferedSuccess(t *testing.T) {
 	if sm.Prompt != "hello there" {
 		t.Fatalf("prompt = %q", sm.Prompt)
 	}
-	if sm.Namespace != semcache.Namespace(DevTenant, "mock-model", "be brief\n") {
+	if sm.Namespace != semcache.Namespace(DevTenant, "mock-model", "be brief\n", "none") {
 		t.Fatalf("namespace = %q, want tenant+model+system derivation", sm.Namespace)
 	}
 	if sm.Fingerprint == "" || sm.RequestID == "" {

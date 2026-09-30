@@ -32,7 +32,8 @@ const (
 	// client.
 	CodeStreamInterrupted Code = "stream_interrupted"
 	// CodePolicyDenied marks a request the tenant's policy forbids (model
-	// not allowed, prompt too large).
+	// not allowed, prompt too large, sensitive data or instruction-override
+	// phrasing the tenant chose to block).
 	CodePolicyDenied Code = "policy_denied"
 	// CodeBudgetExceeded marks a request refused because the tenant's
 	// monthly budget is exhausted; RetryAfter points at the next month.

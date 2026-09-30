@@ -24,7 +24,10 @@ type ChatRequest struct {
 	Model     string    `json:"model"`
 	Messages  []Message `json:"messages"`
 	MaxTokens int       `json:"max_tokens,omitempty"`
-	Stream    bool      `json:"stream,omitempty"`
+	// Temperature is forwarded as the client sent it; a pointer so an
+	// explicit 0 survives (omitted only when the client omitted it).
+	Temperature *float64 `json:"temperature,omitempty"`
+	Stream      bool     `json:"stream,omitempty"`
 }
 
 // Choice is one completion alternative.

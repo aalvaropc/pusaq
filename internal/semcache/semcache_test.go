@@ -125,7 +125,7 @@ func TestShadowHitAndMissRecords(t *testing.T) {
 	// occasional undercount; this test needs determinism).
 	s := NewShadow(embed.Local{}, NewIndex(100), cap.logger(), 0.9, 1, 16)
 
-	ns := Namespace("t1", "m1", "")
+	ns := Namespace("t1", "m1", "", "none")
 	s.Offer(Sample{RequestID: "r1", Namespace: ns, Prompt: "how do I cancel my subscription", Fingerprint: "fp1"})
 	s.Offer(Sample{RequestID: "r2", Namespace: ns, Prompt: "how do I cancel my subscription now", Fingerprint: "fp2"})
 	s.Offer(Sample{RequestID: "r3", Namespace: ns, Prompt: "zzzz qqqq wwww completely different", Fingerprint: "fp3"})
@@ -212,25 +212,30 @@ func TestShadowEmbedderFailureSkipsAndCounts(t *testing.T) {
 }
 
 func TestNamespaceDerivation(t *testing.T) {
-	base := Namespace("t1", "m1", "sys")
-	if Namespace("t2", "m1", "sys") == base {
+	base := Namespace("t1", "m1", "sys", "none")
+	if Namespace("t2", "m1", "sys", "none") == base {
 		t.Fatal("different tenants share a namespace")
 	}
-	if Namespace("t1", "m2", "sys") == base {
+	if Namespace("t1", "m2", "sys", "none") == base {
 		t.Fatal("different models share a namespace")
 	}
-	if Namespace("t1", "m1", "other-sys") == base {
+	if Namespace("t1", "m1", "other-sys", "none") == base {
 		t.Fatal("different system prompts share a namespace")
 	}
-	if Namespace("t1", "m1", "sys") != base {
+	if Namespace("t1", "m1", "sys", "none") != base {
 		t.Fatal("namespace derivation is not deterministic")
+	}
+	// Temperature is part of the key: the provider default ("none"), an
+	// explicit 0, and an explicit 1 are three answer spaces.
+	if Namespace("t1", "m1", "sys", "0") == base || Namespace("t1", "m1", "sys", "1") == base || Namespace("t1", "m1", "sys", "0") == Namespace("t1", "m1", "sys", "1") {
+		t.Fatal("different temperatures share a namespace")
 	}
 }
 
 func TestShadowCloseDrainsQueue(t *testing.T) {
 	cap := &capture{}
 	s := NewShadow(embed.Local{}, NewIndex(100), cap.logger(), 0.9, 1, 16)
-	ns := Namespace("t", "m", "")
+	ns := Namespace("t", "m", "", "none")
 	s.Offer(Sample{RequestID: "a", Namespace: ns, Prompt: "one two three"})
 	s.Offer(Sample{RequestID: "b", Namespace: ns, Prompt: "one two three four"})
 	s.Close()

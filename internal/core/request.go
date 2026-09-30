@@ -47,6 +47,13 @@ type Request struct {
 	// empty when absent; it tags the cost event so a run is auditable from
 	// the log alone.
 	RunID string
+	// PolicyFlags are the content-rule kinds the policy filter matched
+	// (e.g. pii:email, injection:prompt_leak, temporal:now); nil when none.
+	// CacheSkip is why the semantic cache may not see this request
+	// (tenant_off, multi_turn, sensitive, injection, temporal, temperature);
+	// empty when eligible.
+	PolicyFlags []string
+	CacheSkip   string
 	// ServedModel is the physical upstream model that handled the request.
 	ServedModel string
 	// ServedProvider is the upstream backend that actually answered

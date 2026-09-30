@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/aalvaropc/pusaq/internal/core"
+	"github.com/aalvaropc/pusaq/internal/policy"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/spend"
 )
@@ -24,6 +26,12 @@ type Policy struct {
 	// FailClosed rejects requests when a limit's store is unreachable,
 	// instead of the default fail-open.
 	FailClosed bool
+	// BlockSensitive and BlockInjection turn a content-rule match into a
+	// 403 instead of a flag on the cost event.
+	BlockSensitive bool
+	BlockInjection bool
+	// CacheOff keeps every request of the tenant out of the semantic cache.
+	CacheOff bool
 }
 
 // PolicyFor resolves a tenant's policy; nil disables policies entirely.
@@ -55,25 +63,40 @@ func promptChars(messages []provider.Message) int {
 
 // applyPolicy enforces the tenant's policy after the alias is resolved and
 // before any token is charged: allowed models on the concrete alias, the
-// prompt cap, and the monthly budget. A budgeted request registers the
-// finalizer that adds its priced cost to the month's spend. The cost event
-// records the denial code; nothing else is logged per request.
-func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, alias string, opts CompletionsOptions) error {
+// prompt cap, the content rules (flagged on the event always, blocked when
+// the tenant says so), and the monthly budget. A budgeted request registers
+// the finalizer that adds its priced cost to the month's spend. The cost
+// event records the denial code and the content flags; nothing else is
+// logged per request. The flags are returned for the cache-eligibility
+// decision that follows.
+func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, alias string, opts CompletionsOptions) (policy.Flags, error) {
 	p := opts.policyFor(req.Tenant)
 
 	if p.Models != nil && !p.Models[alias] {
 		if alias != cr.Model {
-			return core.Errorf(core.CodePolicyDenied, "model %q (resolved from %q) is not allowed for this tenant", alias, cr.Model)
+			return policy.Flags{}, core.Errorf(core.CodePolicyDenied, "model %q (resolved from %q) is not allowed for this tenant", alias, cr.Model)
 		}
-		return core.Errorf(core.CodePolicyDenied, "model %q is not allowed for this tenant", alias)
+		return policy.Flags{}, core.Errorf(core.CodePolicyDenied, "model %q is not allowed for this tenant", alias)
 	}
 	if p.MaxPromptChars > 0 {
 		if n := promptChars(cr.Messages); n > p.MaxPromptChars {
-			return core.Errorf(core.CodePolicyDenied, "prompt of %d chars exceeds the tenant limit of %d", n, p.MaxPromptChars)
+			return policy.Flags{}, core.Errorf(core.CodePolicyDenied, "prompt of %d chars exceeds the tenant limit of %d", n, p.MaxPromptChars)
 		}
 	}
+
+	// Content rules: the flags are set before any decision so a denial's
+	// event explains itself; a content denial never touches the store.
+	flags := classifyContent(cr.Messages)
+	req.PolicyFlags = flags.List()
+	if p.BlockSensitive && len(flags.Sensitive) > 0 {
+		return flags, core.Errorf(core.CodePolicyDenied, "prompt contains sensitive data (%s)", strings.Join(flags.Sensitive, ", "))
+	}
+	if p.BlockInjection && len(flags.Injection) > 0 {
+		return flags, core.Errorf(core.CodePolicyDenied, "prompt contains instruction-override phrasing (%s)", strings.Join(flags.Injection, ", "))
+	}
+
 	if p.BudgetUSD <= 0 || opts.Spend == nil {
-		return nil
+		return flags, nil
 	}
 
 	limCtx, cancel := context.WithTimeout(ctx, limiterBudget)
@@ -83,13 +106,13 @@ func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, a
 		if p.FailClosed {
 			opts.Logger.Warn("spend store unavailable, failing closed",
 				slog.String("request_id", req.ID), slog.String("tenant", req.Tenant), slog.Any("error", err))
-			return &core.Error{Code: core.CodeStoreUnavailable, Message: "spend store unavailable", Err: err}
+			return flags, &core.Error{Code: core.CodeStoreUnavailable, Message: "spend store unavailable", Err: err}
 		}
 		opts.Logger.Warn("spend store unavailable, failing open",
 			slog.String("request_id", req.ID), slog.String("tenant", req.Tenant), slog.Any("error", err))
 	} else if spent >= p.BudgetUSD {
 		req.SpendUSDMonth = spent
-		return &core.Error{
+		return flags, &core.Error{
 			Code:       core.CodeBudgetExceeded,
 			Message:    fmt.Sprintf("monthly budget of %.2f USD exhausted", p.BudgetUSD),
 			RetryAfter: time.Until(spend.NextMonth(req.ArrivedAt)),
@@ -113,5 +136,5 @@ func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, a
 		}
 		req.SpendUSDMonth = total
 	})
-	return nil
+	return flags, nil
 }

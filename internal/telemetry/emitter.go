@@ -7,6 +7,7 @@ package telemetry
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -53,6 +54,12 @@ func (s SlogSink) Write(event core.CostEvent) {
 	}
 	if event.Region != "" {
 		attrs = append(attrs, slog.String("region", event.Region))
+	}
+	if len(event.PolicyFlags) > 0 {
+		attrs = append(attrs, slog.String("policy_flags", strings.Join(event.PolicyFlags, ",")))
+	}
+	if event.CacheSkip != "" {
+		attrs = append(attrs, slog.String("cache_skip", event.CacheSkip))
 	}
 	if event.TokensCharged > 0 {
 		attrs = append(attrs, slog.Int("tokens_charged", event.TokensCharged))
