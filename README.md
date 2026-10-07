@@ -306,6 +306,15 @@ failure, by one reproducible command, and published with its protocol in
   catches up, for an under-reserving and an over-reserving tenant.
   `make tpmtest` runs it (same profile with token limiting on and emulated
   upstream latency).
+- [`regional-failover.md`](docs/measurements/regional-failover.md) — the
+  gateway in two Cloud Run regions behind a global load balancer, region
+  A's readiness failed on purpose under load: new requests reach the other
+  region 4.1–5.6 s after the flip; first-attempt failures are fast
+  `not_ready` refusals from A's gateway or ~10 s platform 429s, and one
+  retry recovers 41 of 45; zero streams interrupted (a soft failure: the
+  instance keeps running); the split tenant's quota overruns its one-region
+  share by ~5 %. `make chaos-run` runs it against the runtime module;
+  `make chaos-local` checks the harness on the Compose profile.
 - [`content-rules.md`](docs/measurements/content-rules.md) — precision and
   recall of the policy filter's content rules (sensitive data, injection
   phrasing, temporal cues) on a 176-row labeled EN/ES corpus with hard

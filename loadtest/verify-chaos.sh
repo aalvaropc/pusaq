@@ -2,8 +2,9 @@
 # Reads one regional failover run — k6's per-request points, its summary,
 # and the gateways' events — and computes the numbers docs/design.md §8
 # promises, each from a stated source:
-#   time to B          first success answered by another region after the flip (k6)
-#   longest gap        longest interval without a success after the flip (k6)
+#   time to B          first request sent after the flip that another region answered (k6)
+#   longest gap        longest interval between successive sends that succeeded after the flip (k6)
+# All k6 times are send times (completion minus duration).
 #   failed / recovered first-attempt failures, and how the one retry ended (k6)
 #   streams            complete / interrupted / refused (k6), cross-checked
 #                      with stream_interrupted events per region
@@ -44,10 +45,14 @@ echo "client:  $(jqs '.summary.client | to_entries | map("\(.key)=\(.value)") | 
 jq -c '
   def ts: (.[0:19] + "Z" | fromdateiso8601) + (if length > 20 then ((.[20:] | sub("Z$"; "") | sub("[+-][0-9:]+$"; "") | . + "000")[0:3] | tonumber) / 1000 else 0 end);
   select(.type == "Point" and (.metric == "chaos_request" or .metric == "chaos_probe"))
-  | {m: .metric, t: (.data.time | ts), v: .data.value} + (.data.tags | {arm, attempt, status, region, outcome, target})
+  # k6 stamps a point when the request ends; t is when it was sent
+  # (end minus duration), so a request that hung for the whole client
+  # timeout is placed where it entered the failover, not where it gave up.
+  | {m: .metric, t: ((.data.time | ts) - (.data.value / 1000)), v: .data.value} + (.data.tags | {arm, attempt, status, region, outcome, target})
 ' "$points" >"$tmp/points.jsonl"
 
-flip_epoch="$(if [[ -n "$flip_at" ]]; then jq -rn --arg t "$flip_at" '$t | .[0:19] + "Z" | fromdateiso8601'; else echo ""; fi)"
+# Milliseconds matter: every "+X s" below is measured from this instant.
+flip_epoch="$(if [[ -n "$flip_at" ]]; then jq -rn --arg t "$flip_at" '$t | (.[0:19] + "Z" | fromdateiso8601) + ((.[20:23] | tonumber? // 0) / 1000)'; else echo ""; fi)"
 
 # 2. Everything k6 saw, computed in one pass.
 jq -s -c --arg A "$region_a" --arg flip "$flip_epoch" --argjson fail "$fail_for_s" --argjson settle "$settle" '
@@ -73,6 +78,7 @@ jq -s -c --arg A "$region_a" --arg flip "$flip_epoch" --argjson fail "$fail_for_
       first_failures: ($main1 | map(select(.outcome != "ok")) | by("\(.outcome)/\(.status)")),
       retries: ($main2 | by(.outcome)),
       by_region: ($ok1 | by(.region)),
+      setup_ok: ($req | map(select(.arm == "setup" and .outcome == "ok")) | length),
       streams: ($req | map(select(.arm == "stream")) | by("\(.outcome)@attempt\(.attempt)")),
       streams_interrupted_by_region: ($req | map(select(.arm == "stream" and .outcome == "interrupted")) | by(.region)),
       split_admitted_by_region: ($req | map(select(.arm == "split" and .outcome == "ok")) | by(.region)),
@@ -118,8 +124,8 @@ kv() { jq -r "$1 | if . == null or . == {} then \"none\" else (to_entries | map(
 echo "k6 success by region: $(kv '.by_region' "$tmp/k6.json")   pre-flip share of A: $(k6 '.preflip_share | if . == null then "-" else (. * 100 | round) end') %"
 if [[ -n "$flip_epoch" ]]; then
   echo "failover: flip_at=$flip_at fail_for=${fail_for_s}s"
-  echo "  time to B (first success from another region) = $(k6 '.time_to_b') s"
-  echo "  longest interval without a success            = $(k6 '.longest_gap') s"
+  echo "  time to B (first request sent after the flip that another region answered) = $(k6 '.time_to_b') s"
+  echo "  longest interval between successful sends after the flip = $(k6 '.longest_gap') s"
   echo "  first-attempt failures after flip: first at +$(k6 '.first_failure') s, last at +$(k6 '.last_failure') s"
   echo "  probes: A /readyz first 503 at +$(k6 '.probe.a_first_503') s, back to 200 at +$(k6 '.probe.a_back_200') s; balancer first answered from another region at +$(k6 '.probe.lb_first_from_b') s; balancer /readyz non-200 probes = $(k6 '.probe.lb_non_200')"
 fi
@@ -141,7 +147,8 @@ if [[ "$experiment" != "none" ]]; then
 fi
 # k6 and the gateways must agree on what succeeded (a few events may still
 # be in flight in the log pipeline; allow a handful).
-k6_ok=$(( $(jqs '.summary.client.main_first_ok') + $(jqs '.summary.client.main_retry_ok') ))
+# setup() sends the warm-up requests that pick region A as tenant-main too.
+k6_ok=$(( $(jqs '.summary.client.main_first_ok') + $(jqs '.summary.client.main_retry_ok') + $(k6 '.setup_ok') ))
 gw_ok=$(jq -r '[.success_by_tenant_region | to_entries[] | select(.key | startswith("tenant-main@")) | .value] | add // 0' "$tmp/gw.json")
 if (( k6_ok - gw_ok > 5 || gw_ok - k6_ok > 5 )); then echo "FAIL: main successes disagree: k6 $k6_ok vs events $gw_ok"; status=1; fi
 (( status == 0 )) && echo "OK: run consistent across k6, probes, and gateway events — the numbers above are the result"
