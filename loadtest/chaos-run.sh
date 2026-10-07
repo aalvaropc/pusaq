@@ -7,7 +7,7 @@
 # Usage: loadtest/chaos-run.sh <run_id>   (after `make runtime-apply`)
 # Knobs (env): CHAOS_EXPERIMENT (region-fail | none), CHAOS_QPS,
 # CHAOS_STREAM_QPS, CHAOS_SPLIT_QPS, CHAOS_WARMUP, CHAOS_FAIL_FOR,
-# CHAOS_DURATION, REGION_A (override the warm-up choice), K6_IMAGE.
+# CHAOS_DURATION, CHAOS_TIMEOUT, REGION_A (override the warm-up choice), K6_IMAGE.
 set -euo pipefail
 
 run_id="${1:?usage: chaos-run.sh <run_id>}"
@@ -36,13 +36,17 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -e CHAOS_WARMUP="${CHAOS_WARMUP:-60s}" \
   -e CHAOS_FAIL_FOR="${CHAOS_FAIL_FOR:-60s}" \
   -e CHAOS_DURATION="${CHAOS_DURATION:-300s}" \
+  -e CHAOS_TIMEOUT="${CHAOS_TIMEOUT:-10s}" \
   -e RUN_ID="$run_id" \
   -e API_KEY_MAIN="${API_KEY_MAIN:-chaos-main}" \
   -e API_KEY_STREAM="${API_KEY_STREAM:-chaos-stream}" \
   -e API_KEY_SPLIT="${API_KEY_SPLIT:-chaos-split}" \
-  "$k6_image" run --out "json=out/$run_id-chaos-points.json" chaos.js
+  "$k6_image" run --out "json=out/$run_id-chaos-points.json" chaos.js || k6_status=$?
 
+# A crossed k6 threshold must not lose the run: fetch and verify anyway
+# (the verifier reports the threshold failure itself).
 # Cloud Logging lags a little behind the process; give it a moment.
 sleep 30
 CHAOS_MODE=cloud "$here/fetch-events.sh" "$run_id"
 CHAOS_MODE=cloud "$here/verify-chaos.sh" "$run_id"
+exit "${k6_status:-0}"
