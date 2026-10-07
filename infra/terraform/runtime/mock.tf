@@ -29,10 +29,14 @@ resource "google_cloud_run_v2_service" "mock" {
         container_port = 9090
       }
 
+      # CPU stays allocated outside requests (explicit: with a resources
+      # block the provider's default is the same, but it should not hinge on
+      # a default). Cloud Run requires at least 512 MiB in that mode.
       resources {
+        cpu_idle = false
         limits = {
           cpu    = "1"
-          memory = "256Mi"
+          memory = "512Mi"
         }
       }
     }
