@@ -14,7 +14,7 @@
 
 ## 3. Measurement and delivery
 
-- [ ] 3.1 Operator: foundation applied, repository variables set, images published for the commit; runtime `terraform.tfvars` with the image SHA; `make runtime-init && make runtime-plan && make runtime-apply`.
-- [ ] 3.2 Read-only smoke against the balancer and each region; `make chaos-run CHAOS_EXPERIMENT=none` (control), `make chaos-run` (region-fail), optionally a run with `outlier_detection = true`.
-- [ ] 3.3 `docs/measurements/regional-failover.md` with the numbers; README Measurements bullet; `docs/design.md` §8 row; draft PR (measurement).
+- [x] 3.1 Operator: foundation applied, repository variables set, images published for the commit; runtime `terraform.tfvars` with the image SHA; `make runtime-init && make runtime-plan && make runtime-apply`.
+- [x] 3.2 Read-only smoke against the balancer and each region; `make chaos-run CHAOS_EXPERIMENT=none` (control), `make chaos-run` (region-fail), optionally a run with `outlier_detection = true` (not run).
+- [x] 3.3 `docs/measurements/regional-failover.md` with the numbers; README Measurements bullet; `docs/design.md` §8 row; draft PR (measurement).
 - [ ] 3.4 Operator: `make runtime-destroy` the same day; confirm nothing is left (`gcloud run services list`, `gcloud redis instances list`, `gcloud compute forwarding-rules list`).

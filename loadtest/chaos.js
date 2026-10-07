@@ -46,6 +46,15 @@ const KEY_STREAM = env('API_KEY_STREAM', 'chaos-stream');
 const KEY_SPLIT = env('API_KEY_SPLIT', 'chaos-split');
 const RETRY_CAP_MS = 2000;
 const RETRY_DEFAULT_MS = 500;
+// Client timeout for non-streaming requests. During a failover requests can
+// sit in a platform queue; the timeout decides how long the client waits.
+const TIMEOUT_S = Number(String(env('CHAOS_TIMEOUT', '10s')).replace(/s$/, ''));
+const STREAM_TIMEOUT_S = 60;
+// Constant-arrival-rate needs a free VU per in-flight iteration: when
+// requests hang, too few pre-allocated VUs means iterations are silently not
+// sent (dropped), which hides exactly the interval being measured. Size them
+// to rate × the longest an iteration can take, with headroom.
+const vus = (rate, seconds) => Math.ceil(rate * seconds * 1.2) + 10;
 
 const REGIONS = Object.keys(GATEWAY_URLS);
 if (REGIONS.length < 2) throw new Error('GATEWAY_URLS must map at least two regions to their URLs');
@@ -79,9 +88,10 @@ export const options = {
       rate: QPS,
       timeUnit: '1s',
       duration: DURATION,
-      preAllocatedVUs: 30,
-      maxVUs: 200,
-      gracefulStop: '15s',
+      // one retry: an iteration can take two timeouts plus the back-off
+      preAllocatedVUs: vus(QPS, 2 * TIMEOUT_S + 2),
+      maxVUs: vus(QPS, 2 * TIMEOUT_S + 2) * 2,
+      gracefulStop: `${2 * TIMEOUT_S + 5}s`,
     },
     stream: {
       executor: 'constant-arrival-rate',
@@ -89,9 +99,9 @@ export const options = {
       rate: STREAM_QPS,
       timeUnit: '1s',
       duration: DURATION,
-      preAllocatedVUs: 20,
-      maxVUs: 100,
-      gracefulStop: '30s',
+      preAllocatedVUs: vus(STREAM_QPS, STREAM_TIMEOUT_S),
+      maxVUs: vus(STREAM_QPS, STREAM_TIMEOUT_S) * 2,
+      gracefulStop: `${STREAM_TIMEOUT_S}s`,
     },
     split: {
       executor: 'constant-arrival-rate',
@@ -99,9 +109,9 @@ export const options = {
       rate: SPLIT_QPS,
       timeUnit: '1s',
       duration: DURATION,
-      preAllocatedVUs: 30,
-      maxVUs: 200,
-      gracefulStop: '15s',
+      preAllocatedVUs: vus(SPLIT_QPS, TIMEOUT_S),
+      maxVUs: vus(SPLIT_QPS, TIMEOUT_S) * 2,
+      gracefulStop: `${TIMEOUT_S + 5}s`,
     },
     probe: {
       executor: 'constant-arrival-rate',
@@ -109,8 +119,9 @@ export const options = {
       rate: 1,
       timeUnit: '1s',
       duration: DURATION,
-      preAllocatedVUs: 2,
-      maxVUs: 5,
+      // three targets probed one after another, 5 s timeout each
+      preAllocatedVUs: 20,
+      maxVUs: 40,
     },
     flip: {
       executor: 'shared-iterations',
@@ -155,7 +166,7 @@ function completion(key, body, attempt, arm) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     responseCallback: anyStatus,
     responseType: 'text',
-    timeout: '10s',
+    timeout: `${TIMEOUT_S}s`,
   });
   const c = classify(res);
   request.add(res.timings.duration, {
@@ -242,7 +253,7 @@ function streamOnce(attempt) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY_STREAM}` },
     responseCallback: anyStatus,
     responseType: 'text',
-    timeout: '60s',
+    timeout: `${STREAM_TIMEOUT_S}s`,
   });
   const c = classify(res);
   let outcome = c.outcome;
@@ -321,7 +332,7 @@ export function handleSummary(data) {
   const summary = {
     run_id: RUN_ID,
     experiment: EXPERIMENT,
-    params: { qps: QPS, stream_qps: STREAM_QPS, split_qps: SPLIT_QPS, warmup: WARMUP, fail_for: FAIL_FOR, duration: DURATION, regions: REGIONS },
+    params: { qps: QPS, stream_qps: STREAM_QPS, split_qps: SPLIT_QPS, warmup: WARMUP, fail_for: FAIL_FOR, duration: DURATION, timeout_s: TIMEOUT_S, regions: REGIONS },
     region_a: gauge(data, 'region_a_index') !== null ? REGIONS[gauge(data, 'region_a_index')] : null,
     started_at: started ? new Date(started).toISOString() : null,
     flip_at: flip ? new Date(flip).toISOString() : null,

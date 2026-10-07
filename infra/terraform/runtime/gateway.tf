@@ -43,7 +43,12 @@ resource "google_cloud_run_v2_service" "gateway" {
         container_port = 8080
       }
 
+      # CPU stays allocated outside requests: the cost-event emitter drains
+      # asynchronously after the response, and the injected not-ready
+      # window and readiness probe must not depend on a throttled clock.
+      # Cloud Run requires at least 512 MiB in that mode.
       resources {
+        cpu_idle = false
         limits = {
           cpu    = "1"
           memory = "512Mi"

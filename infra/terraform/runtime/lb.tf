@@ -16,11 +16,12 @@ resource "google_compute_region_network_endpoint_group" "gateway" {
   }
 }
 
+# No timeout_sec: serverless NEG backends reject it (their timeout is fixed;
+# the request timeout lives on the Cloud Run service).
 resource "google_compute_backend_service" "gateway" {
   name                  = "pusaq-gateway"
   load_balancing_scheme = "EXTERNAL_MANAGED"
   protocol              = "HTTP"
-  timeout_sec           = 120
 
   dynamic "backend" {
     for_each = google_compute_region_network_endpoint_group.gateway
