@@ -13,19 +13,19 @@ Foundation in place: transport-agnostic pipeline, accounting stage, async teleme
 
 **Non-Goals:**
 
-- SSE streaming, tool calling, multi-provider routing rules, tenants/auth, rate limiting — all separate changes.
+- SSE streaming, tool calling, multi-provider routing rules, tenants/auth, rate limiting — out of scope for this change.
 - Retries/fallback on upstream failure (a circuit-breaker concern); this change fails fast with `upstream_error`.
 
 ## Decisions
 
 1. **`internal/provider` owns the upstream contract.**
-   `Provider` interface: `Complete(ctx, ChatRequest) (ChatResponse, error)` with domain types (not HTTP). `httpprovider` adapter POSTs the OpenAI-shaped JSON to a base URL with a bounded `http.Client` — the mock provider today, any OpenAI-compatible endpoint tomorrow. Alternative (call the mock from the gateway package directly) rejected: the interface seam is exactly where Vertex adapters and the router plug in.
+   `Provider` interface: `Complete(ctx, ChatRequest) (ChatResponse, error)` with domain types (not HTTP). `httpprovider` adapter POSTs the OpenAI-shaped JSON to a base URL with a bounded `http.Client` — the mock provider or any OpenAI-compatible endpoint. Alternative (call the mock from the gateway package directly) rejected: the interface seam is where upstream adapters plug in.
 
 2. **Completions types live in `internal/gateway` as the API subset.**
    Request: `model`, `messages` (role+content), `max_tokens`. Response: `id`, `object`, `model`, `choices[].message`, `choices[].finish_reason`, `usage`. Unknown request fields are ignored (OpenAI-compatible tolerance); missing/invalid required fields are `invalid_request`.
 
 3. **Alias resolution is a config-owned routing table.**
-   `config.Routes`: alias → {provider, model}. Defaults map `pusaq/fast|best|auto` → mock's `mock-model`; `PUSAQ_MOCK_URL` names the upstream base URL, `PUSAQ_UPSTREAM_TIMEOUT` bounds calls (default 30s). Physical model names live here only. The terminal handler receives the table and a provider registry (`map[string]provider.Provider`); with one provider the registry is trivial but establishes the seam the router stage will use.
+   `config.Routes`: alias → {provider, model}. Defaults map `pusaq/fast|best|auto` → mock's `mock-model`; `PUSAQ_MOCK_URL` names the upstream base URL, `PUSAQ_UPSTREAM_TIMEOUT` bounds calls (default 30s). Physical model names live here only. The terminal handler receives the table and a provider registry (`map[string]provider.Provider`); with one provider the registry is trivial but establishes the seam.
 
 4. **Upstream failures map to `upstream_error` (502).**
    New `core.Code`. Provider non-2xx and timeouts both produce it; the provider's raw body is logged, never forwarded (no leaking). Fail-fast, no retry — resilience is a separate, measured change.
@@ -38,4 +38,4 @@ Foundation in place: transport-agnostic pipeline, accounting stage, async teleme
 
 - **Envelope grows completion-specific fields** (models, usage). Accepted: they are accounting fields, and the alternative (per-op event subtypes) is speculative complexity now.
 - **No retry on upstream failure** may look weak next to the design doc's fallback story. Accepted deliberately: fallback belongs to the circuit breaker where it is measured, per the constitution's "measured verification".
-- **Single provider registry entry** ("mock") until Vertex adapters land. Accepted: the seam, not the breadth, is this change's deliverable.
+- **Single provider registry entry** ("mock"). Accepted: this change builds the seam, not provider breadth.

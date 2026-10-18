@@ -13,7 +13,7 @@ Upstream failures today map to `upstream_error` and fail the request; a dead pro
 
 **Non-Goals:**
 
-- Hedged requests; retry budgets beyond one attempt per backend; health probes (passive signal only for now — active probes arrive with the chaos/experiments work); per-tenant fallback policy; mid-stream resumption.
+- Hedged requests; retry budgets beyond one attempt per backend; active health probes (passive signal only); per-tenant fallback policy; mid-stream resumption.
 
 ## Decisions
 
@@ -23,12 +23,12 @@ Upstream failures today map to `upstream_error` and fail the request; a dead pro
 
 3. **Streams: fallback pre-first-byte only.** `StreamComplete` errors before returning a stream → next backend. Once a stream object exists, the existing stream accounting owns failures; restarting a stream midway would silently replay content to the client.
 
-4. **`PUSAQ_UPSTREAMS="name=url,..."` replaces `PUSAQ_MOCK_URL`.** First entry is the primary for all aliases, the rest are fallbacks in order, every one an OpenAI-compatible HTTP upstream — the exact mechanism a Gemini endpoint will later use (plus auth, a separate change). Default remains a single local mock. Breaking pre-1.0 config change, done cleanly instead of carrying both.
+4. **`PUSAQ_UPSTREAMS="name=url,..."` replaces `PUSAQ_MOCK_URL`.** First entry is the primary for all aliases, the rest are fallbacks in order, every one an OpenAI-compatible HTTP upstream. Default remains a single local mock. Breaking pre-1.0 config change, done cleanly instead of carrying both.
 
 5. **Observability: `served_provider` and `attempts` on the envelope and event.** `ServedModel` already exists; the provider name is the failover signal. The mock now echoes the requested model — realistic, and it keeps `X-Pusaq-Model` stable across failover while `served_provider` tells the truth about who answered.
 
 ## Risks / Trade-offs
 
 - **Passive-only detection**: a backend with no traffic never recovers state visibility until probed by real requests in half-open. Accepted; active probes are out of scope for this change.
-- **Per-process breakers**: replicas learn about a dead backend independently (no shared breaker state). Accepted and honest — shared breaker state via Redis is a documented possible refinement, not free.
+- **Per-process breakers**: replicas learn about a dead backend independently (no shared breaker state). Accepted: there is no shared breaker state.
 - **Chain-wide TPM charge on total failure** stands (usage unknown). Consistent with the unknown-usage rule; bounded by bucket TTL.

@@ -6,10 +6,10 @@ RPM protects infrastructure; invoices and provider quotas are measured in **toke
 
 ## What Changes
 
-- Per-tenant TPM token bucket alongside RPM: after model resolution (constitution rule 4 — never before, and cache hits will never pay it), the request charges its **input estimate plus an output reservation** (`max_tokens` when the client sets it, a configured default otherwise) against the TPM bucket. Denials share the `rate_limited` (429) contract with a computed retry.
+- Per-tenant TPM token bucket alongside RPM: after model resolution (constitution rule 4 — never before, and cache hits never pay it), the request charges its **input estimate plus an output reservation** (`max_tokens` when the client sets it, a configured default otherwise) against the TPM bucket. Denials share the `rate_limited` (429) contract with a computed retry.
 - **Reconciliation on completion**: when actual usage is known, the difference between charged and actual is returned to (or additionally charged from) the bucket by a second atomic Lua script. Reconciliation is guaranteed by a new envelope finalizer hook that the accounting stage runs exactly once — on the buffered defer path, at stream end, and on panic alike.
 - Missing usage (e.g. a stream that never delivered its usage chunk) reconciles nothing: the full charge stands — conservative and documented.
-- Input tokens are estimated as chars/4 until a real tokenizer earns its place; reserved and actual are both recorded on the cost event so the estimate's error is measurable.
+- Input tokens are estimated as chars/4; reserved and actual are both recorded on the cost event so the estimate's error is measurable.
 - Config: `PUSAQ_TPM_LIMIT` (tokens/minute, default 100000), `PUSAQ_TPM_BURST` (default = limit), `PUSAQ_TPM_RESERVE_DEFAULT` (output reservation when `max_tokens` is absent, default 512). TPM shares RPM's enablement: active only with `PUSAQ_REDIS_ADDR` set.
 
 ## Capabilities

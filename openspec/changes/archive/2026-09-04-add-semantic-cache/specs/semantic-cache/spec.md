@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Shadow-mode measurement of a semantic cache: what would it hit, how similar are the neighbors, what would the embedding toll cost, and which hits would have been wrong — measured against real traffic without ever serving a cached answer. The serving decision is made later, with these numbers in hand.
+Shadow-mode measurement of a semantic cache: what would it hit, how similar are the neighbors, what would the embedding toll cost, and which hits would have been wrong — measured against real traffic without ever serving a cached answer. Nothing is served from the cache.
 
 ## ADDED Requirements
 

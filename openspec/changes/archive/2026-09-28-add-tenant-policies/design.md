@@ -14,7 +14,7 @@ Tenants exist only as names attached to API keys. The completions flow resolves 
 
 **Non-Goals:**
 
-- Sensitive-data detection, PII redaction, injection heuristics (docs/design.md §4 step 3 names them; a later change earns them separately); per-tenant rate limits (the limiter's own concern); a control plane for policies.
+- Sensitive-data detection, PII redaction, injection heuristics; per-tenant rate limits; a control plane for policies — out of scope for this change.
 
 ## Decisions
 

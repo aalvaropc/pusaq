@@ -23,7 +23,7 @@ A request SHALL be eligible for shadow evaluation only when it is a successful c
 
 ### Requirement: Namespaces isolate incompatible answer spaces
 
-Cache entries and lookups SHALL be scoped to a namespace derived from at least: the tenant, the served physical model, the system-prompt content, the request's explicit temperature (or the absence of one, as its own key), and the version of the eligibility rules — extended mechanically as the API subset grows (tools, response format). Entries in one namespace SHALL never match lookups in another.
+Cache entries and lookups SHALL be scoped to a namespace derived from at least: the tenant, the served physical model, the system-prompt content, the request's explicit temperature (or the absence of one, as its own key), and the version of the eligibility rules — plus fixed markers for tools and response format, which the accepted request subset does not carry. Entries in one namespace SHALL never match lookups in another.
 
 #### Scenario: Different tenants never match
 

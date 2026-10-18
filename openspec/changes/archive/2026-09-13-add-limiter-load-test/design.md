@@ -14,7 +14,7 @@ The limiter (atomic Lua bucket, fail-open, 429 contract, TPM reservation/reconci
 
 **Non-Goals:**
 
-- Lease mode (a separate change reuses this harness); measuring TPM overrun (needs the token limiter on, which would mask the RPM toll — a later run with a different profile); running the load test in CI (it needs Docker Compose and minutes of wall-clock; it stays a `make` target run locally and documented).
+- Lease mode; measuring TPM overrun (needs the token limiter on, which would mask the RPM toll); running the load test in CI (it needs Docker Compose and minutes of wall-clock; it stays a `make` target run locally and documented).
 
 ## Decisions
 

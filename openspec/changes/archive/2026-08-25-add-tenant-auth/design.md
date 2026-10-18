@@ -8,12 +8,12 @@ The pipeline, completions (buffered + streaming), and accounting exist; nothing 
 
 **Goals:**
 
-- Tenant identity on every admitted request and every cost event, as a pipeline stage in the position auth will keep forever (design doc §4.2: auth resolves *who* first).
+- Tenant identity on every admitted request and every cost event, as a pipeline stage in its fixed position: auth resolves *who* first.
 - Zero-friction local development without silent insecurity.
 
 **Non-Goals:**
 
-- Per-tenant policies, limits, or budgets (they consume the tenant, they don't define it); key storage beyond env config (Firestore/Secret Manager is control-plane work); key rotation; hashing keys at rest.
+- Per-tenant policies, limits, or budgets (they consume the tenant, they don't define it); key storage beyond env config; key rotation; hashing keys at rest.
 
 ## Decisions
 
@@ -29,6 +29,6 @@ The pipeline, completions (buffered + streaming), and accounting exist; nothing 
 
 ## Risks / Trade-offs
 
-- **Plaintext keys in env/config.** Accepted for now and documented; a control plane would move them. Keys never appear in logs or cost events — only the tenant does.
-- **Dev mode could reach production config.** Mitigated by the startup warning and by Terraform owning production env later; a `PUSAQ_REQUIRE_AUTH` hard switch can arrive with deployment work if needed.
+- **Plaintext keys in env/config.** Accepted and documented. Keys never appear in logs or cost events — only the tenant does.
+- **Dev mode could reach production config.** Mitigated by the startup warning.
 - **Constant-time comparison is skipped** (map lookup). Accepted: keys are high-entropy opaque strings, not passwords; timing side-channels on map lookups are not this threat model. Documented honestly rather than cargo-culting `subtle`.

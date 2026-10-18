@@ -14,7 +14,7 @@ The provider seam (`internal/provider/http.go`) already speaks the OpenAI-compat
 **Non-Goals:**
 
 - Vertex AI (service-account) auth — that is a cloud-deployment concern; the Gemini API key path is the local/dev route.
-- Per-alias primary *providers* (all aliases still share the chain's primary); the cost/quality router owns that later.
+- Per-alias primary *providers* (all aliases share the chain's primary).
 - Model capability validation (Pusaq forwards; the upstream rejects models it doesn't serve — normalized as `upstream_error`).
 
 ## Decisions

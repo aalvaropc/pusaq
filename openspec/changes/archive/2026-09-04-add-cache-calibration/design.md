@@ -13,7 +13,7 @@ Shadow records carry best-similarity per request, but choosing τ needs ground t
 
 **Non-Goals:**
 
-- The final production dataset (≥200+200 pairs from a real corpus — a separate measurement effort); plotting (the CSV is the interface; any tool plots it); calibrating the local embedder as if its numbers meant semantic quality (the README says which embedder a number came from).
+- A production dataset (≥200+200 pairs from a real corpus); plotting (the CSV is the interface; any tool plots it); calibrating the local embedder as if its numbers meant semantic quality (the README says which embedder a number came from) — out of scope for this change.
 
 ## Decisions
 
@@ -26,4 +26,4 @@ Shadow records carry best-similarity per request, but choosing τ needs ground t
 ## Risks / Trade-offs
 
 - **A τ\* from the seed set is not a production τ** — small n, hand-written pairs. Stated everywhere the number appears.
-- **The local embedder will score traps high** (lexical overlap: "capital of Peru" vs "capital of Bolivia" differ by one word) — which is exactly the *point*: the harness makes the local embedder's unfitness for semantic policy measurable instead of assumed, and the same command validates a real embedder when a key is present.
+- **The local embedder will score traps high** (lexical overlap: "capital of Peru" vs "capital of Bolivia" differ by one word) — which is exactly the *point*: the harness makes the local embedder's unfitness for semantic policy measurable instead of assumed, and the same command runs against a real embedder.

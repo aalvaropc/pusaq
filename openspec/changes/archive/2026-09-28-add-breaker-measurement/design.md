@@ -14,7 +14,7 @@ The breaker is pure state with no I/O, constructed with compile-time defaults fo
 
 **Non-Goals:**
 
-- Active health probes (the design doc's safety net for quiet hours); per-backend or per-tenant breaker parameters (a policy concern); retry budgets and idempotency keys toward upstreams; measuring against a networked provider.
+- Active health probes; per-backend or per-tenant breaker parameters (a policy concern); retry budgets and idempotency keys toward upstreams; measuring against a networked provider.
 
 ## Decisions
 

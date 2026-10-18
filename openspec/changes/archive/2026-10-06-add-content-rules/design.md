@@ -14,7 +14,7 @@ The policy filter (`internal/gateway/policy.go`) checks models, prompt size and 
 
 **Non-Goals:**
 
-- Rewriting or masking content (the gateway never logs prompt text, and the cache never sees flagged prompts, so there is nothing to mask yet); a learned classifier; outbound secret scanning of responses; a managed DLP backend; tools or response-format awareness (not in the API subset).
+- Rewriting or masking content (the gateway never logs prompt text, and the cache never sees flagged prompts); a learned classifier; outbound secret scanning of responses; a managed DLP backend; tools or response-format awareness (not in the API subset).
 
 ## Decisions
 

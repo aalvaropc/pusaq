@@ -13,13 +13,13 @@ RPM limiting exists (atomic Lua bucket, fail-open, 429 contract). Usage is alrea
 
 **Non-Goals:**
 
-- Real tokenization (chars/4 estimate until a tokenizer earns its dependency); budget-in-dollars cutoffs; per-tenant limit overrides; measuring max overrun (measured in a load run, not here).
+- Real tokenization (chars/4 estimate); budget-in-dollars cutoffs; per-tenant limit overrides; measuring max overrun — out of scope for this change.
 
 ## Decisions
 
 1. **Envelope finalizers, run by Accounting.** `core.Request` gains `OnFinalize(fn)`; the accounting stage runs registered finalizers exactly once at its emission moment — the buffered defer, the stream-end finalize, and the panic path are already unified there, so reconciliation inherits the exactly-once guarantee instead of reimplementing it. Finalizers run before the event is emitted, so what they record lands on the event. Alternative (defer inside the completions handler) rejected: it fires at handler return, which is before a stream ends.
 
-2. **TPM check lives in the completions flow, not a pipeline stage.** Constitution rule 4: TPM after model selection; a generic stage runs before the handler resolves the model. The handler charges after route resolution and before the provider call, via the same `Admitter`-style port (`TokenLimiter`: `Allow` + `Adjust`); nil disables. When routing later moves into its own stage, the TPM call moves with it.
+2. **TPM check lives in the completions flow, not a pipeline stage.** Constitution rule 4: TPM after model selection; a generic stage runs before the handler resolves the model. The handler charges after route resolution and before the provider call, via the same `Admitter`-style port (`TokenLimiter`: `Allow` + `Adjust`); nil disables.
 
 3. **Reconcile is a second small Lua script** (`Adjust`): refill by elapsed time, then `tokens = min(B, tokens + delta)`, persist with TTL. Refunds cap at capacity; extra charges (actual > reserved) go negative naturally, pushing the next refill window out — the design doc's semantics. Fire-and-forget with the same bounded budget as admission; a failed refund under Redis outage is accepted (fail-open symmetry).
 
@@ -29,6 +29,6 @@ RPM limiting exists (atomic Lua bucket, fail-open, 429 contract). Usage is alrea
 
 ## Risks / Trade-offs
 
-- **chars/4 is a crude input estimate.** Accepted and measurable (charged vs actual on every event); a tokenizer is a later, earned dependency.
-- **Reservation pessimism throttles high-`max_tokens` tenants.** Accepted: the design doc's percentile-based estimate needs traffic history that does not exist yet.
+- **chars/4 is a crude input estimate.** Accepted and measurable (charged vs actual on every event).
+- **Reservation pessimism throttles high-`max_tokens` tenants.** Accepted: the design doc's percentile-based estimate needs traffic history the gateway does not keep.
 - **Failed refunds under Redis outage leak charge until bucket TTL.** Accepted: bounded by TTL, symmetric with fail-open, logged.

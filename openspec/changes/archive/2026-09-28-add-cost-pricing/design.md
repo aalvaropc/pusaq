@@ -33,4 +33,4 @@ Cost events already carry the served model and provider-reported usage, and the 
 ## Risks / Trade-offs
 
 - **Provider-reported usage is the source of truth.** If a provider omits or misreports usage, the cost is absent or wrong; the event still carries `tokens_charged` from the limiter as a cross-check.
-- **One global table.** Tenants paying negotiated rates would need overrides; out of scope until a policy layer exists.
+- **One global table.** Per-tenant price overrides are out of scope for this change.

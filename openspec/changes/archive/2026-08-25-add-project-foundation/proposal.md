@@ -11,8 +11,8 @@ Pusaq has a full design ([docs/design.md](../../../docs/design.md)) but no code,
 - Asynchronous cost-event emitter: buffered, non-blocking, with a drop counter — the response path never waits on telemetry.
 - Normalized error model (code, HTTP status, message) rendered as a single JSON error shape.
 - Operational endpoints: `GET /healthz` (liveness), `GET /readyz` (readiness backed by an atomic flag), SIGTERM draining (not-ready → in-flight grace → shutdown).
-- Temporary smoke endpoint `POST /v1/echo` routed through the pipeline; removed when the chat-completions capability lands.
-- Mock provider binary (canned OpenAI-shaped response; configurable latency and error rate) for future $0 experiments.
+- Temporary smoke endpoint `POST /v1/echo` routed through the pipeline.
+- Mock provider binary (canned OpenAI-shaped response; configurable latency and error rate) for $0 limiter and failover experiments.
 - Local environment: Docker Compose (Redis 7 + mock provider), multi-stage Dockerfile, Makefile, golangci-lint config, GitHub Actions CI (lint, vet, race tests, build).
 
 ## Capabilities
@@ -25,11 +25,11 @@ Pusaq has a full design ([docs/design.md](../../../docs/design.md)) but no code,
 
 ### Modified Capabilities
 
-None — this is the first change; no specs exist yet.
+None — this is the first change.
 
 ## Impact
 
 - New code: `cmd/pusaq`, `cmd/mockprovider`, `internal/core`, `internal/gateway`, `internal/telemetry`, `internal/config`, `internal/mockprovider`.
 - New tooling: `Makefile`, `Dockerfile`, `docker-compose.yml`, `.golangci.yml`, `.github/workflows/ci.yml`, `.editorconfig`.
 - Docs: README gains a Development/Quickstart section.
-- No external Go dependencies introduced; Redis appears in Compose only (no code uses it yet — it anchors the local environment contract for the rate-limiting change).
+- No external Go dependencies introduced; Redis appears in Compose only (no code in this change uses it; it anchors the local environment contract).

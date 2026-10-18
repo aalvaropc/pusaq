@@ -2,7 +2,7 @@
 
 ## Why
 
-The token limit reserves on admission and reconciles when usage is known. Between those two moments the bucket is wrong by exactly the reservation error, and a tenant that under-reserves can consume more tokens than its bucket allows before reconciliation catches up. The design says the maximum observed overrun is reported as part of the exactness metric; nothing measures it yet. This change builds that run.
+The token limit reserves on admission and reconciles when usage is known. Between those two moments the bucket is wrong by exactly the reservation error, and a tenant that under-reserves can consume more tokens than its bucket allows before reconciliation catches up. The design says the maximum observed overrun is reported as part of the exactness metric; nothing measured it. This change builds that run.
 
 ## What Changes
 

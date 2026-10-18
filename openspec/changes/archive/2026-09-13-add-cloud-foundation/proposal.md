@@ -2,7 +2,7 @@
 
 ## Why
 
-Pusaq's cloud side has no declared state: no registry of its own, no identity for CI, no way to publish an image without a stored key, and no spending guard scoped to the gateway. Everything the gateway will run on later (Cloud Run, Memorystore) depends on those three things existing first — and they cost nothing to keep.
+Pusaq's cloud side has no declared state: no registry of its own, no identity for CI, no way to publish an image without a stored key, and no spending guard scoped to the gateway. Running the gateway in the cloud (Cloud Run, Memorystore) depends on those three things existing first — and they cost nothing to keep.
 
 ## What Changes
 
