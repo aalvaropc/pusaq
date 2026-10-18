@@ -65,8 +65,8 @@ type Request struct {
 	// TokensCharged is what the token limiter charged on admission
 	// (input estimate + output reservation); zero when TPM is disabled.
 	TokensCharged int
-	// Cost is set by a finalizer once usage is known and a price table is
-	// configured.
+	// Cost is set by a finalizer when a price table is configured and a
+	// provider answered.
 	Cost Cost
 	// SpendUSDMonth is the tenant's month-to-date spend after this request
 	// (or the total that caused a budget denial); zero when unbudgeted.

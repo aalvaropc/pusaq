@@ -55,7 +55,7 @@ type CostEvent struct {
 	// reservation) so reservation error is measurable against Usage.
 	TokensCharged int `json:"tokens_charged,omitempty"`
 	// Cost is the request's price against the configured table; zero
-	// (and omitted) when no table is configured or usage is unknown.
+	// (and omitted) when no table is configured or no provider answered.
 	Cost Cost `json:"cost,omitzero"`
 	// SpendUSDMonth is the tenant's month-to-date spend for budgeted
 	// tenants: the total after this request, or the total that denied it.
@@ -63,8 +63,11 @@ type CostEvent struct {
 }
 
 // Cost is a priced usage: dollars and the version of the table that
-// produced them, so reports stay consistent when prices change.
+// produced them, so reports stay consistent when prices change. Estimated
+// marks a price taken from the request's reservation because the provider
+// reported no usage.
 type Cost struct {
 	USD          float64 `json:"usd"`
 	TableVersion string  `json:"table_version"`
+	Estimated    bool    `json:"estimated,omitempty"`
 }

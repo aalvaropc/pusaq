@@ -250,22 +250,38 @@ type CompletionsOptions struct {
 	Logger *slog.Logger
 }
 
-// priceOnFinalize registers the finalizer that prices the request once its
-// usage is known — after a buffered return, at stream end, or never (an
-// error before the provider answered leaves no usage and no cost). The
-// price is keyed by the served model, which the fallback chain preserves.
-func priceOnFinalize(req *core.Request, prices *pricing.Table) {
-	if prices == nil {
+// priceOnFinalize registers the finalizer that prices the request after a
+// buffered return or at stream end. A provider that answered without usage
+// is priced from the reservation; a request no provider answered has no
+// cost. The price is keyed by the served model, which the fallback chain
+// preserves.
+func priceOnFinalize(req *core.Request, cr completionRequest, opts CompletionsOptions) {
+	if opts.Prices == nil {
 		return
 	}
 	req.OnFinalize(func() {
-		if req.Usage == (core.Usage{}) {
-			return
+		usage, estimated := req.Usage, false
+		if usage == (core.Usage{}) {
+			if req.ServedProvider == "" {
+				return
+			}
+			usage = core.Usage{
+				PromptTokens:     estimateInputTokens(cr.Messages),
+				CompletionTokens: reservation(cr, opts.ReserveDefault),
+			}
+			estimated = true
 		}
-		if usd, ok := prices.Cost(req.ServedModel, req.Usage); ok {
-			req.Cost = core.Cost{USD: usd, TableVersion: prices.Version}
+		if usd, ok := opts.Prices.Cost(req.ServedModel, usage); ok {
+			req.Cost = core.Cost{USD: usd, TableVersion: opts.Prices.Version, Estimated: estimated}
 		}
 	})
+}
+
+func reservation(cr completionRequest, reserveDefault int) int {
+	if cr.MaxTokens != nil {
+		return *cr.MaxTokens
+	}
+	return reserveDefault
 }
 
 // offerShadow registers a finalizer that enqueues a shadow sample once the
@@ -341,7 +357,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		req.ServedModel = route.Model
 		req.FeatureTag = tag
 		req.RouteReason = reason
-		priceOnFinalize(req, opts.Prices)
+		priceOnFinalize(req, cr, opts)
 
 		// Policy runs after the alias is known and before anything is
 		// charged: a denied request costs the tenant nothing. Its content
@@ -405,10 +421,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 	if opts.Tokens == nil {
 		return nil
 	}
-	reserve := opts.ReserveDefault
-	if cr.MaxTokens != nil {
-		reserve = *cr.MaxTokens
-	}
+	reserve := reservation(cr, opts.ReserveDefault)
 	estimate := estimateInputTokens(cr.Messages)
 	if need, burst := float64(estimate)+float64(reserve), opts.Tokens.Limits().Burst; need > burst {
 		return core.Errorf(core.CodeInvalidRequest,
