@@ -9,7 +9,7 @@ Every Redis call already carries a deadline: the request-limit stage, the budget
 **Goals:**
 
 - A hung store costs each call the limiter budget, not the client default.
-- Every phase of a streamed provider call is bounded by the configured upstream timeout.
+- Every step of a streamed provider call is bounded by the configured upstream timeout.
 - The server sheds slow request headers and idle keep-alive connections.
 
 **Non-Goals:**
