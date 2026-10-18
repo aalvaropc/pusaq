@@ -27,6 +27,8 @@ const (
 	// CodeUpstream marks a provider failure or timeout. The provider's raw
 	// response is never forwarded to the client.
 	CodeUpstream Code = "upstream_error"
+	// CodeClientCanceled marks a request whose client left before any answer existed.
+	CodeClientCanceled Code = "client_canceled"
 	// CodeStreamInterrupted marks a streamed response the client abandoned
 	// before completion. Accounting-only: nothing is written to a gone
 	// client.
@@ -55,6 +57,7 @@ var statusByCode = map[Code]int{
 	CodeNotFound:       http.StatusNotFound,
 	CodeInternal:       http.StatusInternalServerError,
 	CodeUpstream:       http.StatusBadGateway,
+	CodeClientCanceled: 499,
 	CodePolicyDenied:   http.StatusForbidden,
 	// 402 rather than 429: SDKs retry 429 with backoff, which is wrong for
 	// a budget that only resets next month.
