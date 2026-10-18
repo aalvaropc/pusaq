@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -31,8 +32,10 @@ const RegionHeader = "X-Pusaq-Region"
 // never leave a region refusing traffic indefinitely.
 const maxInjectedWindow = time.Hour
 
-// maxRunIDLen bounds metadata.run_id: a label, not a payload.
-const maxRunIDLen = 64
+// maxLabelLen bounds metadata.run_id and metadata.feature_tag: labels, not payloads.
+const maxLabelLen = 64
+
+var labelChars = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // runIDFromPayload reads metadata.run_id before the request is admitted, so
 // every cost event of the request — including a rejection by an early stage
@@ -56,8 +59,8 @@ func runIDFromPayload(body []byte) (string, error) {
 	if err := json.Unmarshal(raw, &id); err != nil {
 		return "", core.NewError(core.CodeInvalidRequest, "metadata.run_id must be a string")
 	}
-	if len(id) > maxRunIDLen {
-		return "", core.Errorf(core.CodeInvalidRequest, "metadata.run_id must be at most %d characters", maxRunIDLen)
+	if len(id) > maxLabelLen {
+		return "", core.Errorf(core.CodeInvalidRequest, "metadata.run_id must be at most %d characters", maxLabelLen)
 	}
 	return id, nil
 }
