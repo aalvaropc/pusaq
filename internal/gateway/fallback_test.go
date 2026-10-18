@@ -190,9 +190,7 @@ func TestStreamFallsBackBeforeFirstByte(t *testing.T) {
 }
 
 func TestMidStreamFailureDoesNotRetry(t *testing.T) {
-	// Primary starts a stream that breaks midway; backup must NOT be tried.
-	brokenStream := &errReader{r: strings.NewReader("data: partial\n\n"), err: errors.New("connection reset")}
-	primary := &brokenStreamProvider{stream: brokenStream}
+	primary := &streamQueue{streams: []io.ReadCloser{brokenStream()}}
 	backup := &scriptedProvider{name: "backup", sse: fakeSSE}
 	brs, _ := tightBreakers(t)
 	s, events := fallbackServer(t, primary, backup, brs)
@@ -203,26 +201,90 @@ func TestMidStreamFailureDoesNotRetry(t *testing.T) {
 	if backup.calls != 0 {
 		t.Fatal("backup tried after the stream had begun")
 	}
+	if body := rec.Body.String(); strings.Contains(body, "[DONE]") || !strings.HasSuffix(body, streamErrorEvent) {
+		t.Fatalf("body = %q, want the partial stream and an error event", body)
+	}
+	assertErrorEvent(t, rec.Body.String())
 	e := (*events)[0]
 	if e.ErrorCode != core.CodeUpstream || e.ServedProvider != "primary" {
 		t.Fatalf("event = %+v, want mid-stream upstream_error on primary", e)
 	}
-	_ = rec
 }
 
-// brokenStreamProvider returns a stream that fails mid-read.
-type brokenStreamProvider struct {
-	stream io.ReadCloser
+func TestBrokenStreamsOpenTheBreaker(t *testing.T) {
+	primary := &streamQueue{streams: []io.ReadCloser{brokenStream(), brokenStream()}}
+	backup := &scriptedProvider{name: "backup", sse: fakeSSE}
+	brs, m := tightBreakers(t)
+	s, events := fallbackServer(t, primary, backup, brs)
+
+	for range 3 {
+		s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(streamingPayload()))))
+	}
+
+	if got := m["primary"].State(); got != breaker.StateOpen {
+		t.Fatalf("primary breaker = %s, want open after two broken streams", got)
+	}
+	if primary.calls != 2 || (*events)[2].ServedProvider != "backup" {
+		t.Fatalf("primary calls = %d, third served by %q; want the open breaker to route to backup", primary.calls, (*events)[2].ServedProvider)
+	}
 }
 
-func (b *brokenStreamProvider) Name() string { return "primary" }
+func TestStartedStreamOutcomeFeedsBreaker(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		readFully bool
+		want      breaker.State
+	}{
+		{"completed streams count as successes", true, breaker.StateClosed},
+		{"client disconnects count as nothing", false, breaker.StateOpen},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			primary := &streamQueue{streams: []io.ReadCloser{
+				io.NopCloser(strings.NewReader(fakeSSE)), io.NopCloser(strings.NewReader(fakeSSE)),
+				brokenStream(), brokenStream(),
+			}}
+			brs, m := tightBreakers(t)
+			h := core.Chain(Accounting(func(core.CostEvent) {}, discardLogger()), RequestID())(CompletionsHandler(fallbackRoutes(),
+				map[string]provider.Provider{"primary": primary, "backup": &scriptedProvider{name: "backup"}},
+				CompletionsOptions{Breakers: brs, Logger: discardLogger()}))
 
-func (b *brokenStreamProvider) Complete(_ context.Context, _ provider.ChatRequest) (provider.ChatResponse, error) {
+			for i := range 4 {
+				resp, err := h(context.Background(), &core.Request{Op: "chat.completions", Payload: streamingPayload()})
+				if err != nil {
+					t.Fatalf("request %d: %v", i, err)
+				}
+				if tc.readFully || i >= 2 {
+					_, _ = io.ReadAll(resp.Stream)
+				}
+				_ = resp.Stream.Close()
+			}
+
+			if got := m["primary"].State(); got != tc.want {
+				t.Fatalf("primary breaker = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+type streamQueue struct {
+	streams []io.ReadCloser
+	calls   int
+}
+
+func (q *streamQueue) Name() string { return "primary" }
+
+func (q *streamQueue) Complete(_ context.Context, _ provider.ChatRequest) (provider.ChatResponse, error) {
 	return provider.ChatResponse{}, core.NewError(core.CodeUpstream, "buffered not used here")
 }
 
-func (b *brokenStreamProvider) StreamComplete(_ context.Context, _ provider.ChatRequest) (io.ReadCloser, error) {
-	return b.stream, nil
+func (q *streamQueue) StreamComplete(_ context.Context, _ provider.ChatRequest) (io.ReadCloser, error) {
+	s := q.streams[q.calls]
+	q.calls++
+	return s, nil
+}
+
+func brokenStream() io.ReadCloser {
+	return &errReader{r: strings.NewReader("data: partial\n\n"), err: errors.New("connection reset")}
 }
 
 func TestValidationErrorsDoNotConsumeAttempts(t *testing.T) {
