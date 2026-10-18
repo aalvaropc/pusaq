@@ -114,8 +114,7 @@ func TestOversizedBodyRejectedNormalized(t *testing.T) {
 	if body.Error.Code != core.CodeInvalidRequest {
 		t.Fatalf("error code = %q, want %q", body.Error.Code, core.CodeInvalidRequest)
 	}
-	// Rejected before pipeline admission: no cost event yet (admission
-	// accounting for pre-pipeline rejections is a limiter concern).
+	// Rejected before pipeline admission: no cost event.
 	if len(*events) != 0 {
 		t.Fatalf("emitted %d cost events for a pre-admission rejection, want 0", len(*events))
 	}

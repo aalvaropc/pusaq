@@ -19,7 +19,7 @@ From the design (docs/design.md §5.6, §7) and the change's design notes:
 
 - Failing region A's readiness makes Cloud Run take its instance out of
   rotation within one probe period (2 s) and the balancer's service health
-  move new requests to B some seconds later; that propagation time is not
+  move new requests to B some seconds after that; that propagation time is not
   published, so it is the main output.
 - Before Cloud Run notices, A's gateway refuses new requests itself with
   503 `not_ready` (fast, retriable); after it notices and before the
@@ -133,7 +133,7 @@ events 0.
 
 ## Reading
 
-- **Three phases, each with its own answer.** For the first 0.5–0.75 s
+- **Three intervals, each with its own answer.** For the first 0.5–0.75 s
   (1.7 s in run 1) the balancer still routes to A and A's gateway refuses
   new requests itself (503 `not_ready`, ~110 ms, retriable). Then Cloud Run
   takes A's only instance out of rotation (its readiness probe runs every
@@ -186,8 +186,8 @@ events 0.
   mechanism with different regions.
 - **The ~10 s platform hold before 429** is Cloud Run behavior observed in
   these runs, not a documented constant.
-- **Outlier detection** (ejecting a backend on consecutive 5xx) was not run;
-  the module supports it behind a variable.
+- **Outlier detection** (ejecting a backend on consecutive 5xx) was off in
+  every run (`outlier_detection`, default false).
 - **Plain HTTP** on a global address with throwaway keys: acceptable for
   synthetic traffic on a deployment that lived about an hour.
 - **Clocks.** Every time above comes from k6's clock (send time =

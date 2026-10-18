@@ -19,6 +19,7 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12
+      - run: make lint-docs
 
   test:
     runs-on: ubuntu-latest

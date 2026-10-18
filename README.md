@@ -46,8 +46,8 @@ Every request also leaves one cost event on stdout (abridged):
 ```
 
 Apps address models through aliases (`pusaq/fast`, `pusaq/best`, `pusaq/auto`);
-the physical names live in configuration, never in code. A real model such as
-Gemini is configuration too — see [serving a real model](docs/gateway.md#serving-a-real-model-gemini).
+the physical names live in configuration, never in code. Upstreams are
+OpenAI-compatible servers named in configuration — see [upstreams](docs/gateway.md#upstreams).
 
 ## What it does
 
@@ -59,7 +59,7 @@ Gemini is configuration too — see [serving a real model](docs/gateway.md#servi
 | **Resilience** | Circuit breaker per backend and ordered fallback; streams fall back only before the first byte. [Details](docs/gateway.md#resilience) |
 | **Content rules** | Flags personal data, secrets, prompt-injection phrasing and time-dependent questions; tenants may block. A policy filter, not a firewall. [Details](docs/gateway.md#content-rules) |
 | **Semantic cache** | Runs in shadow mode: measures would-be hits and false positives, serves nothing. [Details](docs/gateway.md#semantic-cache-shadow-mode) |
-| **Cost telemetry** | Exactly one asynchronous cost event per request — success, error, panic or stream end — priced against a versioned table. |
+| **Cost telemetry** | One asynchronous cost event per request admitted to the pipeline — success, error, panic or stream end — priced against a versioned table. |
 
 Configuration is environment variables only: [docs/configuration.md](docs/configuration.md).
 
@@ -78,8 +78,8 @@ reproducible command, and is published with its protocol.
 
 ## Honest limits
 
-- The semantic cache never serves an answer: a similarity threshold is only
-  adopted once its precision is measured on real embeddings (target ≥ 0.99).
+- The semantic cache never serves an answer: it runs in shadow mode,
+  recording would-be hits and their false positives.
 - With one Redis per region, limits are per region during a failover, not
   globally exact; the measured overrun is in the failover report.
 - A readiness failure is a soft failure; a region dying abruptly can cut
@@ -91,7 +91,7 @@ reproducible command, and is published with its protocol.
 
 ```sh
 make test      # go test -race -cover ./...
-make lint      # golangci-lint + go vet
+make lint      # golangci-lint + go vet + lint-docs
 make help      # every target: load tests, calibration, Terraform
 ```
 

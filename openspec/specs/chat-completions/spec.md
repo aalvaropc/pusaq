@@ -1,7 +1,7 @@
 # chat-completions Specification
 
 ## Purpose
-The OpenAI-compatible chat-completions subset — the contract that lets an application switch to Pusaq by changing only its base URL. Covers request validation, model-alias resolution, provider proxying, served-model reporting, and upstream error mapping. Non-streaming only; streaming is a separate capability.
+The OpenAI-compatible chat-completions subset — the contract that lets an application switch to Pusaq by changing only its base URL. Covers request validation, model-alias resolution, provider proxying, served-model reporting, and upstream error mapping. Covers buffered and streamed (SSE) responses.
 
 ## Requirements
 

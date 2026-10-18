@@ -4,8 +4,8 @@ name: release-image
 # push to main. Authentication is workload identity federation: the workflow's
 # OIDC token is exchanged for short-lived credentials of a service account
 # that can only write to the Pusaq registry. No stored keys. The job is
-# skipped until the repository variables produced by the cloud foundation
-# (infra/terraform/foundation outputs) exist.
+# skipped when the repository variables produced by the cloud foundation
+# (infra/terraform/foundation outputs) are unset.
 
 on:
   push:

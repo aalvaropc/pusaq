@@ -9,7 +9,7 @@ The gateway runs in one region locally and nowhere in the cloud; the foundation 
 **Goals:**
 
 - The numbers the design promises, each from a stated source: time until new requests land in the other region, the longest interval without a success, first-attempt failures / recovered by retry / failed after retry, streams complete / interrupted / refused, latency before / during / after per region, and the split tenant's admissions per region.
-- A deployment that exists only for the run, under ~$10, and a harness that can be dry-run locally at no cost.
+- A deployment that exists only for the run, and a harness that can be dry-run locally at no cost.
 
 **Non-Goals:**
 

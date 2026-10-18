@@ -17,5 +17,5 @@
 ## 4. Verification and delivery
 
 - [x] 4.1 E2E (mock, always): defaults unchanged — completions, streaming, limits, fallback all green with zero config.
-- [x] 4.2 E2E (real Gemini): SKIPPED in this run — no API key available in-session. The README "Serving a real model" recipe is the user-runnable verification; mock E2E covers the mechanics (auth header asserted by unit tests).
+- [x] 4.2 E2E against real Gemini: not run (no API key in the session); mock E2E covers the mechanics and unit tests assert the auth header.
 - [x] 4.3 Conventional commit(s) on `feat/gemini-upstream`, push, PR (stacked on `feat/circuit-breaker`; auto-retarget now enabled); CI green.

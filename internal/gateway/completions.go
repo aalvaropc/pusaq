@@ -62,7 +62,7 @@ type TokenLimiter interface {
 
 // estimateInputTokens approximates prompt tokens as ceil(chars/4) — crude,
 // but its error is measurable: tokens_charged and actual usage land side by
-// side on every cost event. A real tokenizer is a later, earned dependency.
+// side on every cost event.
 func estimateInputTokens(messages []provider.Message) int {
 	chars := 0
 	for _, m := range messages {

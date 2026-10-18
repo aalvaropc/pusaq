@@ -141,9 +141,9 @@ const PolicyVersion = "v1"
 // Namespace derives the cache namespace per constitution rule 2: tenant,
 // served physical model, system-prompt content, the request's temperature
 // (formatted, or "none" when the client omitted it — the provider default
-// is a distinct key from any explicit value), and the policy version, with
-// explicit placeholders for fields the API subset does not carry yet
-// (tools, response format) so the derivation extends mechanically.
+// is a distinct key from any explicit value), and the policy version, plus
+// fixed tools=none and format=none markers: the accepted request subset
+// carries neither tools nor a response format.
 // Language is content, not configuration: it lives in the embedding space.
 func Namespace(tenant, servedModel, systemPrompt, temperature string) string {
 	h := sha256.New()

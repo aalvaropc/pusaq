@@ -2,7 +2,7 @@
 
 ## Context
 
-Tenants exist (tenant-auth change); Redis has been in Compose since the foundation, unused until now. The design doc (docs/design.md §5.1–5.2) fixes the algorithm (token bucket) and the mechanism (atomic Lua, lazy refill); this change implements the strict mode. Lease mode and TPM are separate changes. See proposal.md.
+Tenants exist (tenant-auth change); Redis has been in Compose since the foundation. The design doc (docs/design.md §5.1–5.2) fixes the algorithm (token bucket) and the mechanism (atomic Lua, lazy refill); this change implements the strict mode. Lease mode and TPM are out of scope for this change. See proposal.md.
 
 ## Goals / Non-Goals
 
@@ -13,7 +13,7 @@ Tenants exist (tenant-auth change); Redis has been in Compose since the foundati
 
 **Non-Goals:**
 
-- TPM (reservation/reconciliation — a separate change), lease/batching mode, per-tenant limit overrides (a policy concern), the local conservative limit refinement of fail-open, breaker in front of Redis.
+- TPM (reservation/reconciliation), lease/batching mode, per-tenant limit overrides, a local conservative limit during fail-open, a breaker in front of Redis — out of scope for this change.
 
 ## Decisions
 
@@ -25,14 +25,14 @@ Tenants exist (tenant-auth change); Redis has been in Compose since the foundati
 
 4. **Enablement mirrors auth's dev-mode pattern:** `PUSAQ_REDIS_ADDR` set → limiting on; unset → off with a startup warning. An implicit default address would produce permanent fail-open log spam on machines without Redis — worse than an explicit mode.
 
-5. **Fail-open, logged.** On Redis error the stage admits and logs a warning. The design doc's refinement (local `limit/M` fallback) needs replica-count awareness that does not exist yet; plain fail-open is the honest first cut and the spec only promises that much. Per-tenant `fail_closed` arrives with policies.
+5. **Fail-open, logged.** On Redis error the stage admits and logs a warning. A local `limit/M` fallback would need replica-count awareness the gateway does not have; plain fail-open is what the spec promises.
 
-6. **`RetryAfter` on the normalized error.** `core.Error` gains an optional duration; the renderer emits `retry_after_ms` in the body and a ceiled `Retry-After` header. This extends the error contract once, for every future limiter (TPM, budgets).
+6. **`RetryAfter` on the normalized error.** `core.Error` gains an optional duration; the renderer emits `retry_after_ms` in the body and a ceiled `Retry-After` header. This extends the error contract once, for every limiter that returns a retry hint.
 
 7. **The gateway joins Compose** (finally a Redis consumer): `pusaq` service wired to `redis:6379` and the mock by service name, dev-mode auth for frictionless smoke. This also sidesteps the host→container firewall issue on the dev machine — E2E runs inside the network.
 
 ## Risks / Trade-offs
 
-- **Fail-open means a Redis outage suspends limits entirely** until it recovers. Accepted and spec'd; the availability trade is deliberate (docs/design.md §9) and the refinement path is documented.
+- **Fail-open means a Redis outage suspends limits entirely** until it recovers. Accepted and spec'd; the availability trade is deliberate (docs/design.md §5.2).
 - **Per-request Redis round-trip (~0.5–1 ms same-zone)** on the hot path. Accepted: measuring strict-mode cost vs lease mode *is* the project's experiment; lease mode is the alternative.
 - **miniredis may diverge from real Redis semantics.** Mitigated: the E2E runs the same script against real Redis in Compose.

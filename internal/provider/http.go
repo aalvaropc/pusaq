@@ -17,7 +17,7 @@ import (
 const maxUpstreamBody = 4 << 20 // 4 MiB
 
 // HTTP is a Provider adapter for any OpenAI-compatible chat-completions
-// endpoint — the mock provider today, other compatible upstreams tomorrow.
+// endpoint, the mock provider included.
 type HTTP struct {
 	name    string
 	baseURL string

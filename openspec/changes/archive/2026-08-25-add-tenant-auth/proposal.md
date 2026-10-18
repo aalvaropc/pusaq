@@ -2,7 +2,7 @@
 
 ## Why
 
-Everything the gateway will govern — rate limits, budgets, policies, cost reports — is *per tenant*, and no tenant exists yet. Attribution must land before the rate-limiting change: a limiter without tenant identity has nothing to key its buckets on.
+Rate limits, budgets, policies and cost reports are all per tenant, and the gateway has no tenant identity. A limiter without tenant identity has nothing to key its buckets on.
 
 ## What Changes
 
@@ -24,4 +24,4 @@ Everything the gateway will govern — rate limits, budgets, policies, cost repo
 ## Impact
 
 - Modified: `internal/core` (envelope `APIKey`/`Tenant`, event tenant, `unauthorized` code), `internal/gateway` (auth stage, adapter passes the bearer token), `internal/config` (key parsing/validation), `internal/telemetry` (tenant attribute), `cmd/pusaq` (wiring + dev-mode warning), README, docker-compose (example keys).
-- No new external Go dependencies. Real secret management (Firestore/Secret Manager) is a later control-plane change.
+- No new external Go dependencies. Secret management is out of scope for this change.

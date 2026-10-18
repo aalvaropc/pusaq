@@ -12,8 +12,8 @@
 
 ## 3. Apply and verify
 
-- [ ] 3.1 Operator: application-default credentials for the project; `make infra-init && make infra-plan` — the plan lists API enablements, one registry, one provider, one service account, two IAM members, one budget, nothing else; `make infra-apply`.
-- [ ] 3.2 Operator: set repository variables `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` from `terraform output -raw`.
-- [ ] 3.3 Verify: the new provider exists with the Pusaq condition and the pre-existing provider is unchanged; the registry lists; no Cloud Run service or Memorystore instance exists for Pusaq.
+- [x] 3.1 Operator: application-default credentials for the project; `make infra-init && make infra-plan` — the plan lists API enablements, one registry, one provider, one service account, two IAM members, one budget, nothing else; `make infra-apply`.
+- [x] 3.2 Repository variables `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` set from `terraform output -raw`.
+- [x] 3.3 Verified: the new provider exists with the Pusaq condition and the pre-existing provider is unchanged; the registry lists; no Cloud Run service or Memorystore instance exists for Pusaq.
 - [x] 3.4 README "Cloud" section.
-- [ ] 3.5 PR to main; CI green including the terraform job; after merge, the `release-image` run succeeds and the registry shows both images with two tags each.
+- [x] 3.5 CI green including the terraform job; the `release-image` run on `main` succeeds and the registry shows both images with two tags each.

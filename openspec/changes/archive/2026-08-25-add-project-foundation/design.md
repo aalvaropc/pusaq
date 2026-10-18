@@ -13,7 +13,7 @@ Empty Go repo (docs only). Constraints from [CLAUDE.md](../../../CLAUDE.md): Eng
 
 **Non-Goals:**
 
-- OpenAI-compatible API surface (a separate change).
+- OpenAI-compatible API surface (out of scope for this change).
 - Any Redis-consuming code, provider adapters beyond the mock binary, Terraform, or GCP deployment.
 
 ## Decisions
@@ -22,7 +22,7 @@ Empty Go repo (docs only). Constraints from [CLAUDE.md](../../../CLAUDE.md): Eng
    `net/http` (Go 1.22+ method-pattern `ServeMux`), `log/slog` JSON logging, `signal.NotifyContext`, `crypto/rand` request IDs. Alternatives (chi/echo/gin, zap, uuid libs) add nothing measurable to a hot proxy path. A dependency is added only when a change genuinely needs it.
 
 2. **Transport-agnostic pipeline in `internal/core`.**
-   `Handler func(ctx, *Request) (*Response, error)`; `Stage func(Handler) Handler`; `Chain(stages...) Stage`. Decorator middleware is the idiomatic Go shape and matches the design doc's composable-stages contract. Stages see a domain envelope, not `*http.Request`, so every future stage (limiter, policy, cache, router) is unit-testable without HTTP. Alternative considered: stages over `http.Handler` — rejected because accounting, TPM reconciliation, and routing need typed domain data, not raw HTTP.
+   `Handler func(ctx, *Request) (*Response, error)`; `Stage func(Handler) Handler`; `Chain(stages...) Stage`. Decorator middleware is the idiomatic Go shape and matches the design doc's composable-stages contract. Stages see a domain envelope, not `*http.Request`, so every stage is unit-testable without HTTP. Alternative considered: stages over `http.Handler` — rejected because accounting, TPM reconciliation, and routing need typed domain data, not raw HTTP.
 
 3. **`internal/core` is pure.** Depends on stdlib only; never imports other internal packages. Domain types (`Request`, `Response`, `CostEvent`, `Error`) live here; import cycles become impossible by construction.
 
@@ -30,7 +30,7 @@ Empty Go repo (docs only). Constraints from [CLAUDE.md](../../../CLAUDE.md): Eng
    One stage owns the request's `CostEvent`: starts the clock, defers emission (executes on success, error, and panic), recovers panics into the normalized internal error. This implements the spec's "exactly one cost event per request" as a structural property rather than a convention.
 
 5. **Async emitter: buffered channel + one drain goroutine.**
-   Non-blocking send (`select`/`default`); overflow increments an atomic drop counter; `Close()` stops intake and flushes the buffer. Sink is an interface; foundation sink writes slog JSON to stdout — swapped for Pub/Sub later without touching producers. Alternative (write synchronously, "it's just a log line") rejected: the no-blocking invariant must be load-bearing from day one.
+   Non-blocking send (`select`/`default`); overflow increments an atomic drop counter; `Close()` stops intake and flushes the buffer. Sink is an interface; foundation sink writes slog JSON to stdout; producers depend only on the interface. Alternative (write synchronously, "it's just a log line") rejected: the no-blocking invariant must be load-bearing from day one.
 
 6. **Errors: `core.Error{Code, Status, Message}`.**
    Stable machine codes (`internal`, `not_found`, `invalid_request`, …), one JSON rendering in the HTTP layer, `errors.As` for mapping. Unknown errors map to `internal` without leaking details.
@@ -44,11 +44,11 @@ Empty Go repo (docs only). Constraints from [CLAUDE.md](../../../CLAUDE.md): Eng
 9. **Mock provider as a separate binary (`cmd/mockprovider`).**
    Logic in `internal/mockprovider` (testable); flags for listen address, p50/p99 latency, error rate. Returns a canned OpenAI-shaped JSON body so the chat-completions change can proxy to it unchanged. Runs as a Compose service.
 
-10. **Tooling choices.** Multi-stage Dockerfile (CGO_ENABLED=0 → distroless/static). Compose pins `redis:7-alpine` (Memorystore parity) with a healthcheck even though no code touches it yet — the local-env contract for the rate-limiting change. golangci-lint with a curated set (govet, staticcheck, errcheck, revive, unused, ineffassign, misspell, gocritic). CI: lint → vet → `go test -race -cover` → build.
+10. **Tooling choices.** Multi-stage Dockerfile (CGO_ENABLED=0 → distroless/static). Compose pins `redis:7-alpine` (Memorystore parity) with a healthcheck although no code in this change touches it: it fixes the local-environment contract. golangci-lint with a curated set (govet, staticcheck, errcheck, revive, unused, ineffassign, misspell, gocritic). CI: lint → vet → `go test -race -cover` → build.
 
 ## Risks / Trade-offs
 
 - **`/v1/echo` is throwaway surface.** Accepted: the spec needs an observable request path before the real API exists; the endpoint is documented as temporary and removed by the chat-completions change.
-- **Dropped telemetry is invisible in-process** (counter only, no metrics endpoint yet). Accepted: the counter is exposed in logs at shutdown and via tests; a metrics endpoint arrives with observability work.
-- **Zero-dependency rule may bend soon** (e.g. an OTel SDK). Accepted: the rule is "no dependency without a change that needs it", not "never".
-- **Envelope minimalism.** `core.Request` starts with only what this change uses (ID, arrival time, operation, payload); tenant/model/token fields arrive with the changes that use them. Risk of churn accepted to avoid speculative design.
+- **Dropped telemetry is invisible in-process** (counter only, no metrics endpoint). Accepted: the counter is logged at shutdown and asserted by tests.
+- **The zero-dependency rule is conditional.** Accepted: the rule is "no dependency without a change that needs it", not "never".
+- **Envelope minimalism.** `core.Request` starts with only what this change uses (ID, arrival time, operation, payload); each field is added by the change that uses it. Risk of churn accepted to avoid speculative design.

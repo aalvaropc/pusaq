@@ -54,7 +54,7 @@ TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
 # measurement run (created before it, destroyed the same day).
 TF_RUNTIME := terraform -chdir=infra/terraform/runtime
 
-.PHONY: help up down run mock test lint tidy smoke calibrate loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
+.PHONY: help up down run mock test lint lint-docs tidy smoke calibrate loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
         infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate \
         runtime-init runtime-plan runtime-apply runtime-destroy
 
@@ -76,9 +76,19 @@ mock: ## Run the mock provider locally
 test: ## Run all tests with the race detector
 	go test -race -cover ./...
 
-lint: ## Run golangci-lint and go vet
+lint: lint-docs ## Run golangci-lint, go vet and lint-docs
 	golangci-lint run
 	go vet ./...
+
+# Planning and tracking vocabulary the repository does not carry (CLAUDE.md).
+DOC_GUARD_RE := \b(roadmaps?|backlogs?|milestones?|follow-?ups?|next (steps?|slice|change|phase)|separate (changes?|capabilit(y|ies))|later|future|phases?|deliverables?|upcoming|eventually|someday|planned|for now|plan b|mechanical gate|known issues?|workarounds?|todo|fixme|tbd|(does|do) not [a-z]+ yet|(not built|nothing to [a-z]+|no [a-z-]+( [a-z-]+){0,3}) yet|yet to|until [a-z -]{0,40}(exists?|arrives?)|earns? (its|their|them)|earned dependency)\b
+DOC_GUARD_PATHS := . ':!go.sum' ':!*.lock.hcl' ':!.claude' ':!CLAUDE.md' ':!Makefile' ':!testdata'
+DOC_GUARD_FAIL := { echo "lint-docs: planning or tracking language found (see CLAUDE.md)"; exit 1; }
+
+lint-docs: ## Fail on planning or tracking language and unchecked archived tasks
+	@git grep -n -I -i -E '$(DOC_GUARD_RE)' -- $(DOC_GUARD_PATHS); s=$$?; [ $$s -eq 1 ] || $(DOC_GUARD_FAIL)
+	@git grep -n -I -E '\bV[0-9]\b' -- $(DOC_GUARD_PATHS); s=$$?; [ $$s -eq 1 ] || $(DOC_GUARD_FAIL)
+	@git grep -n -E '^\s*- \[ \]' -- openspec/changes/archive; s=$$?; [ $$s -eq 1 ] || $(DOC_GUARD_FAIL)
 
 tidy: ## Tidy module files
 	go mod tidy
