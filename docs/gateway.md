@@ -15,7 +15,11 @@ rest of that family — are rejected with 400 `invalid_request` naming the
 field; other fields are ignored, and a field set to `null` or `false`
 counts as absent. With `"stream": true` the response is Server-Sent
 Events: `chat.completion.chunk` deltas passed through from the provider,
-a final usage chunk, then `data: [DONE]`. The `model` field takes an alias:
+a final usage chunk (requested upstream with `stream_options.include_usage`),
+then `data: [DONE]`. A stream completes only with `[DONE]`: when the provider
+fails mid-stream, ends without `[DONE]`, or sends an event over 1 MiB, the
+stream ends with one event carrying the error shape below with code
+`upstream_error`, and no `[DONE]`. The `model` field takes an alias:
 `pusaq/fast` and `pusaq/best` resolve to physical models in configuration;
 `pusaq/auto` resolves through routing rules keyed by the request's
 `metadata.feature_tag` (`PUSAQ_ROUTING_RULES`, default
@@ -90,7 +94,9 @@ log record (`backend`, `from`, `to`), which is what detection and recovery
 times are measured from. On an
 upstream error or an open breaker, the route's fallback backends are tried
 in order — at most once each, same model contract; streams fall back only
-before the first byte. A provider's rejection of the request (400, 413, 422)
+before the first byte. A started stream feeds its backend's breaker when it
+ends: a mid-stream failure or a missing `[DONE]` as a failure, a completed
+stream as a success, a client that leaves as nothing. A provider's rejection of the request (400, 413, 422)
 ends the chain without counting as a failure, and so does a client that
 leaves. Failover is observable per request: every cost event
 records `served_provider` and `attempts`. Backends come from
@@ -146,7 +152,8 @@ gives a tenant up to seven policies: `models=pusaq/fast|pusaq/best` (the
 concrete aliases it may be served by — `pusaq/auto` is checked against the
 alias it resolves to and denied rather than rerouted), `max_prompt_chars`
 (bytes of message content), `budget_usd` (monthly ceiling; spend is
-counted in Redis from `cost_usd` per completion, read before admission, and
+counted in Redis from `cost_usd` per completion, estimated ones included,
+read before admission, and
 reset at the UTC month boundary — requests already in flight when the
 budget is reached may complete, so the overrun is bounded by their cost),
 `fail_closed=true` (reject with 503 instead of admitting when the store
@@ -157,6 +164,10 @@ enforced after the alias is resolved and before any token is charged, so a
 denied request costs nothing. Tenants without an entry are unrestricted.
 Every entry is validated at startup; a budget needs `PUSAQ_PRICES` and
 `PUSAQ_REDIS_ADDR`. Budgeted tenants' cost events carry `spend_usd_month`.
+A request that a provider answered without usage (a stream without a usage
+chunk, a client that left mid-stream, a mid-stream failure) is priced from
+its reservation — the input estimate plus `max_tokens` or
+`PUSAQ_TPM_RESERVE_DEFAULT` — and its event carries `cost_estimated`.
 
 ### Content rules
 

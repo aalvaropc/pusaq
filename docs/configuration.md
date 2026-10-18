@@ -46,7 +46,7 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_LEASE_TTL` | `1s` | How long a replica may hold unused lease tokens. |
 | `PUSAQ_TPM_LIMIT` | `100000` | LLM tokens per minute per tenant; `0` disables token limiting (with a warning). |
 | `PUSAQ_TPM_BURST` | = limit | Token bucket capacity; an empty value also means the default. |
-| `PUSAQ_TPM_RESERVE_DEFAULT` | `512` | Output reservation when a request sets no `max_tokens`; at most `PUSAQ_TPM_BURST` while token limiting is on. A request whose prompt estimate plus `max_tokens` exceeds the burst is rejected with 400. |
+| `PUSAQ_TPM_RESERVE_DEFAULT` | `512` | Output reservation when a request sets no `max_tokens`, also used to price a request answered without usage; at most `PUSAQ_TPM_BURST` while token limiting is on. A request whose prompt estimate plus `max_tokens` exceeds the burst is rejected with 400. |
 
 ## Circuit breakers (per upstream backend)
 

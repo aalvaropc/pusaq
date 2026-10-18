@@ -187,7 +187,7 @@ cost.
    once per request (the same model contract holds across the fallback chain).
 8. **Provider call.** The OpenAI-compatible adapter calls the backend chain
    (see §5.5), streaming passed through if requested; every answered attempt
-   feeds that backend's breaker.
+   feeds that backend's breaker, a started stream when it ends.
 9. **Finalizers and event.** In registration order: price, monthly spend, TPM
    reconciliation (return the unused reservation — in a `defer`, so it runs on
    success, error, timeout, and cancellation alike), and the shadow-cache
@@ -407,9 +407,12 @@ flags, cache-skip reason, the backend that served it and the attempts, the
 **cost in $ against a versioned price table** (`PUSAQ_PRICES`,
 `PUSAQ_PRICE_TABLE_VERSION`; the table version travels in the event — prices
 change and historical reports must still add up), and the tenant's spend for
-the month. Shadow-cache evaluations are separate `cache_shadow` records
-(similarity, neighbor, response fingerprints, embedder latency), and breaker
-transitions are `breaker_state` records.
+the month. A provider that answered without usage — a stream without its
+usage chunk, a client that left mid-stream, a stream that failed — is priced
+from the request's reservation and the event says so (`cost_estimated`); the
+monthly spend counts that estimate. Shadow-cache evaluations are separate
+`cache_shadow` records (similarity, neighbor, response fingerprints, embedder
+latency), and breaker transitions are `breaker_state` records.
 
 The write is asynchronous and may **never** block or slow the response path:
 a single goroutine drains a bounded buffer and writes one line per event;
