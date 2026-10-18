@@ -20,7 +20,7 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | Variable | Default | What it does |
 |---|---|---|
 | `PUSAQ_UPSTREAMS` | `mock=http://localhost:9090` | Backends in priority order, `name=url,...`; the first is primary, the rest are fallbacks. |
-| `PUSAQ_UPSTREAM_KEY_<NAME>` | unset | API key for upstream `<NAME>` (uppercased); never logged. |
+| `PUSAQ_UPSTREAM_KEY_<NAME>` | unset | API key for upstream `<NAME>`: the name upper-cased, every character other than a letter or digit as `_`; never logged. Two upstreams that map to the same variable fail startup. |
 | `PUSAQ_UPSTREAM_TIMEOUT` | `30s` | Bound on every provider call: the whole exchange when buffered; the connection, TLS handshake, response headers and every silence between chunks when streamed. |
 | `PUSAQ_ROUTES` | both aliases → `mock-model` | `alias=model,...` for `pusaq/fast` and `pusaq/best`. |
 | `PUSAQ_ROUTING_RULES` | `classify,extract`→fast; `reason,code`→best; default fast | `tag=alias,...,default=alias`; replaces the table `pusaq/auto` resolves through. Tags use letters, digits, `.`, `_` and `-`. |
@@ -29,7 +29,7 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `PUSAQ_API_KEYS` | unset (dev mode) | `key:tenant,...`. Unset means no authentication and everything is the `dev` tenant. |
+| `PUSAQ_API_KEYS` | unset (dev mode) | `key:tenant,...`, spaces around fields ignored. Unset means no authentication and everything is the `dev` tenant; set but empty fails startup. |
 | `PUSAQ_TENANT_POLICIES` | unset | `tenant:key=value,...;tenant2:...` with `models`, `max_prompt_chars`, `budget_usd`, `fail_closed`, `sensitive`, `injection`, `cache`. A budget needs `PUSAQ_PRICES` and `PUSAQ_REDIS_ADDR`. |
 | `PUSAQ_PRICES` | unset (no cost fields) | `model=usd_per_1M_input/usd_per_1M_output,...` keyed by physical model; every route model must be priced. |
 | `PUSAQ_PRICE_TABLE_VERSION` | required with prices | Label carried on every priced event as `price_table_version`. |
