@@ -189,8 +189,8 @@ type Config struct {
 	// (PUSAQ_TENANT_POLICIES); tenants absent here are unrestricted.
 	TenantPolicies map[string]TenantPolicy
 	// APIKeys maps API keys to tenant names (PUSAQ_API_KEYS,
-	// "key:tenant" comma-separated). Empty means dev mode: no
-	// authentication, every request attributed to the "dev" tenant.
+	// "key:tenant" comma-separated). Empty when the variable is unset: dev
+	// mode, no authentication, every request attributed to the "dev" tenant.
 	APIKeys map[string]string
 	// RedisAddr enables distributed rate limiting when set
 	// (PUSAQ_REDIS_ADDR); unset means limiting is disabled, announced by
@@ -557,7 +557,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("PUSAQ_EMBED_MODEL: required when PUSAQ_EMBEDDER is %q", cfg.EmbedderKind)
 	}
 
-	if v, ok := lookup("PUSAQ_API_KEYS"); ok && v != "" {
+	if v, ok := lookup("PUSAQ_API_KEYS"); ok {
 		keys, err := parseAPIKeys(v)
 		if err != nil {
 			return Config{}, fmt.Errorf("PUSAQ_API_KEYS: %w", err)
@@ -725,27 +725,35 @@ func parsePolicyFields(tenant, fields string, routes map[string]Route) (TenantPo
 }
 
 // parseUpstreams parses "name=url" comma-separated backends in priority
-// order, failing fast on malformed pairs, invalid URLs, and duplicates.
+// order, failing fast on malformed pairs, invalid URLs, duplicates, and
+// names that share a key variable.
 func parseUpstreams(v string) ([]Upstream, error) {
 	var ups []Upstream
-	seen := make(map[string]bool)
+	keyVars := make(map[string]string)
+	position := 0
 	for pair := range strings.SplitSeq(v, ",") {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
 			continue
 		}
+		position++
 		name, rawURL, ok := strings.Cut(pair, "=")
+		name, rawURL = strings.TrimSpace(name), strings.TrimSpace(rawURL)
 		if !ok || name == "" || rawURL == "" {
-			return nil, fmt.Errorf("malformed pair %q, want name=url", pair)
+			return nil, fmt.Errorf("pair %d is malformed, want name=url", position)
 		}
 		u, err := url.Parse(rawURL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
-			return nil, fmt.Errorf("upstream %q: not an absolute URL: %q", name, rawURL)
+			return nil, fmt.Errorf("upstream %q: not an absolute URL", name)
 		}
-		if seen[name] {
-			return nil, fmt.Errorf("duplicate upstream name %q", name)
+		keyVar := envKeyName(name)
+		if other, taken := keyVars[keyVar]; taken {
+			if other == name {
+				return nil, fmt.Errorf("duplicate upstream name %q", name)
+			}
+			return nil, fmt.Errorf("upstreams %q and %q share %s", other, name, keyVar)
 		}
-		seen[name] = true
+		keyVars[keyVar] = name
 		ups = append(ups, Upstream{Name: name, URL: strings.TrimRight(rawURL, "/")})
 	}
 	if len(ups) == 0 {
@@ -876,17 +884,20 @@ func parseRoutingRules(v string, routes map[string]Route) (map[string]string, st
 // startup, not at request time.
 func parseAPIKeys(v string) (map[string]string, error) {
 	keys := make(map[string]string)
+	position := 0
 	for pair := range strings.SplitSeq(v, ",") {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
 			continue
 		}
+		position++
 		key, tenant, ok := strings.Cut(pair, ":")
+		key, tenant = strings.TrimSpace(key), strings.TrimSpace(tenant)
 		if !ok || key == "" || tenant == "" {
-			return nil, fmt.Errorf("malformed pair %q, want key:tenant", pair)
+			return nil, fmt.Errorf("pair %d is malformed, want key:tenant", position)
 		}
-		if _, dup := keys[key]; dup {
-			return nil, fmt.Errorf("duplicate API key in pair %q", pair)
+		if other, dup := keys[key]; dup {
+			return nil, fmt.Errorf("duplicate API key for tenants %q and %q", other, tenant)
 		}
 		keys[key] = tenant
 	}

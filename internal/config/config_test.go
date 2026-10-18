@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -554,5 +555,49 @@ func TestRegionAndAdminTokenRejections(t *testing.T) {
 		if _, err := Load(lookupFrom(env)); err == nil {
 			t.Fatalf("env %v accepted, want an error", env)
 		}
+	}
+}
+
+func TestConfigErrorsNeverEchoSecrets(t *testing.T) {
+	const secret = "sk-live-TOPSECRET123"
+	for name, env := range map[string]map[string]string{
+		"duplicate key":      {"PUSAQ_API_KEYS": secret + ":acme," + secret + ":beta"},
+		"wrong separator":    {"PUSAQ_API_KEYS": secret + "=acme"},
+		"url with password":  {"PUSAQ_UPSTREAMS": "a=https://user:" + secret + "@/nohost"},
+		"malformed url pair": {"PUSAQ_UPSTREAMS": "https://user:" + secret + "@host"},
+	} {
+		_, err := Load(lookupFrom(env))
+		if err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("%s: error echoes the secret: %v", name, err)
+		}
+	}
+}
+
+func TestEmptyAPIKeysFailsStartup(t *testing.T) {
+	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_API_KEYS": ""})); err == nil {
+		t.Fatal("empty PUSAQ_API_KEYS accepted as dev mode")
+	}
+}
+
+func TestUpstreamKeyVariableCollisionRejected(t *testing.T) {
+	_, err := Load(lookupFrom(map[string]string{"PUSAQ_UPSTREAMS": "my-api=http://a:1,my_api=http://b:1"}))
+	if err == nil {
+		t.Fatal("upstreams sharing PUSAQ_UPSTREAM_KEY_MY_API accepted")
+	}
+	if !strings.Contains(err.Error(), "PUSAQ_UPSTREAM_KEY_MY_API") {
+		t.Fatalf("error = %v, want the shared variable named", err)
+	}
+}
+
+func TestAPIKeyFieldsAreTrimmed(t *testing.T) {
+	cfg, err := Load(lookupFrom(map[string]string{"PUSAQ_API_KEYS": "sk-a : acme"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.APIKeys["sk-a"] != "acme" {
+		t.Fatalf("keys = %q, want sk-a → acme", cfg.APIKeys)
 	}
 }
