@@ -40,7 +40,8 @@ func WithAPIKey(key string) Option {
 	return func(h *HTTP) { h.apiKey = key }
 }
 
-// NewHTTP builds an adapter for the endpoint at baseURL (no trailing slash).
+// NewHTTP builds an adapter for the API at baseURL, version included and
+// without a trailing slash; completions go to baseURL/chat/completions.
 // Buffered calls are bounded end to end by timeout; streamed calls bound by
 // it the connection, the TLS handshake, the response headers, and every
 // silence between chunks.
@@ -79,7 +80,7 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		p.baseURL+"/v1/chat/completions", bytes.NewReader(payload))
+		p.baseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -152,7 +153,7 @@ func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadClos
 
 	ctx, cancel := context.WithCancelCause(ctx)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		p.baseURL+"/v1/chat/completions", bytes.NewReader(payload))
+		p.baseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		cancel(nil)
 		return nil, fmt.Errorf("build upstream request: %w", err)

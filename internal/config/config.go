@@ -112,7 +112,7 @@ func envKeyName(name string) string {
 }
 
 func defaultUpstreams() []Upstream {
-	return []Upstream{{Name: "mock", URL: "http://localhost:9090"}}
+	return []Upstream{{Name: "mock", URL: "http://localhost:9090/v1"}}
 }
 
 // AutoAlias is the router alias: it has no physical model of its own and

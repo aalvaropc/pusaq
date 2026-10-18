@@ -69,7 +69,7 @@ resource "google_cloud_run_v2_service" "gateway" {
       }
       env {
         name  = "PUSAQ_UPSTREAMS"
-        value = "mock=${google_cloud_run_v2_service.mock[each.key].uri}"
+        value = "mock=${google_cloud_run_v2_service.mock[each.key].uri}/v1"
       }
       env {
         name  = "PUSAQ_API_KEYS"

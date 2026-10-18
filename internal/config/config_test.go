@@ -601,3 +601,20 @@ func TestAPIKeyFieldsAreTrimmed(t *testing.T) {
 		t.Fatalf("keys = %q, want sk-a → acme", cfg.APIKeys)
 	}
 }
+
+func TestUpstreamURLsAreVersionedBases(t *testing.T) {
+	def, err := Load(lookupFrom(map[string]string{}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if def.Upstreams[0].URL != "http://localhost:9090/v1" {
+		t.Fatalf("default upstream = %q, want the mock's /v1 base", def.Upstreams[0].URL)
+	}
+	got, err := Load(lookupFrom(map[string]string{"PUSAQ_UPSTREAMS": "gemini=https://g.example/v1beta/openai/"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.Upstreams[0].URL != "https://g.example/v1beta/openai" {
+		t.Fatalf("upstream = %q, want the base without its trailing slash", got.Upstreams[0].URL)
+	}
+}
