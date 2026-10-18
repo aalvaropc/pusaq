@@ -51,7 +51,10 @@ review → archive (`/opsx:archive`).
   with a concurrency test"), never horizontal layers.
 - Development runs locally (Redis in Docker, mock provider); cloud resources
   exist only for measurement runs, created and destroyed with Terraform per run.
-- Repository docs describe the system as it is. Roadmaps, phases, schedules,
-  and budgets are not tracked here; unbuilt behavior is stated as "not
-  implemented" or "out of scope for this change".
+- Repository files and GitHub metadata (issues, PR descriptions, commit
+  messages) describe the system as it is, in the present tense, limits
+  included. They carry no tracking material: roadmaps, phases, schedules,
+  budgets, backlogs, known issues, future features, follow-ups, next steps,
+  pending tasks — that lives outside the repository. Unbuilt behavior is "not
+  implemented" or "out of scope for this change"; `make lint-docs` checks.
 - Commits follow Conventional Commits. Never add Claude co-authorship.
