@@ -433,7 +433,7 @@ event stream (`loadtest/verify-*.sh`).
 | Cloud Run + global external load balancer | Measurement runtime | Stateless gateway: two regions = two services behind serverless NEGs; **not GKE** — two clusters for a stateless service is paying for control planes without new learning |
 | Redis (Memorystore in the cloud) | Request and token buckets, monthly spend | The limiter needs single-point atomic (Lua) sub-millisecond state; one instance **per region**. Breaker state and the shadow cache live in process memory |
 | Lua scripts | Atomicity | Read-decide-decrement as one operation; races removed by construction |
-| Embedders | Shadow-cache vectors | `local` (character trigrams, $0, deterministic) or any OpenAI-compatible `/embeddings` upstream; the same code serves the gateway and `cmd/cachecal` |
+| Embedders | Shadow-cache vectors | `local` (character trigrams, $0, deterministic) or any OpenAI-compatible `/embeddings` endpoint; the same code serves the gateway and `cmd/cachecal` |
 | Terraform | IaC | The foundation and the two-region runtime, created and destroyed per measurement run |
 | GitHub Actions + workload identity federation | CI and image publishing | Lint, race tests and Terraform validation on every PR; images published without stored keys |
 | k6 | Load and chaos | Concurrency tests and failure injection |

@@ -96,10 +96,10 @@ upstream error or an open breaker, the route's fallback backends are tried
 in order — at most once each, same model contract; streams fall back only
 before the first byte. A started stream feeds its backend's breaker when it
 ends: a mid-stream failure or a missing `[DONE]` as a failure, a completed
-stream as a success, a client that leaves as nothing. A provider's rejection of the request (400, 413, 422)
-ends the chain without counting as a failure, and so does a client that
-leaves. Failover is observable per request: every cost event
-records `served_provider` and `attempts`. Backends come from
+stream as a success, a client that leaves as nothing. A provider's rejection
+of the request (400, 413, 422) ends the chain without counting as a failure,
+and so does a client that leaves. Failover is observable per request: every
+cost event records `served_provider` and `attempts`. Backends come from
 `PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
 
 ### Semantic cache (shadow mode)
@@ -115,7 +115,9 @@ workers; saturation drops are counted). Every `cache_shadow` record carries
 any τ is computable offline from the log stream alone; `PUSAQ_CACHE_TAU`
 (default 0.95) only labels records. Embedders: `local` (deterministic,
 $0 — measures the machinery, not paraphrase quality) or
-`openai:<upstream>` + `PUSAQ_EMBED_MODEL` for real embeddings. Published
+`openai:<url>` + `PUSAQ_EMBED_MODEL` (and `PUSAQ_EMBED_KEY`) for real
+embeddings from any OpenAI-compatible endpoint, independent of the chat
+upstreams. Published
 numbers must say which embedder produced them. Eligibility is decided once
 per request and the reason a request was kept out travels on its cost
 event as `cache_skip`: `tenant_off` (policy `cache=off`), `multi_turn`,
@@ -189,9 +191,11 @@ below the published precision/recall floors.
 
 An upstream is any OpenAI-compatible server. `PUSAQ_UPSTREAMS` lists them in
 priority order (`name=url,…`); the first is the primary for every alias and
-the rest are fallbacks. Completions go to `POST <url>/v1/chat/completions`,
-buffered or streamed; the `openai:<upstream>` embedder of the shadow cache
-calls `POST <url>/embeddings`. `PUSAQ_ROUTES` maps each alias to the physical
+the rest are fallbacks. Each URL is the API base with its version segment,
+as OpenAI SDKs take it (`http://host:9090/v1`, `https://host/v1beta/openai`):
+completions go to `POST <url>/chat/completions`, buffered or streamed. The
+shadow cache's `openai:<url>` embedder has its own base URL and calls
+`POST <url>/embeddings`. `PUSAQ_ROUTES` maps each alias to the physical
 model sent upstream. `PUSAQ_UPSTREAM_KEY_<NAME>` (the upper-cased upstream
 name) is the bearer key for that upstream and is never logged.
 
