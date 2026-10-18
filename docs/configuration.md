@@ -23,7 +23,7 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_UPSTREAM_KEY_<NAME>` | unset | API key for upstream `<NAME>` (uppercased); never logged. |
 | `PUSAQ_UPSTREAM_TIMEOUT` | `30s` | Bound on every provider call: the whole exchange when buffered; the connection, TLS handshake, response headers and every silence between chunks when streamed. |
 | `PUSAQ_ROUTES` | both aliases → `mock-model` | `alias=model,...` for `pusaq/fast` and `pusaq/best`. |
-| `PUSAQ_ROUTING_RULES` | `classify,extract`→fast; `reason,code`→best; default fast | `tag=alias,...,default=alias`; replaces the table `pusaq/auto` resolves through. |
+| `PUSAQ_ROUTING_RULES` | `classify,extract`→fast; `reason,code`→best; default fast | `tag=alias,...,default=alias`; replaces the table `pusaq/auto` resolves through. Tags use letters, digits, `.`, `_` and `-`. |
 
 ## Tenants and policies
 
@@ -42,11 +42,11 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_RPM_LIMIT` | `60` | Requests per minute per tenant. |
 | `PUSAQ_RPM_BURST` | = limit | Request bucket capacity. |
 | `PUSAQ_RATELIMIT_MODE` | `strict` | `strict` (one atomic decision per request) or `lease` (batches of tokens per replica). |
-| `PUSAQ_LEASE_SIZE` | `10` | Tokens per lease; at most the burst. |
+| `PUSAQ_LEASE_SIZE` | `10` | Tokens per lease; at most the burst in lease mode. |
 | `PUSAQ_LEASE_TTL` | `1s` | How long a replica may hold unused lease tokens. |
 | `PUSAQ_TPM_LIMIT` | `100000` | LLM tokens per minute per tenant; `0` disables token limiting (with a warning). |
 | `PUSAQ_TPM_BURST` | = limit | Token bucket capacity; an empty value also means the default. |
-| `PUSAQ_TPM_RESERVE_DEFAULT` | `512` | Output reservation when a request sets no `max_tokens`. |
+| `PUSAQ_TPM_RESERVE_DEFAULT` | `512` | Output reservation when a request sets no `max_tokens`; at most `PUSAQ_TPM_BURST` while token limiting is on. A request whose prompt estimate plus `max_tokens` exceeds the burst is rejected with 400. |
 
 ## Circuit breakers (per upstream backend)
 

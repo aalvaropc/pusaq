@@ -5,9 +5,15 @@ How the gateway behaves, mechanism by mechanism. Every variable named here is li
 ## API
 
 `POST /v1/chat/completions` — OpenAI request subset (`model`, `messages`,
-`max_tokens`, `temperature`, `stream`, `metadata`). `temperature` is
-forwarded to the provider exactly as sent (an explicit 0 included) and is
-part of the cache key. With `"stream": true` the response is Server-Sent
+`max_tokens`, `temperature`, `stream`, `metadata`). `max_tokens`, when
+present, is a positive integer. `temperature` is forwarded to the provider
+exactly as sent (an explicit 0 included) and is part of the cache key.
+Fields that would change the response contract — `tools`, `tool_choice`,
+`response_format`, `n` other than 1, `logprobs`, `audio`, message
+`tool_calls`/`tool_call_id`, content given as an array of parts, and the
+rest of that family — are rejected with 400 `invalid_request` naming the
+field; other fields are ignored, and a field set to `null` or `false`
+counts as absent. With `"stream": true` the response is Server-Sent
 Events: `chat.completion.chunk` deltas passed through from the provider,
 a final usage chunk, then `data: [DONE]`. The `model` field takes an alias:
 `pusaq/fast` and `pusaq/best` resolve to physical models in configuration;
@@ -18,7 +24,8 @@ fast). Responses carry `X-Pusaq-Model` (the physical model served),
 `X-Pusaq-Route-Reason` (`direct`, `rule:<tag>`, `default:untagged`, or
 `default:unknown_tag`), `X-Pusaq-Request-Id`, and — when the replica is
 labeled with `PUSAQ_REGION` — `X-Pusaq-Region`; the cost event records the
-same as `route_reason`, `feature_tag`, and `region`. A request may declare
+same as `route_reason`, `feature_tag`, and `region`. A feature tag is at
+most 64 letters, digits, `.`, `_` or `-`; anything else is 400. A request may declare
 `metadata.run_id` (a string of at most 64 characters), read before
 admission and recorded on its cost event as `run_id` — also when the rate
 limiter rejects it — so a measurement run can be read back from the events.
