@@ -195,16 +195,18 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "embedder naming unconfigured upstream rejected",
+			name:    "embedder without an absolute URL rejected",
 			env:     map[string]string{"PUSAQ_EMBEDDER": "openai:gemini"},
 			wantErr: true,
 		},
 		{
-			name: "openai embedder requires a model",
-			env: map[string]string{
-				"PUSAQ_UPSTREAMS": "gemini=http://g:1",
-				"PUSAQ_EMBEDDER":  "openai:gemini",
-			},
+			name:    "openai embedder requires a model",
+			env:     map[string]string{"PUSAQ_EMBEDDER": "openai:http://g:1/v1"},
+			wantErr: true,
+		},
+		{
+			name:    "embed key without an openai embedder rejected",
+			env:     map[string]string{"PUSAQ_EMBED_KEY": "sk-e"},
 			wantErr: true,
 		},
 		{
@@ -357,15 +359,19 @@ func TestRouteOverrideUnknownAliasRejected(t *testing.T) {
 
 func TestOpenAIEmbedderAccepted(t *testing.T) {
 	got, err := Load(lookupFrom(map[string]string{
-		"PUSAQ_UPSTREAMS":   "gemini=http://g:1",
-		"PUSAQ_EMBEDDER":    "openai:gemini",
+		"PUSAQ_EMBEDDER":    "openai:https://g.example/v1beta/openai/",
 		"PUSAQ_EMBED_MODEL": "gemini-embedding-001",
+		"PUSAQ_EMBED_KEY":   "sk-e",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if got.EmbedderKind != "openai:gemini" || got.EmbedModel != "gemini-embedding-001" {
-		t.Fatalf("embedder = %q model %q", got.EmbedderKind, got.EmbedModel)
+	if got.EmbedderKind != "openai" || got.EmbedURL != "https://g.example/v1beta/openai" ||
+		got.EmbedModel != "gemini-embedding-001" || got.EmbedKey != "sk-e" {
+		t.Fatalf("embedder = %q %q model %q key %q", got.EmbedderKind, got.EmbedURL, got.EmbedModel, got.EmbedKey)
+	}
+	if len(got.Upstreams) != 1 || got.Upstreams[0].Name != "mock" {
+		t.Fatalf("upstreams = %+v, want the chat chain untouched by the embedder", got.Upstreams)
 	}
 }
 
@@ -565,6 +571,8 @@ func TestConfigErrorsNeverEchoSecrets(t *testing.T) {
 		"wrong separator":    {"PUSAQ_API_KEYS": secret + "=acme"},
 		"url with password":  {"PUSAQ_UPSTREAMS": "a=https://user:" + secret + "@/nohost"},
 		"malformed url pair": {"PUSAQ_UPSTREAMS": "https://user:" + secret + "@host"},
+		"embedder url":       {"PUSAQ_EMBEDDER": "openai:https://user:" + secret + "@/nohost"},
+		"embedder no model":  {"PUSAQ_EMBEDDER": "openai:https://user:" + secret + "@host/v1"},
 	} {
 		_, err := Load(lookupFrom(env))
 		if err == nil {

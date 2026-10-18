@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -103,14 +102,7 @@ func run(logger *slog.Logger) error {
 	var shadow *semcache.Shadow
 	var leased *ratelimit.Leased
 	if cfg.CacheMode == config.CacheShadow {
-		var embedder embed.Embedder = embed.Local{}
-		if name, ok := strings.CutPrefix(cfg.EmbedderKind, "openai:"); ok {
-			for _, up := range cfg.Upstreams {
-				if up.Name == name {
-					embedder = embed.NewHTTP(name, up.URL, cfg.EmbedModel, up.APIKey, cfg.UpstreamTimeout)
-				}
-			}
-		}
+		embedder := newEmbedder(cfg)
 		shadow = semcache.NewShadow(embedder, semcache.NewIndex(cfg.CacheMaxEntries),
 			logger, cfg.CacheTau, 8, 256)
 		completionsOpts.Shadow = shadow
@@ -311,6 +303,13 @@ const (
 // retries, and reads and writes end at the context deadline.
 func redisOptions(addr string) *redis.Options {
 	return &redis.Options{Addr: addr, MaxRetries: -1, ContextTimeoutEnabled: true}
+}
+
+func newEmbedder(cfg config.Config) embed.Embedder {
+	if cfg.EmbedURL == "" {
+		return embed.Local{}
+	}
+	return embed.NewHTTP("openai", cfg.EmbedURL, cfg.EmbedModel, cfg.EmbedKey, cfg.UpstreamTimeout)
 }
 
 func newHTTPServer(addr string, h http.Handler) *http.Server {
