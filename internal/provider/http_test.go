@@ -330,3 +330,72 @@ func TestNoAPIKeyMeansNoAuthHeader(t *testing.T) {
 		t.Fatalf("Authorization = %q, want none", got)
 	}
 }
+
+func statusUpstream(status int, body string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+}
+
+func TestCompleteClientErrorsAreInvalidRequest(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity} {
+		upstream := statusUpstream(status, `{"error":{"message":"secret upstream detail"}}`)
+		p := NewHTTP("mock", upstream.URL, time.Second, discardLogger())
+		_, err := p.Complete(context.Background(), chatReq())
+		upstream.Close()
+
+		var norm *core.Error
+		if !errors.As(err, &norm) || norm.Code != core.CodeInvalidRequest {
+			t.Fatalf("status %d: err = %v, want %s", status, err, core.CodeInvalidRequest)
+		}
+		if strings.Contains(norm.Message, "secret upstream detail") {
+			t.Fatalf("status %d: upstream body leaked into %q", status, norm.Message)
+		}
+	}
+}
+
+func TestCompleteRetryableStatusesAreUpstreamErrors(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		upstream := statusUpstream(status, `{}`)
+		p := NewHTTP("mock", upstream.URL, time.Second, discardLogger())
+		_, err := p.Complete(context.Background(), chatReq())
+		upstream.Close()
+
+		var norm *core.Error
+		if !errors.As(err, &norm) || norm.Code != core.CodeUpstream {
+			t.Fatalf("status %d: err = %v, want %s", status, err, core.CodeUpstream)
+		}
+	}
+}
+
+func TestStreamComplete400IsInvalidRequest(t *testing.T) {
+	upstream := statusUpstream(http.StatusBadRequest, `{"error":{"message":"bad"}}`)
+	defer upstream.Close()
+
+	p := NewHTTP("mock", upstream.URL, time.Second, discardLogger())
+	_, err := p.StreamComplete(context.Background(), chatReq())
+	var norm *core.Error
+	if !errors.As(err, &norm) || norm.Code != core.CodeInvalidRequest {
+		t.Fatalf("err = %v, want %s", err, core.CodeInvalidRequest)
+	}
+}
+
+func TestComplete200WithoutCompletionIsUpstreamError(t *testing.T) {
+	bodies := map[string]string{
+		"error object":   `{"error":{"message":"quota exceeded"}}`,
+		"no choices":     `{"id":"cmpl-1","choices":[]}`,
+		"oversized body": `{"choices":[{"message":{"content":"` + strings.Repeat("x", maxUpstreamBody) + `"}}]}`,
+	}
+	for name, body := range bodies {
+		upstream := statusUpstream(http.StatusOK, body)
+		p := NewHTTP("mock", upstream.URL, 5*time.Second, discardLogger())
+		_, err := p.Complete(context.Background(), chatReq())
+		upstream.Close()
+
+		var norm *core.Error
+		if !errors.As(err, &norm) || norm.Code != core.CodeUpstream {
+			t.Fatalf("%s: err = %v, want %s", name, err, core.CodeUpstream)
+		}
+	}
+}
