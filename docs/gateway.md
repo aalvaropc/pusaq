@@ -38,9 +38,10 @@ read-decide-decrement as a single operation, so the limit stays exact under
 concurrency (proven by test: exactly the bucket capacity admitted out of 200
 concurrent requests across two instances). Denials are 429 `rate_limited`
 with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
-the gateway **fails open** — temporarily inexact limits beat an outage
-caused by the limiter itself — unless the tenant's
-policy sets `fail_closed`, in which case it answers 503 `store_unavailable`.
+the gateway **fails open** within a 250 ms budget per store call —
+temporarily inexact limits beat an outage caused by the limiter itself —
+unless the tenant's policy sets `fail_closed`, in which case it answers 503
+`store_unavailable`.
 Unset `PUSAQ_REDIS_ADDR` disables limiting with a startup warning.
 
 Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one

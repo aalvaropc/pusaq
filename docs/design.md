@@ -254,7 +254,8 @@ modes and **measures both**: limit exactness under aggressive concurrency vs
 round-trips and latency added by the limiter.
 
 **Store outage.** When Redis does not answer, the request limit, the token
-charge, and the budget read fail open by default, each logged — a gateway that
+charge, and the budget read fail open by default after at most 250 ms per
+call, each logged — a gateway that
 rejects everything because its semaphore died trades a cost problem for an
 availability outage. A tenant with `fail_closed=true` gets 503
 `store_unavailable` instead. A reconciliation that fails leaves its charge in
