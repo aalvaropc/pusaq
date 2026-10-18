@@ -121,9 +121,7 @@ func run(logger *slog.Logger) error {
 		)
 	}
 	if cfg.RedisAddr != "" {
-		// MaxRetries -1 disables internal retries: the limiter stages own
-		// the time budget and fail open past it.
-		client := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, MaxRetries: -1})
+		client := redis.NewClient(redisOptions(cfg.RedisAddr))
 		rpm, err := ratelimit.New(client, "rpm", ratelimit.Limits{
 			Burst: cfg.RPMBurst,
 			Rate:  cfg.RPMLimit / 60.0, // requests/minute → tokens/second
@@ -243,10 +241,7 @@ func run(logger *slog.Logger) error {
 		logger.Warn("admin endpoints enabled: readiness can be failed on purpose with the admin token")
 	}
 
-	httpServer := &http.Server{
-		Addr:    cfg.Addr,
-		Handler: srv,
-	}
+	httpServer := newHTTPServer(cfg.Addr, srv)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -305,4 +300,19 @@ func run(logger *slog.Logger) error {
 	emitter.Close()
 	logger.Info("gateway stopped", slog.Uint64("telemetry_dropped", emitter.Dropped()))
 	return nil
+}
+
+const (
+	readHeaderTimeout = 10 * time.Second
+	idleTimeout       = 120 * time.Second
+)
+
+// redisOptions leaves the time budget to the callers' contexts: no internal
+// retries, and reads and writes end at the context deadline.
+func redisOptions(addr string) *redis.Options {
+	return &redis.Options{Addr: addr, MaxRetries: -1, ContextTimeoutEnabled: true}
+}
+
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: readHeaderTimeout, IdleTimeout: idleTimeout}
 }
