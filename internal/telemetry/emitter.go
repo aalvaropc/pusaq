@@ -15,8 +15,8 @@ import (
 )
 
 // Sink receives cost events. Implementations may be slow; the Emitter
-// shields the request path from them. The foundation sink writes slog JSON
-// to stdout; a Pub/Sub sink can replace it without touching producers.
+// shields the request path from them. SlogSink writes one JSON line per
+// event to stdout.
 type Sink interface {
 	Write(event core.CostEvent)
 }

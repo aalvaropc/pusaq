@@ -1,8 +1,7 @@
 // Package provider defines Pusaq's upstream contract — the seam where model
 // adapters plug in. The gateway talks to providers through the Provider
-// interface with domain types; today the only adapter is the HTTP one used
-// against the mock provider, tomorrow Vertex adapters implement the same
-// interface.
+// interface with domain types; the HTTP adapter serves every
+// OpenAI-compatible upstream, the mock provider included.
 package provider
 
 import (

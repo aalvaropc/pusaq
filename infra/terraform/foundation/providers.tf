@@ -7,7 +7,7 @@ provider "google" {
   billing_project       = var.project_id
 
   # Applied to every resource that supports labels. The label-filtered budget
-  # in budget.tf keys on `project = "pusaq"`, so anything Terraform creates
-  # for Pusaq later (Cloud Run, Memorystore) is counted automatically.
+  # in budget.tf keys on `project = "pusaq"`; the runtime module sets the
+  # same label, so its resources are counted too.
   default_labels = var.labels
 }

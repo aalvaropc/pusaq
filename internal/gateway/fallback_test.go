@@ -159,7 +159,7 @@ func TestRepeatedFailuresOpenBreakerAndStopPayingTimeouts(t *testing.T) {
 			t.Fatalf("status = %d, want every request served via fallback", rec.Code)
 		}
 	}
-	// Two failures (min samples) opened the breaker; later requests skip.
+	// Two failures (min samples) opened the breaker; subsequent requests skip.
 	if m["primary"].State() != breaker.StateOpen {
 		t.Fatal("primary breaker never opened under sustained failures")
 	}

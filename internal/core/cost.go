@@ -16,8 +16,8 @@ const (
 
 // CostEvent is the per-request accounting record — the raw material of
 // Pusaq's cost accounting (docs/design.md §5.7). Exactly one event is emitted per
-// admitted request, regardless of outcome. The schema can grow with new
-// fields (e.g. price) without breaking consumers.
+// admitted request, regardless of outcome. Fields are additive: consumers
+// ignore fields they do not read.
 type CostEvent struct {
 	RequestID string        `json:"request_id"`
 	Timestamp time.Time     `json:"timestamp"`

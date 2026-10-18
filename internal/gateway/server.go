@@ -19,7 +19,8 @@ import (
 	"github.com/aalvaropc/pusaq/internal/core"
 )
 
-// maxBodyBytes bounds request bodies until per-tenant policy limits exist.
+// maxBodyBytes bounds every request body before the tenant is known; the
+// per-tenant prompt cap applies after authentication.
 const maxBodyBytes = 1 << 20 // 1 MiB
 
 // RegionHeader reports the region label of the replica that answered
@@ -71,7 +72,7 @@ type Server struct {
 	region     string
 	adminToken string
 	// notReadyUntil is the end of the injected not-ready window in Unix
-	// nanoseconds; zero means none. While it is in the future, readiness
+	// nanoseconds; zero means none. While the window is open, readiness
 	// reports 503 and new requests are refused with not_ready; in-flight
 	// requests and streams are untouched.
 	notReadyUntil atomic.Int64
