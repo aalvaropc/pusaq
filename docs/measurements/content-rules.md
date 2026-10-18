@@ -93,8 +93,8 @@ suite enforces on every change.
 
 - **Author-labeled, not blind.** The corpus and the patterns share an
   author, which is why two families score perfectly; a blind corpus from
-  real traffic would score lower, and its numbers would replace these. The
-  floors were set for that corpus, not this one.
+  real traffic would score lower. The floors are set for such a corpus, not
+  for this one.
 - **Heuristics.** A secret in an unknown format, a phone number written
   with dots, an injection phrased around the lexemes, a question whose time
   dependence is implicit — all pass. The rules are what keeps the obvious
@@ -103,5 +103,4 @@ suite enforces on every change.
 - **Language coverage** is English and Peruvian-centric Spanish; other
   variants and languages are untested.
 - **RE2** has no lookaround and an ASCII-only `\b`; the masks and explicit
-  Unicode boundaries are how the exceptions are stated, and they are the
-  first place to look when a new false positive appears.
+  Unicode boundaries are how the exceptions are stated.

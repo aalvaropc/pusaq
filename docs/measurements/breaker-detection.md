@@ -108,8 +108,8 @@ breaker).
   is what this run isolates.
 - **Lazy half-open.** The breaker notices the cooldown has elapsed on the
   next call; under this steady traffic that is at most one inter-arrival
-  (≈ 83 ms). With no traffic it would stay open indefinitely — the case the
-  design doc reserves for active probes, not built here.
+  (≈ 83 ms). With no traffic it stays open until the next request arrives:
+  there are no active health probes.
 - **One host, one clock.** Detection and recovery are differences between
   timestamps written by different containers on the same host; clock skew
   between machines is not exercised.

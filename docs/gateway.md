@@ -38,8 +38,8 @@ read-decide-decrement as a single operation, so the limit stays exact under
 concurrency (proven by test: exactly the bucket capacity admitted out of 200
 concurrent requests across two instances). Denials are 429 `rate_limited`
 with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
-the gateway **fails open** within a 250ms budget — temporarily inexact
-limits beat an outage caused by the limiter itself — unless the tenant's
+the gateway **fails open** — temporarily inexact limits beat an outage
+caused by the limiter itself — unless the tenant's
 policy sets `fail_closed`, in which case it answers 503 `store_unavailable`.
 Unset `PUSAQ_REDIS_ADDR` disables limiting with a startup warning.
 
@@ -48,7 +48,7 @@ atomic store decision per request, exact across replicas. **`lease`**: each
 replica takes up to `PUSAQ_LEASE_SIZE` request tokens per round-trip and
 admits locally; unused tokens return when the lease passes `PUSAQ_LEASE_TTL`
 or the replica drains, and a store denial is cached locally until its retry
-time. Cumulative admissions never exceed the bucket in either mode; in lease
+time or the lease TTL, whichever is sooner. Cumulative admissions never exceed the bucket in either mode; in lease
 mode up to `replicas × lease size` tokens can sit unspent in leases at any
 moment, and a replica that dies without draining strands at most one lease
 per tenant (under-admission, never overrun). Lease mode covers request
@@ -113,8 +113,8 @@ embedder implementations the gateway runs, writes the precision/recall
 curve, and prints `τ* = min{τ : precision ≥ 0.99}` — or fails loudly when
 the embedder cannot separate the traps (which the local embedder, being
 lexical, often cannot: that failure is the harness working). The seed
-dataset (60 pairs) proves the harness; a production τ needs a
-production-traffic corpus (≥200+200 pairs) and a real embedder.
+dataset (60 pairs) exercises the harness; it is not a production corpus,
+and `PUSAQ_CACHE_TAU` only labels the shadow records.
 
 ### Authentication
 
@@ -160,28 +160,20 @@ and keyword heuristics with stated limits, measured on a labeled corpus
 ([content-rules.md](measurements/content-rules.md)); the suite fails
 below the published precision/recall floors.
 
-## Serving a real model (Gemini)
+## Upstreams
 
-Google exposes Gemini on an OpenAI-compatible endpoint, so a real model is
-a config entry — no code:
-
-```sh
-export PUSAQ_UPSTREAMS="gemini=https://generativelanguage.googleapis.com/v1beta/openai,mock=http://localhost:9090"
-export PUSAQ_UPSTREAM_KEY_GEMINI="<your Gemini API key>"
-export PUSAQ_ROUTES="pusaq/fast=gemini-2.5-flash,pusaq/best=gemini-2.5-pro"
-export PUSAQ_ROUTING_RULES="classify=pusaq/fast,extract=pusaq/fast,reason=pusaq/best,code=pusaq/best,default=pusaq/fast"
-make run
-```
-
-Requests to `pusaq/fast` now hit Gemini through the whole pipeline —
-limits, breakers, accounting — with the mock as the fallback backend.
-Upstream keys come from `PUSAQ_UPSTREAM_KEY_<NAME>` (uppercased upstream
-name) and are never logged.
+An upstream is any OpenAI-compatible server. `PUSAQ_UPSTREAMS` lists them in
+priority order (`name=url,…`); the first is the primary for every alias and
+the rest are fallbacks. Completions go to `POST <url>/v1/chat/completions`,
+buffered or streamed; the `openai:<upstream>` embedder of the shadow cache
+calls `POST <url>/embeddings`. `PUSAQ_ROUTES` maps each alias to the physical
+model sent upstream. `PUSAQ_UPSTREAM_KEY_<NAME>` (the upper-cased upstream
+name) is the bearer key for that upstream and is never logged.
 
 ## Not implemented
 
-Serving answers from the cache; rewriting or masking flagged content (the
-gateway never logs prompt text and the cache never sees flagged prompts, so
-there is nothing to mask yet); outbound secret scanning of responses; and a
-standing multi-region deployment (the two-region runtime module exists for
-measurement runs only and is destroyed after each one).
+Serving answers from the cache; rewriting or masking flagged content (prompt
+text is never logged and flagged prompts never reach the cache); scanning
+responses for secrets; tool calling and response formats; and a standing
+deployment (the two-region runtime
+module exists for measurement runs only and is destroyed after each one).

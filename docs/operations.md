@@ -4,9 +4,10 @@ Running, observing, measuring and deploying the gateway.
 
 ## Telemetry and health
 
-Every request through the pipeline emits one `cost_event` JSON line on
-stdout — success, error, or panic — including requested/served model and
-token usage for completions. `GET /healthz` is liveness; `GET /readyz` is
+Every request admitted to the pipeline emits one `cost_event` JSON line on
+stdout — success, error, panic, or stream end — including requested/served
+model and token usage for completions; requests refused before admission
+(oversized body, malformed `run_id`, injected not-ready window) emit none. `GET /healthz` is liveness; `GET /readyz` is
 readiness and turns 503 during the drain window on SIGTERM. With
 `PUSAQ_ADMIN_TOKEN` set, `POST /admin/readiness?state=down&for=<duration>`
 (bearer token) fails readiness on purpose for that long — `/readyz` answers
@@ -24,16 +25,11 @@ make up      # gateway + Redis + mock provider
 make run     # run the gateway on :8080
 make smoke   # POST /v1/chat/completions with pusaq/fast
 make test    # go test -race -cover ./...
-make lint    # golangci-lint + go vet
+make lint    # golangci-lint + go vet + lint-docs
 make down    # stop the local environment
 ```
 
-The mock provider's admin routes are never published: `POST /admin/fail?for=5s` fails every completion for 5 s, `DELETE /admin/fail` clears it, `GET /stats` counts what reached it.
-
-> Note (Fedora): if `localhost:9090`/`localhost:6379` hang while the
-> containers are healthy, the firewall is blocking host→container traffic on
-> the Docker bridge. The containers still reach each other inside the Compose
-> network; run the mock natively with `make mock` as a workaround.
+The mock provider's admin routes are unauthenticated: `POST /admin/fail?for=5s` fails every completion for 5 s, `DELETE /admin/fail` clears it, `GET /stats` counts what reached it.
 
 ## Measurements and how to run them
 
