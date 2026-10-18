@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -235,5 +236,16 @@ func TestAdjustOnStoreFailureSurfacesError(t *testing.T) {
 	mr.Close()
 	if err := l.Adjust(context.Background(), "team-a", 1); err == nil {
 		t.Fatal("want error when the store is down")
+	}
+}
+
+func TestLimitsRejectNonFiniteValues(t *testing.T) {
+	for _, l := range []Limits{
+		{Burst: math.NaN(), Rate: 1, TTL: time.Minute},
+		{Burst: 10, Rate: math.Inf(1), TTL: time.Minute},
+	} {
+		if err := l.Validate(); err == nil {
+			t.Fatalf("Validate(%+v) accepted a non-finite value", l)
+		}
 	}
 }

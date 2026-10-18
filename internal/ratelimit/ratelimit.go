@@ -8,6 +8,7 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -138,7 +139,7 @@ type Limits struct {
 
 // Validate rejects meaningless limits.
 func (l Limits) Validate() error {
-	if l.Burst <= 0 || l.Rate <= 0 {
+	if !(l.Burst > 0) || !(l.Rate > 0) || math.IsInf(l.Burst, 0) || math.IsInf(l.Rate, 0) {
 		return fmt.Errorf("burst and rate must be positive, got burst=%g rate=%g", l.Burst, l.Rate)
 	}
 	if l.TTL <= 0 {
