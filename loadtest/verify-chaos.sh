@@ -26,7 +26,12 @@ points="$here/out/$run_id-chaos-points.json"
 events="$here/out/$run_id-chaos-events.jsonl"
 mode="${CHAOS_MODE:-cloud}"
 settle="${CHAOS_SETTLE_SECONDS:-15}"
+[[ "$mode" == local || "$mode" == cloud ]] || { echo "invalid chaos mode: $mode" >&2; exit 1; }
 for f in "$summary" "$points" "$events"; do [[ -f "$f" ]] || { echo "missing $f" >&2; exit 1; }; done
+
+jq -e --arg run "$run_id" '.summary.run_id == $run and (.summary.thresholds_passed | type == "boolean")' "$summary" >/dev/null || { echo "invalid summary for $run_id" >&2; exit 1; }
+
+jq -e '[.summary.client.main_first_ok, .summary.client.main_retry_ok, .summary.client.split_admitted, .summary.client.split_rate_limited, .summary.client.stream_complete, .summary.client.unexpected] | all(type == "number" and . >= 0)' "$summary" >/dev/null || { echo "invalid chaos counters" >&2; exit 1; }
 
 jqs() { jq -r "$1" "$summary"; }
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
@@ -79,6 +84,10 @@ jq -s -c --arg A "$region_a" --arg flip "$flip_epoch" --argjson fail "$fail_for_
       retries: ($main2 | by(.outcome)),
       by_region: ($ok1 | by(.region)),
       setup_ok: ($req | map(select(.arm == "setup" and .outcome == "ok")) | length),
+      main_successes: ($req | map(select(.arm == "main" and .outcome == "ok")) | length),
+      main_success_by_region: ($req | map(select((.arm == "main" or .arm == "setup") and .outcome == "ok")) | by(.region)),
+      stream_complete_by_region: ($req | map(select(.arm == "stream" and .outcome == "complete")) | by(.region)),
+      non_comparable: ($req | map(select(.region == "none" or .outcome == "not_ready")) | by(.outcome)),
       streams: ($req | map(select(.arm == "stream")) | by("\(.outcome)@attempt\(.attempt)")),
       streams_interrupted_by_region: ($req | map(select(.arm == "stream" and .outcome == "interrupted")) | by(.region)),
       split_admitted_by_region: ($req | map(select(.arm == "split" and .outcome == "ok")) | by(.region)),
@@ -102,14 +111,17 @@ jq -s -c --arg A "$region_a" --arg flip "$flip_epoch" --argjson fail "$fail_for_
 ' "$tmp/points.jsonl" >"$tmp/k6.json"
 
 # 3. The gateways' view.
-jq -s -c --arg A "$region_a" '
+jq -s -c --arg A "$region_a" --arg run "$run_id" '
   def by(f): group_by(f) | map({key: (.[0] | f), value: length}) | from_entries;
-  (map(select(.msg == "cost_event"))) as $ev
+  (map(select(.msg == "cost_event" and .run_id == $run))) as $ev
   | {
       events: ($ev | length),
       success_by_tenant_region: ($ev | map(select(.outcome == "success")) | by("\(.tenant)@\(.region)")),
       errors_by_code_region: ($ev | map(select(.outcome != "success")) | by("\(.error_code)@\(.region)")),
       stream_interrupted_by_region: ($ev | map(select(.tenant == "tenant-stream" and .error_code == "stream_interrupted")) | by(.region)),
+      main_success_by_region: ($ev | map(select(.tenant == "tenant-main" and .outcome == "success")) | by(.region)),
+      stream_complete_by_region: ($ev | map(select(.tenant == "tenant-stream" and .outcome == "success")) | by(.region)),
+      split_limited_by_region: ($ev | map(select(.tenant == "tenant-split" and .error_code == "rate_limited")) | by(.region)),
       split_admitted_by_region: ($ev | map(select(.tenant == "tenant-split" and .outcome == "success")) | by(.region)),
       window_down: (map(select(.msg == "readiness_window" and .action == "down" and .region == $A)) | last | if . then {from, until} else null end),
       window_up: (map(select(.msg == "readiness_window" and .action == "up" and .region == $A)) | length),
@@ -137,6 +149,14 @@ jq -r '.latency | to_entries[] | "  \(.key): before \(.value.before | "\(.p50)/\
 echo "events:  $(gw '.events') cost events; success by tenant@region $(kv '.success_by_tenant_region' "$tmp/gw.json"); errors $(kv '.errors_by_code_region' "$tmp/gw.json"); readiness_window down=$(gw '.window_down | if . then "\(.from)→\(.until)" else "none" end') up=$(gw '.window_up'); failing-open warnings=$(gw '.failing_open')"
 
 status=0
+check_total() {
+  local label=$1 actual=$2 expected=$3
+  if (( actual != expected )); then echo "FAIL: $label points $actual != summary $expected"; status=1; fi
+}
+check_total "main successes" "$(k6 .main_successes)" "$(( $(jqs .summary.client.main_first_ok) + $(jqs .summary.client.main_retry_ok) ))"
+check_total "split admissions" "$(k6 '[.split_admitted_by_region[]] | add // 0')" "$(jqs .summary.client.split_admitted)"
+check_total "split rejections" "$(k6 '[.split_limited_by_region[]] | add // 0')" "$(jqs .summary.client.split_rate_limited)"
+check_total "completed streams" "$(k6 '[.stream_complete_by_region[]] | add // 0')" "$(jqs .summary.client.stream_complete)"
 if [[ "$(jqs '.summary.thresholds_passed')" != "true" ]]; then echo "FAIL: k6 thresholds failed"; status=1; fi
 if (( $(jqs '.summary.client.unexpected') > 0 )); then echo "FAIL: unexpected statuses (400/401/500) seen"; status=1; fi
 if (( $(gw '.failing_open') > 0 )); then echo "FAIL: a gateway failed open during the run"; status=1; fi
@@ -145,11 +165,21 @@ if [[ "$experiment" != "none" ]]; then
   if [[ "$(gw '.window_down')" == "null" ]]; then echo "FAIL: no readiness_window down record for $region_a in the gateway events"; status=1; fi
   if [[ "$mode" == "cloud" ]] && awk -v s="$(k6 '.preflip_share')" 'BEGIN { exit !(s < 0.9) }'; then echo "FAIL: pre-flip share of $region_a below 90 %"; status=1; fi
 fi
-# k6 and the gateways must agree on what succeeded (a few events may still
-# be in flight in the log pipeline; allow a handful).
-# setup() sends the warm-up requests that pick region A as tenant-main too.
-k6_ok=$(( $(jqs '.summary.client.main_first_ok') + $(jqs '.summary.client.main_retry_ok') + $(k6 '.setup_ok') ))
-gw_ok=$(jq -r '[.success_by_tenant_region | to_entries[] | select(.key | startswith("tenant-main@")) | .value] | add // 0' "$tmp/gw.json")
-if (( k6_ok - gw_ok > 5 || gw_ok - k6_ok > 5 )); then echo "FAIL: main successes disagree: k6 $k6_ok vs events $gw_ok"; status=1; fi
+compare_counts() {
+  local label=$1 expected=$2 observed=$3 tolerance=$4 difference
+  difference=$(jq -n --argjson client "$(k6 "$expected")" --argjson gateway "$(gw "$observed")" '
+    [($client | keys[]), ($gateway | keys[])] | unique
+    | map(. as $region | (($client[$region] // 0) - ($gateway[$region] // 0)) | if . < 0 then -. else . end)
+    | add // 0')
+  echo "$label: client=$(k6 "$expected") gateway=$(gw "$observed") difference=$difference tolerance=$tolerance"
+  if (( difference > tolerance )); then echo "FAIL: $label disagree by region"; status=1; fi
+}
+main_tolerance=0
+if [[ "$mode" == cloud ]]; then main_tolerance=5; fi
+compare_counts "main successes including setup and retries" .main_success_by_region .main_success_by_region "$main_tolerance"
+compare_counts "split admissions" .split_admitted_by_region .split_admitted_by_region 0
+compare_counts "split rejections" .split_limited_by_region .split_limited_by_region 0
+compare_counts "completed streams" .stream_complete_by_region .stream_complete_by_region 0
+echo "client outcomes without a comparable cost event: $(k6 '.non_comparable')"
 (( status == 0 )) && echo "OK: run consistent across k6, probes, and gateway events — the numbers above are the result"
 exit $status

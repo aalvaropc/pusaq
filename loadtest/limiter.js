@@ -167,7 +167,7 @@ const okOnly = http.expectedStatuses(200);
 
 function completion(baseURL, key, alias, callback, metadata) {
   const body = { model: alias, messages: [{ role: 'user', content: 'ping' }], max_tokens: 8 };
-  if (metadata) body.metadata = metadata;
+  body.metadata = Object.assign({ run_id: RUN_ID }, metadata || {});
   return http.post(
     `${baseURL}/v1/chat/completions`,
     JSON.stringify(body),

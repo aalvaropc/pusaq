@@ -172,3 +172,17 @@ With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K reque
 
 - **WHEN** the mode is neither `strict` nor `lease`, the lease size is not a positive integer, exceeds the request bucket capacity, or the lease TTL is not positive
 - **THEN** the gateway fails to start with a configuration error
+
+### Requirement: Limiter measurement sources agree
+
+The limiter measurement verifier SHALL compare client admissions, rejections and unexpected outcomes with the gateway's cost events for the same run and tenant, and compare admitted requests with the mock provider's served count. Missing, duplicated or differently classified evidence SHALL fail verification.
+
+#### Scenario: Independent counters agree
+
+- **WHEN** the client, gateway and provider evidence agree within the configured admission bounds
+- **THEN** verification succeeds
+
+#### Scenario: Gateway evidence differs
+
+- **WHEN** a gateway event is missing, duplicated or classified differently from the client count
+- **THEN** verification fails even when client admissions remain within their bounds
