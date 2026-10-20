@@ -14,7 +14,7 @@ import (
 
 // newTestLimiter runs the real Lua path against miniredis with a frozen
 // clock the test controls.
-func newTestLimiter(t *testing.T, limits Limits) (*Limiter, *miniredis.Miniredis, *time.Time) {
+func newTestLimiter(t *testing.T, limits Limits) (*Limiter, *miniredis.Miniredis, func(time.Duration)) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -25,8 +25,12 @@ func newTestLimiter(t *testing.T, limits Limits) (*Limiter, *miniredis.Miniredis
 		t.Fatal(err)
 	}
 	now := time.UnixMilli(1_700_000_000_000)
-	l.now = func() time.Time { return now }
-	return l, mr, &now
+	mr.SetTime(now)
+	advance := func(d time.Duration) {
+		now = now.Add(d)
+		mr.SetTime(now)
+	}
+	return l, mr, advance
 }
 
 func limits() Limits {
@@ -59,7 +63,7 @@ func TestBucketStartsFullThenDenies(t *testing.T) {
 }
 
 func TestRefillRestoresAndNeverExceedsCapacity(t *testing.T) {
-	l, _, now := newTestLimiter(t, limits())
+	l, _, advance := newTestLimiter(t, limits())
 	ctx := context.Background()
 
 	// Drain the bucket.
@@ -71,7 +75,7 @@ func TestRefillRestoresAndNeverExceedsCapacity(t *testing.T) {
 	}
 
 	// One second accrues exactly one token.
-	*now = now.Add(time.Second)
+	advance(time.Second)
 	if d, _ := l.Allow(ctx, "team-a", 1); !d.Allowed {
 		t.Fatal("token not restored after refill interval")
 	}
@@ -80,7 +84,7 @@ func TestRefillRestoresAndNeverExceedsCapacity(t *testing.T) {
 	}
 
 	// A long idle period caps at capacity, not beyond.
-	*now = now.Add(time.Hour)
+	advance(time.Hour)
 	admitted := 0
 	for range 10 {
 		if d, _ := l.Allow(ctx, "team-a", 1); d.Allowed {
@@ -125,6 +129,7 @@ func TestIdleBucketGetsTTL(t *testing.T) {
 func TestExactnessAcrossReplicasUnderConcurrency(t *testing.T) {
 	mr := miniredis.RunT(t)
 	frozen := time.UnixMilli(1_700_000_000_000)
+	mr.SetTime(frozen)
 	newReplica := func() *Limiter {
 		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 		t.Cleanup(func() { _ = client.Close() })
@@ -132,7 +137,6 @@ func TestExactnessAcrossReplicasUnderConcurrency(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		l.now = func() time.Time { return frozen }
 		return l
 	}
 	replicaA, replicaB := newReplica(), newReplica()
@@ -209,7 +213,7 @@ func TestAdjustRefundCappedAtCapacity(t *testing.T) {
 }
 
 func TestAdjustExtraChargeGoesNegative(t *testing.T) {
-	l, _, now := newTestLimiter(t, limits())
+	l, _, advance := newTestLimiter(t, limits())
 	ctx := context.Background()
 
 	// Drain to 0, then charge 2 more (actual exceeded reservation).
@@ -220,12 +224,12 @@ func TestAdjustExtraChargeGoesNegative(t *testing.T) {
 		t.Fatal(err)
 	}
 	// One second of refill (1 token) is not enough to cover the debt + cost.
-	*now = now.Add(time.Second)
+	advance(time.Second)
 	if d, _ := l.Allow(ctx, "team-a", 1); d.Allowed {
 		t.Fatal("admitted while the bucket was in debt")
 	}
 	// Four more seconds clears the 2-token debt and accrues 3: cost 1 passes.
-	*now = now.Add(4 * time.Second)
+	advance(4 * time.Second)
 	if d, _ := l.Allow(ctx, "team-a", 1); !d.Allowed {
 		t.Fatal("denied after the debt window elapsed")
 	}

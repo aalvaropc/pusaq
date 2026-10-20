@@ -232,10 +232,16 @@ elapsed time, decide, decrement, persist with TTL, and return
 verdict + balance + suggested retry, all in a single round-trip. Details that
 matter: the bucket starts **full** (a new tenant can use its burst
 immediately); refill is computed lazily at read time (no background refiller);
-idle buckets expire via TTL; `retry_after` is returned computed. The script's
-`now` comes from the calling replica: `redis.TIME` would remove the
-replica-clock dependence but makes the script non-deterministic for
-replication, so replica clocks are trusted.
+idle buckets expire via TTL; `retry_after` is returned computed.
+
+Every admission, adjustment and lease acquisition reads `TIME` inside its
+Lua operation. Redis is the shared refill clock; gateway wall-clock offsets
+do not create extra refill. The saved timestamp never moves backward. When
+store time is behind it, refill pauses and retry guidance includes that
+catch-up delay. The existing keys and balances are preserved. Redis 7 uses
+effects replication, which permits `TIME` inside a writing script; this
+still uses one network round-trip. Store clock jumps remain an infrastructure
+property, and mixed gateway versions retain the older writer's behavior.
 
 The cost — one Redis round-trip per request (under 0.5 ms on a local Redis;
 [measurements](measurements/limiter-exactness.md)) — has a measured

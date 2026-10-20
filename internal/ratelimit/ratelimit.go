@@ -14,117 +14,61 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// script is the heart of the limiter. Atomicity comes from Redis executing
-// Lua as one operation; refill is computed lazily from elapsed time (no
-// background refiller). The bucket starts full so a new tenant can use its
-// burst immediately. `now` comes from the replica: redis.TIME would remove
-// the replica-clock dependence but makes the script non-deterministic for
-// replication — the trade-off documented in docs/design.md §5.2.
-//
-// KEYS[1] = bucket key. ARGV: capacity(B), rate(r tokens/sec), now(ms),
-// cost, ttl(sec). Returns {allowed, remaining, retry_after_ms}.
-const script = `
-local B    = tonumber(ARGV[1])
-local r    = tonumber(ARGV[2])
-local now  = tonumber(ARGV[3])
+const refillBucket = `
+local B = tonumber(ARGV[1])
+local r = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local st = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(st[1]) or B
+local ts = tonumber(st[2]) or now
+local rollback = math.max(0, ts - now)
+now = math.max(now, ts)
+tokens = math.min(B, tokens + (now - ts) / 1000 * r)
+`
+
+const persistBucket = `
+redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
+redis.call('EXPIRE', KEYS[1], ttl)
+`
+
+const script = refillBucket + `
 local cost = tonumber(ARGV[4])
-local ttl  = tonumber(ARGV[5])
-
-local st     = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
-local tokens = tonumber(st[1])
-local ts     = tonumber(st[2])
-if tokens == nil then
-  tokens, ts = B, now
-end
-
-local delta = math.max(0, now - ts) / 1000.0
-tokens = math.min(B, tokens + delta * r)
-
 local allowed = 0
 if tokens >= cost then
   tokens = tokens - cost
   allowed = 1
 end
-
-redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
-redis.call('EXPIRE', KEYS[1], ttl)
-
+` + persistBucket + `
 local retry = 0
 if allowed == 0 then
-  retry = math.ceil((cost - tokens) / r * 1000)
+  retry = rollback + math.ceil((cost - tokens) / r * 1000)
 end
-return { allowed, tostring(tokens), retry }
+return {allowed, tostring(tokens), retry}
 `
 
-// adjustScript reconciles a bucket after actual consumption is known:
-// refill by elapsed time, then apply the delta (positive = refund, negative
-// = extra charge), capped at capacity. Refunds can never push a bucket past
-// full; extra charges may go negative, pushing the next refill window out.
-//
-// KEYS[1] = bucket key. ARGV: capacity(B), rate(r), now(ms), delta, ttl.
-const adjustScript = `
-local B     = tonumber(ARGV[1])
-local r     = tonumber(ARGV[2])
-local now   = tonumber(ARGV[3])
+const adjustScript = refillBucket + `
 local delta = tonumber(ARGV[4])
-local ttl   = tonumber(ARGV[5])
-
-local st     = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
-local tokens = tonumber(st[1])
-local ts     = tonumber(st[2])
-if tokens == nil then
-  tokens, ts = B, now
-end
-
-local elapsed = math.max(0, now - ts) / 1000.0
-tokens = math.min(B, tokens + elapsed * r)
 tokens = math.min(B, tokens + delta)
-
-redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
-redis.call('EXPIRE', KEYS[1], ttl)
+` + persistBucket + `
 return tostring(tokens)
 `
 
-// takeScript grants a batch of tokens in one atomic operation: at least
-// `need` (the request being served) and at most `want` (the lease size),
-// never more than the bucket holds. Lease mode uses it to buy K admissions
-// per round-trip; the strict `script` above is untouched. Fractional tokens
-// stay in the bucket: a lease is a whole number of admissions.
-//
-// KEYS[1] = bucket key. ARGV: capacity(B), rate(r), now(ms), need, want,
-// ttl(sec). Returns {granted, remaining, retry_after_ms}.
-const takeScript = `
-local B    = tonumber(ARGV[1])
-local r    = tonumber(ARGV[2])
-local now  = tonumber(ARGV[3])
+const takeScript = refillBucket + `
 local need = tonumber(ARGV[4])
 local want = tonumber(ARGV[5])
-local ttl  = tonumber(ARGV[6])
-
-local st     = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
-local tokens = tonumber(st[1])
-local ts     = tonumber(st[2])
-if tokens == nil then
-  tokens, ts = B, now
-end
-
-local delta = math.max(0, now - ts) / 1000.0
-tokens = math.min(B, tokens + delta * r)
-
 local granted = 0
 if tokens >= need then
   granted = math.max(need, math.min(want, math.floor(tokens)))
   tokens = tokens - granted
 end
-
-redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
-redis.call('EXPIRE', KEYS[1], ttl)
-
+` + persistBucket + `
 local retry = 0
 if granted == 0 then
-  retry = math.ceil((need - tokens) / r * 1000)
+  retry = rollback + math.ceil((need - tokens) / r * 1000)
 end
-return { tostring(granted), tostring(tokens), retry }
+return {tostring(granted), tostring(tokens), retry}
 `
 
 // Limits parameterize one bucket dimension.
@@ -175,8 +119,6 @@ type Limiter struct {
 	script *redis.Script
 	adjust *redis.Script
 	take   *redis.Script
-	// now is injected so tests freeze or advance time deterministically.
-	now func() time.Time
 }
 
 // New builds a Limiter for one dimension (e.g. "rpm") with the given limits.
@@ -191,7 +133,6 @@ func New(client redis.Scripter, prefix string, limits Limits) (*Limiter, error) 
 		script: redis.NewScript(script),
 		adjust: redis.NewScript(adjustScript),
 		take:   redis.NewScript(takeScript),
-		now:    time.Now,
 	}, nil
 }
 
@@ -206,9 +147,8 @@ func (l *Limiter) Allow(ctx context.Context, tenant string, cost float64) (Decis
 	res, err := l.script.Run(ctx, l.client, []string{key},
 		l.limits.Burst,
 		l.limits.Rate,
-		l.now().UnixMilli(),
-		cost,
 		int(l.limits.TTL.Seconds()),
+		cost,
 	).Slice()
 	if err != nil {
 		return Decision{}, fmt.Errorf("rate limit script: %w", err)
@@ -240,9 +180,8 @@ func (l *Limiter) Adjust(ctx context.Context, tenant string, delta float64) erro
 	err := l.adjust.Run(ctx, l.client, []string{key},
 		l.limits.Burst,
 		l.limits.Rate,
-		l.now().UnixMilli(),
-		delta,
 		int(l.limits.TTL.Seconds()),
+		delta,
 	).Err()
 	if err != nil {
 		return fmt.Errorf("rate limit adjust script: %w", err)
@@ -259,10 +198,9 @@ func (l *Limiter) Take(ctx context.Context, tenant string, need, want float64) (
 	res, err := l.take.Run(ctx, l.client, []string{key},
 		l.limits.Burst,
 		l.limits.Rate,
-		l.now().UnixMilli(),
+		int(l.limits.TTL.Seconds()),
 		need,
 		want,
-		int(l.limits.TTL.Seconds()),
 	).Slice()
 	if err != nil {
 		return Grant{}, fmt.Errorf("rate limit take script: %w", err)

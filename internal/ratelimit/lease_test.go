@@ -25,7 +25,9 @@ type leaseFixture struct {
 
 func newLeaseFixture(t *testing.T) *leaseFixture {
 	t.Helper()
-	return &leaseFixture{t: t, mr: miniredis.RunT(t), now: time.UnixMilli(1_700_000_000_000)}
+	f := &leaseFixture{t: t, mr: miniredis.RunT(t), now: time.UnixMilli(1_700_000_000_000)}
+	f.mr.SetTime(f.now)
+	return f
 }
 
 func (f *leaseFixture) clock() time.Time {
@@ -37,6 +39,7 @@ func (f *leaseFixture) clock() time.Time {
 func (f *leaseFixture) advance(d time.Duration) {
 	f.mu.Lock()
 	f.now = f.now.Add(d)
+	f.mr.SetTime(f.now)
 	f.mu.Unlock()
 }
 
@@ -48,7 +51,6 @@ func (f *leaseFixture) strict(limits Limits) *Limiter {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	l.now = f.clock
 	return l
 }
 
