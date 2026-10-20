@@ -45,7 +45,7 @@ func TestCompleteRoundTrip(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := NewHTTP("mock", upstream.URL, time.Second, discardLogger())
+	p := NewHTTP("mock", upstream.URL+"/v1", time.Second, discardLogger())
 	resp, err := p.Complete(context.Background(), chatReq())
 	if err != nil {
 		t.Fatalf("Complete() error: %v", err)
@@ -114,6 +114,34 @@ func TestCompleteMalformedUpstreamBodyIsUpstreamError(t *testing.T) {
 	var norm *core.Error
 	if !errors.As(err, &norm) || norm.Code != core.CodeUpstream {
 		t.Fatalf("err = %v, want %s on malformed body", err, core.CodeUpstream)
+	}
+}
+
+func TestPathsFollowTheVersionedBaseURL(t *testing.T) {
+	var paths []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("gemini", upstream.URL+"/v1beta/openai", time.Second, discardLogger())
+	if _, err := p.Complete(context.Background(), chatReq()); err != nil {
+		t.Fatalf("Complete() error: %v", err)
+	}
+	stream, err := p.StreamComplete(context.Background(), chatReq())
+	if err != nil {
+		t.Fatalf("StreamComplete() error: %v", err)
+	}
+	_ = stream.Close()
+
+	want := "/v1beta/openai/chat/completions"
+	if len(paths) != 2 || paths[0] != want || paths[1] != want {
+		t.Fatalf("paths = %q, want both calls at %s", paths, want)
 	}
 }
 

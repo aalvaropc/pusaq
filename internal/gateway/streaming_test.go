@@ -265,7 +265,7 @@ func TestStreamUsageFromAnOpenAICompatibleUpstream(t *testing.T) {
 	var events []core.CostEvent
 	pipeline := core.Chain(Accounting(func(e core.CostEvent) { events = append(events, e) }, discardLogger()), RequestID())
 	completions := CompletionsHandler(testRoutes(),
-		map[string]provider.Provider{"mock": provider.NewHTTP("mock", upstream.URL, time.Second, discardLogger())},
+		map[string]provider.Provider{"mock": provider.NewHTTP("mock", upstream.URL+"/v1", time.Second, discardLogger())},
 		CompletionsOptions{Tokens: tokens, ReserveDefault: 100, Prices: testPrices(), Logger: discardLogger()})
 	s := NewServer(discardLogger(), pipeline, completions)
 

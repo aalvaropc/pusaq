@@ -5,9 +5,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/aalvaropc/pusaq/internal/config"
+	"github.com/aalvaropc/pusaq/internal/embed"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
 
 	"github.com/redis/go-redis/v9"
@@ -62,5 +65,26 @@ func TestHTTPServerTimeouts(t *testing.T) {
 	}
 	if s.ReadTimeout != 0 || s.WriteTimeout != 0 {
 		t.Fatalf("read/write timeouts = %v/%v, want none so SSE responses are not cut", s.ReadTimeout, s.WriteTimeout)
+	}
+}
+
+func TestEmbedderUsesItsOwnEndpoint(t *testing.T) {
+	if _, ok := newEmbedder(config.Config{}).(embed.Local); !ok {
+		t.Fatal("embedder without a URL is not the local one")
+	}
+
+	var gotPath, gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{"data":[{"embedding":[1,0]}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	e := newEmbedder(config.Config{EmbedURL: upstream.URL + "/v1", EmbedModel: "m", EmbedKey: "sk-e", UpstreamTimeout: time.Second})
+	if _, err := e.Embed(context.Background(), "hello"); err != nil {
+		t.Fatalf("Embed() error: %v", err)
+	}
+	if gotPath != "/v1/embeddings" || gotAuth != "Bearer sk-e" {
+		t.Fatalf("path = %q, auth = %q; want /v1/embeddings with the embedder key", gotPath, gotAuth)
 	}
 }

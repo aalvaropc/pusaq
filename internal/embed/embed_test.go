@@ -72,12 +72,12 @@ func TestHTTPEmbedRequestShapeAndAuth(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	e := NewHTTP("gemini-embed", upstream.URL, "gemini-embedding-001", "sk-e", time.Second)
+	e := NewHTTP("gemini-embed", upstream.URL+"/v1beta/openai", "gemini-embedding-001", "sk-e", time.Second)
 	vec, err := e.Embed(context.Background(), "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/embeddings" || gotAuth != "Bearer sk-e" {
+	if gotPath != "/v1beta/openai/embeddings" || gotAuth != "Bearer sk-e" {
 		t.Fatalf("path=%q auth=%q", gotPath, gotAuth)
 	}
 	if !strings.Contains(gotBody, `"model":"gemini-embedding-001"`) || !strings.Contains(gotBody, `"input":"hello"`) {

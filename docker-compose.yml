@@ -23,7 +23,7 @@ x-pusaq-loadtest: &pusaq-loadtest
 # pusaq/auto with a feature tag the rules send to pusaq/best.
 x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_REDIS_ADDR: redis:6379
-  PUSAQ_UPSTREAMS: mock=http://mock-lt:9090,backup=http://mock-lt-backup:9090
+  PUSAQ_UPSTREAMS: mock=http://mock-lt:9090/v1,backup=http://mock-lt-backup:9090/v1
   PUSAQ_ROUTES: pusaq/fast=mock-exactness,pusaq/best=mock-neighbor
   PUSAQ_ROUTING_RULES: toll=pusaq/best,default=pusaq/fast
   PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll,chaos-main:tenant-main,chaos-stream:tenant-stream,chaos-split:tenant-split
@@ -46,7 +46,7 @@ services:
       target: pusaq
     environment:
       PUSAQ_REDIS_ADDR: redis:6379
-      PUSAQ_UPSTREAMS: mock=http://mockprovider:9090,backup=http://mockbackup:9090
+      PUSAQ_UPSTREAMS: mock=http://mockprovider:9090/v1,backup=http://mockbackup:9090/v1
       PUSAQ_RPM_LIMIT: "60"
       PUSAQ_RPM_BURST: "50"
       PUSAQ_TPM_LIMIT: "300"

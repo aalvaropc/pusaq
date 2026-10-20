@@ -112,7 +112,7 @@ func envKeyName(name string) string {
 }
 
 func defaultUpstreams() []Upstream {
-	return []Upstream{{Name: "mock", URL: "http://localhost:9090"}}
+	return []Upstream{{Name: "mock", URL: "http://localhost:9090/v1"}}
 }
 
 // AutoAlias is the router alias: it has no physical model of its own and
@@ -237,11 +237,14 @@ type Config struct {
 	CacheTau float64
 	// CacheMaxEntries caps the shadow index (PUSAQ_CACHE_MAX_ENTRIES).
 	CacheMaxEntries int
-	// EmbedderKind is "local" or "openai:<upstream>" naming a configured
-	// upstream (PUSAQ_EMBEDDER); EmbedModel names the embedding model for
-	// the openai kind (PUSAQ_EMBED_MODEL).
+	// EmbedderKind is "local" or "openai" (PUSAQ_EMBEDDER, "local" or
+	// "openai:<url>"); an openai embedder calls EmbedURL with EmbedModel
+	// (PUSAQ_EMBED_MODEL) and the bearer key EmbedKey (PUSAQ_EMBED_KEY),
+	// never logged.
 	EmbedderKind string
+	EmbedURL     string
 	EmbedModel   string
+	EmbedKey     string
 }
 
 // Load reads configuration through lookup (os.LookupEnv in production,
@@ -532,29 +535,25 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		cfg.CacheMaxEntries = n
 	}
 	cfg.EmbedderKind = "local"
-	if v, ok := lookup("PUSAQ_EMBEDDER"); ok && v != "" {
-		if v != "local" {
-			name, found := strings.CutPrefix(v, "openai:")
-			if !found || name == "" {
-				return Config{}, fmt.Errorf("PUSAQ_EMBEDDER: must be \"local\" or \"openai:<upstream>\", got %q", v)
-			}
-			exists := false
-			for _, up := range cfg.Upstreams {
-				if up.Name == name {
-					exists = true
-				}
-			}
-			if !exists {
-				return Config{}, fmt.Errorf("PUSAQ_EMBEDDER: upstream %q is not configured", name)
-			}
+	if v, ok := lookup("PUSAQ_EMBEDDER"); ok && v != "" && v != "local" {
+		rawURL, found := strings.CutPrefix(v, "openai:")
+		u, err := url.Parse(rawURL)
+		if !found || err != nil || u.Scheme == "" || u.Host == "" {
+			return Config{}, fmt.Errorf("PUSAQ_EMBEDDER: must be \"local\" or \"openai:<absolute url>\"")
 		}
-		cfg.EmbedderKind = v
+		cfg.EmbedderKind, cfg.EmbedURL = "openai", strings.TrimRight(rawURL, "/")
 	}
 	if v, ok := lookup("PUSAQ_EMBED_MODEL"); ok {
 		cfg.EmbedModel = v
 	}
-	if strings.HasPrefix(cfg.EmbedderKind, "openai:") && cfg.EmbedModel == "" {
-		return Config{}, fmt.Errorf("PUSAQ_EMBED_MODEL: required when PUSAQ_EMBEDDER is %q", cfg.EmbedderKind)
+	if v, ok := lookup("PUSAQ_EMBED_KEY"); ok {
+		cfg.EmbedKey = v
+	}
+	if cfg.EmbedURL != "" && cfg.EmbedModel == "" {
+		return Config{}, fmt.Errorf("PUSAQ_EMBED_MODEL: required with an openai embedder")
+	}
+	if cfg.EmbedURL == "" && cfg.EmbedKey != "" {
+		return Config{}, fmt.Errorf("PUSAQ_EMBED_KEY: set without an openai embedder")
 	}
 
 	if v, ok := lookup("PUSAQ_API_KEYS"); ok {

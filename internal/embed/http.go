@@ -21,9 +21,9 @@ type HTTP struct {
 	client  *http.Client
 }
 
-// NewHTTP builds an adapter for the endpoint at baseURL (no trailing
-// slash), embedding with model; every call is bounded by timeout. An empty
-// apiKey sends no credentials.
+// NewHTTP builds an adapter for the API at baseURL, version included and
+// without a trailing slash, embedding with model at baseURL/embeddings;
+// every call is bounded by timeout. An empty apiKey sends no credentials.
 func NewHTTP(name, baseURL, model, apiKey string, timeout time.Duration) *HTTP {
 	return &HTTP{
 		name:    name,

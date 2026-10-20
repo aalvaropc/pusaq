@@ -19,7 +19,7 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `PUSAQ_UPSTREAMS` | `mock=http://localhost:9090` | Backends in priority order, `name=url,...`; the first is primary, the rest are fallbacks. |
+| `PUSAQ_UPSTREAMS` | `mock=http://localhost:9090/v1` | Backends in priority order, `name=url,...`; the first is primary, the rest are fallbacks. Each URL is the API base with its version segment; completions go to `<url>/chat/completions`. |
 | `PUSAQ_UPSTREAM_KEY_<NAME>` | unset | API key for upstream `<NAME>`: the name upper-cased, every character other than a letter or digit as `_`; never logged. Two upstreams that map to the same variable fail startup. |
 | `PUSAQ_UPSTREAM_TIMEOUT` | `30s` | Bound on every provider call: the whole exchange when buffered; the connection, TLS handshake, response headers and every silence between chunks when streamed. |
 | `PUSAQ_ROUTES` | both aliases → `mock-model` | `alias=model,...` for `pusaq/fast` and `pusaq/best`. |
@@ -65,5 +65,6 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_CACHE_MODE` | `off` | `off` or `shadow`. Shadow measures and never serves. |
 | `PUSAQ_CACHE_TAU` | `0.95` | Similarity threshold that labels shadow records hit/miss. |
 | `PUSAQ_CACHE_MAX_ENTRIES` | `10000` | Cap on the in-process index (LRU). |
-| `PUSAQ_EMBEDDER` | `local` | `local` or `openai:<upstream>` naming a configured upstream. |
+| `PUSAQ_EMBEDDER` | `local` | `local` or `openai:<url>`, an OpenAI-compatible API base with its version segment; embeddings go to `<url>/embeddings`. Independent of `PUSAQ_UPSTREAMS`. |
 | `PUSAQ_EMBED_MODEL` | unset | Embedding model; required with an `openai:` embedder. |
+| `PUSAQ_EMBED_KEY` | unset | Bearer key for the `openai:` embedder; never logged. Set without an `openai:` embedder, startup fails. |
