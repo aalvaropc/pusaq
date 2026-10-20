@@ -11,6 +11,8 @@ import (
 // sweepBudget bounds one sweep of refunds, by the janitor or by Close.
 const sweepBudget = 250 * time.Millisecond
 
+// Leased satisfies the same Allow surface as Limiter; it is meant for the
+// request dimension, whose cost is always 1.
 type Leased struct {
 	inner *Limiter
 	size  float64
