@@ -48,4 +48,3 @@ With rate limiting enabled, the gateway SHALL additionally limit each tenant by 
 
 - **WHEN** a confirmed token reservation exists but every backend is skipped or the request ends before invoking any provider
 - **THEN** finalization attempts one full refund with a bounded context independent of client cancellation, and the original request outcome is preserved
-
