@@ -63,4 +63,3 @@ With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K reque
 
 - **WHEN** store retry is longer than lease TTL and tokens are returned during the local denial interval
 - **THEN** the replica consults the store again after lease TTL and can use those tokens
-
