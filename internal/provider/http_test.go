@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -177,18 +178,20 @@ func TestStreamCompleteHeaderTimeoutBounded(t *testing.T) {
 }
 
 func TestStreamCompleteNotKilledByOverallTimeout(t *testing.T) {
-	// Headers arrive instantly; the body takes longer than the timeout.
-	// The stream client must not cut it (only time-to-first-byte is bounded).
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
-		time.Sleep(150 * time.Millisecond) // longer than the 50ms timeout
+		for range 6 {
+			time.Sleep(60 * time.Millisecond)
+			_, _ = io.WriteString(w, "data: {}\n\n")
+			w.(http.Flusher).Flush()
+		}
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer upstream.Close()
 
-	p := NewHTTP("mock", upstream.URL, 50*time.Millisecond, discardLogger())
+	p := NewHTTP("mock", upstream.URL, 200*time.Millisecond, discardLogger())
 	stream, err := p.StreamComplete(context.Background(), chatReq())
 	if err != nil {
 		t.Fatalf("StreamComplete() error: %v", err)
@@ -200,6 +203,84 @@ func TestStreamCompleteNotKilledByOverallTimeout(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "[DONE]") {
 		t.Fatalf("incomplete stream: %q", got)
+	}
+}
+
+func TestStreamCompleteIdleTimeoutEndsStalledStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {}\n\n")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+
+	p := NewHTTP("mock", upstream.URL, 100*time.Millisecond, discardLogger())
+	stream, err := p.StreamComplete(context.Background(), chatReq())
+	if err != nil {
+		t.Fatalf("StreamComplete() error: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	type result struct {
+		got []byte
+		err error
+	}
+	done := make(chan result, 1)
+	start := time.Now()
+	go func() {
+		got, err := io.ReadAll(stream)
+		done <- result{got, err}
+	}()
+	var got []byte
+	select {
+	case r := <-done:
+		got, err = r.got, r.err
+	case <-time.After(2 * time.Second):
+		t.Fatal("stalled stream never ended")
+	}
+	if !errors.Is(err, errStreamIdle) {
+		t.Fatalf("read error = %v, want the idle timeout", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatal("idle timeout must not look like a client cancellation")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("stalled stream ended after %v, want about the 100ms timeout", elapsed)
+	}
+	if string(got) != "data: {}\n\n" {
+		t.Fatalf("bytes before the stall = %q", got)
+	}
+}
+
+func TestStreamCompleteTLSHandshakeBounded(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { _, _ = io.Copy(io.Discard, c) }()
+		}
+	}()
+
+	p := NewHTTP("mock", "https://"+ln.Addr().String(), 50*time.Millisecond, discardLogger())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err = p.StreamComplete(ctx, chatReq())
+	var norm *core.Error
+	if !errors.As(err, &norm) || norm.Code != core.CodeUpstream {
+		t.Fatalf("err = %v, want %s", err, core.CodeUpstream)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("TLS handshake against a silent server took %v, want about the 50ms timeout", elapsed)
 	}
 }
 

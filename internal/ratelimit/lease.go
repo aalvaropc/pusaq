@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// sweepBudget bounds one refund round-trip made by the janitor.
+// sweepBudget bounds one sweep of refunds, by the janitor or by Close.
 const sweepBudget = 250 * time.Millisecond
 
 // Leased trades per-window exactness for fewer store round-trips: each
