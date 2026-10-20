@@ -77,6 +77,38 @@ func TestCooldownGrantsBoundedProbes(t *testing.T) {
 	}
 }
 
+func TestReleaseReturnsProbeSlot(t *testing.T) {
+	b, now := testBreaker()
+	failN(b, 4)
+	*now = now.Add(10 * time.Second)
+	for range 2 {
+		if !b.Allow() {
+			t.Fatal("half-open denied a probe")
+		}
+	}
+	if b.Allow() {
+		t.Fatal("half-open exceeded its probe budget")
+	}
+
+	b.Release()
+	if !b.Allow() {
+		t.Fatal("released probe slot was not reusable")
+	}
+	if got := b.State(); got != StateHalfOpen {
+		t.Fatalf("state = %s, want half_open: a release records no outcome", got)
+	}
+}
+
+func TestReleaseIsNoOpWhenClosed(t *testing.T) {
+	b, _ := testBreaker()
+	failN(b, 3)
+	b.Release()
+	failN(b, 1)
+	if got := b.State(); got != StateOpen {
+		t.Fatalf("state = %s, want open: a release must not erase failures", got)
+	}
+}
+
 func TestProbeSuccessClosesAndFailureReopens(t *testing.T) {
 	b, now := testBreaker()
 	failN(b, 4)

@@ -69,7 +69,8 @@ func (p *HTTP) authorize(req *http.Request) {
 // Name implements Provider.
 func (p *HTTP) Name() string { return p.name }
 
-// Complete implements Provider. Upstream failures and timeouts map to
+// Complete implements Provider. A rejection of the request (400, 413, 422)
+// maps to core.CodeInvalidRequest and every other failure to
 // core.CodeUpstream; the upstream's raw body is logged, never returned.
 func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	payload, err := json.Marshal(req)
@@ -95,7 +96,7 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxUpstreamBody))
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxUpstreamBody+1))
 	if err != nil {
 		return ChatResponse{}, &core.Error{
 			Code: core.CodeUpstream, Message: "failed reading upstream response", Err: err,
@@ -108,22 +109,30 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 			slog.Int("status", httpResp.StatusCode),
 			slog.String("body", string(body[:min(len(body), 512)])),
 		)
-		return ChatResponse{}, core.Errorf(core.CodeUpstream,
-			"upstream provider returned status %d", httpResp.StatusCode)
+		return ChatResponse{}, statusError(httpResp.StatusCode)
+	}
+	if len(body) > maxUpstreamBody {
+		return ChatResponse{}, core.NewError(core.CodeUpstream, "upstream response too large")
 	}
 
-	var resp ChatResponse
+	var resp struct {
+		ChatResponse
+		Error json.RawMessage `json:"error"`
+	}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return ChatResponse{}, &core.Error{
 			Code: core.CodeUpstream, Message: "invalid upstream response body", Err: err,
 		}
 	}
-	return resp, nil
+	if (len(resp.Error) > 0 && string(resp.Error) != "null") || len(resp.Choices) == 0 {
+		return ChatResponse{}, core.NewError(core.CodeUpstream, "upstream response carried no completion")
+	}
+	return resp.ChatResponse, nil
 }
 
 // StreamComplete implements Provider. On success the returned stream is the
 // upstream's raw SSE body; the caller closes it. Failures before the stream
-// starts map to core.CodeUpstream like buffered calls.
+// starts map to errors like buffered calls.
 func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadCloser, error) {
 	req.Stream = true
 	payload, err := json.Marshal(req)
@@ -161,10 +170,17 @@ func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadClos
 			slog.Int("status", httpResp.StatusCode),
 			slog.String("body", string(body)),
 		)
-		return nil, core.Errorf(core.CodeUpstream,
-			"upstream provider returned status %d", httpResp.StatusCode)
+		return nil, statusError(httpResp.StatusCode)
 	}
 	return newIdleTimeoutBody(httpResp.Body, p.idleTimeout, cancel), nil
+}
+
+func statusError(status int) error {
+	switch status {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		return core.Errorf(core.CodeInvalidRequest, "upstream rejected the request (status %d)", status)
+	}
+	return core.Errorf(core.CodeUpstream, "upstream provider returned status %d", status)
 }
 
 var errStreamIdle = errors.New("upstream stream idle past the timeout")

@@ -186,8 +186,8 @@ cost.
    the TPM bucket charges input tokens plus a reserved estimate for output,
    once per request (the same model contract holds across the fallback chain).
 8. **Provider call.** The OpenAI-compatible adapter calls the backend chain
-   (see §5.5), streaming passed through if requested; every outcome feeds that
-   backend's breaker.
+   (see §5.5), streaming passed through if requested; every answered attempt
+   feeds that backend's breaker.
 9. **Finalizers and event.** In registration order: price, monthly spend, TPM
    reconciliation (return the unused reservation — in a `defer`, so it runs on
    success, error, timeout, and cancellation alike), and the shadow-cache
@@ -350,9 +350,14 @@ reintroduce the cost the router exists to remove.
 
 **Fallback.** Every alias shares one backend chain: the first `PUSAQ_UPSTREAMS`
 entry is the primary, the rest are fallbacks in order, all called with the
-route's physical model name. A transport failure, a timeout, any non-200
-answer, or an open breaker moves the request to the next backend, at most once
-each; the token charge is made once, before the chain. Streams fall back only
+route's physical model name. A transport failure, a timeout, a non-200 answer
+other than a rejection, a 200 without a completion, or an open breaker moves
+the request to the next backend, at most once each, and counts as that
+backend's failure; the token charge is made once, before the chain. A
+provider's rejection of the request (400, 413, 422) is the client's error: it
+ends the chain as `invalid_request` and counts as an answer, not a failure.
+When the client leaves, the chain stops, the interrupted attempt feeds no
+breaker, and the event records `client_canceled`. Streams fall back only
 before the first byte — a started stream is never silently restarted. No
 idempotency key is sent upstream.
 

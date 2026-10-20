@@ -245,3 +245,81 @@ func TestValidationErrorsDoNotConsumeAttempts(t *testing.T) {
 		t.Fatalf("attempts = %d, want 0", (*events)[0].Attempts)
 	}
 }
+
+func TestUpstreamClientErrorStopsChainWithoutTrippingBreaker(t *testing.T) {
+	rejecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"max_tokens is invalid"}}`)
+	}))
+	defer rejecting.Close()
+	backup := &scriptedProvider{name: "backup"}
+	brs, m := tightBreakers(t)
+	primary := provider.NewHTTP("primary", rejecting.URL, time.Second, discardLogger())
+	s, events := fallbackServer(t, primary, backup, brs)
+
+	for i := range 4 {
+		if rec := post(s, string(validPayload())); rec.Code != http.StatusBadRequest {
+			t.Fatalf("request %d: status = %d, want 400", i, rec.Code)
+		}
+	}
+	if backup.calls != 0 {
+		t.Fatalf("backup called %d times for a request the primary rejected", backup.calls)
+	}
+	for name, br := range m {
+		if got := br.State(); got != breaker.StateClosed {
+			t.Fatalf("%s breaker = %s, want closed: a rejected request is not a backend failure", name, got)
+		}
+	}
+	if code := (*events)[0].ErrorCode; code != core.CodeInvalidRequest {
+		t.Fatalf("event code = %s, want %s", code, core.CodeInvalidRequest)
+	}
+}
+
+type blockingProvider struct {
+	name  string
+	calls int
+}
+
+func (b *blockingProvider) Name() string { return b.name }
+
+func (b *blockingProvider) Complete(ctx context.Context, _ provider.ChatRequest) (provider.ChatResponse, error) {
+	b.calls++
+	<-ctx.Done()
+	return provider.ChatResponse{}, &core.Error{Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: ctx.Err()}
+}
+
+func (b *blockingProvider) StreamComplete(ctx context.Context, _ provider.ChatRequest) (io.ReadCloser, error) {
+	b.calls++
+	<-ctx.Done()
+	return nil, &core.Error{Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: ctx.Err()}
+}
+
+func TestCanceledRequestStopsChainWithoutBreakerFailure(t *testing.T) {
+	payloads := map[string][]byte{"buffered": validPayload(), "stream": streamingPayload()}
+	for name, payload := range payloads {
+		t.Run(name, func(t *testing.T) {
+			primary := &blockingProvider{name: "primary"}
+			backup := &scriptedProvider{name: "backup", sse: fakeSSE}
+			brs, m := tightBreakers(t)
+			h := CompletionsHandler(fallbackRoutes(),
+				map[string]provider.Provider{"primary": primary, "backup": backup},
+				CompletionsOptions{Breakers: brs, Logger: discardLogger()})
+
+			for range 2 {
+				ctx, cancel := context.WithCancel(context.Background())
+				time.AfterFunc(20*time.Millisecond, cancel)
+				_, err := h(ctx, &core.Request{Op: "chat.completions", Payload: payload})
+				cancel()
+				if code := core.AsError(err).Code; code != core.CodeClientCanceled {
+					t.Fatalf("err = %v, want %s", err, core.CodeClientCanceled)
+				}
+			}
+			if backup.calls != 0 {
+				t.Fatalf("backup called %d times after the client left", backup.calls)
+			}
+			if got := m["primary"].State(); got != breaker.StateClosed {
+				t.Fatalf("primary breaker = %s, want closed: cancellations are not failures", got)
+			}
+		})
+	}
+}

@@ -117,8 +117,8 @@ func (b *Breaker) State() State {
 }
 
 // Allow reports whether an attempt may proceed now. In half-open it grants
-// at most cfg.Probes concurrent probes; callers MUST call Record for every
-// allowed attempt, or probe slots leak.
+// at most cfg.Probes concurrent probes; callers MUST call Record or Release
+// for every allowed attempt, or probe slots leak.
 func (b *Breaker) Allow() bool {
 	b.mu.Lock()
 	from := b.state
@@ -148,6 +148,15 @@ func (b *Breaker) Record(success bool) {
 	to := b.state
 	b.mu.Unlock()
 	b.notify(from, to)
+}
+
+// Release returns an allowed attempt that produced no outcome, such as one the client canceled.
+func (b *Breaker) Release() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.state == StateHalfOpen && b.probes > 0 {
+		b.probes--
+	}
 }
 
 // notify reports a transition to the configured hook. Callers must NOT

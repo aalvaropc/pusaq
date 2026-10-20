@@ -18,6 +18,7 @@ func TestErrorStatusMapping(t *testing.T) {
 		{CodePolicyDenied, http.StatusForbidden},
 		{CodeBudgetExceeded, http.StatusPaymentRequired},
 		{CodeStoreUnavailable, http.StatusServiceUnavailable},
+		{CodeClientCanceled, 499},
 		{Code("unregistered"), http.StatusInternalServerError},
 	}
 	for _, tt := range tests {

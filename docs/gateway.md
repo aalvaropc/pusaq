@@ -23,8 +23,10 @@ same as `route_reason`, `feature_tag`, and `region`. A request may declare
 admission and recorded on its cost event as `run_id` — also when the rate
 limiter rejects it — so a measurement run can be read back from the events.
 All errors share one JSON shape: `{"error":{"code":"...","message":"..."}}`
-— provider failures surface as `upstream_error` (502) without leaking
-upstream responses; a tenant policy denial is `policy_denied` (403); an
+— provider failures surface as `upstream_error` (502) and a provider's
+rejection of the request (400, 413, 422) as `invalid_request` (400), neither
+leaking upstream responses; a request whose client left before any answer is
+recorded as `client_canceled`; a tenant policy denial is `policy_denied` (403); an
 exhausted monthly budget is `budget_exceeded` (402, with `retry_after_ms`
 until the next UTC month); a store outage for a fail-closed tenant is
 `store_unavailable` (503); a replica inside an injected not-ready window
@@ -81,7 +83,9 @@ log record (`backend`, `from`, `to`), which is what detection and recovery
 times are measured from. On an
 upstream error or an open breaker, the route's fallback backends are tried
 in order — at most once each, same model contract; streams fall back only
-before the first byte. Failover is observable per request: every cost event
+before the first byte. A provider's rejection of the request (400, 413, 422)
+ends the chain without counting as a failure, and so does a client that
+leaves. Failover is observable per request: every cost event
 records `served_provider` and `attempts`. Backends come from
 `PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
 
