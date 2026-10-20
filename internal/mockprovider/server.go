@@ -218,8 +218,11 @@ func (s *Server) sampleLatency() time.Duration {
 
 func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Model  string `json:"model"`
-		Stream bool   `json:"stream"`
+		Model         string `json:"model"`
+		Stream        bool   `json:"stream"`
+		StreamOptions struct {
+			IncludeUsage bool `json:"include_usage"`
+		} `json:"stream_options"`
 	}
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	_ = json.Unmarshal(body, &req) // malformed body → buffered response
@@ -239,7 +242,7 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Stream {
-		s.streamCompletion(w, req.Model)
+		s.streamCompletion(w, req.Model, req.StreamOptions.IncludeUsage)
 		return
 	}
 
@@ -263,8 +266,9 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 const cannedContent = "This is a canned response from the Pusaq mock provider."
 
 // streamCompletion emits the canned content as OpenAI chat.completion.chunk
-// events, a final chunk carrying usage, then "data: [DONE]".
-func (s *Server) streamCompletion(w http.ResponseWriter, model string) {
+// events, a final usage chunk when the request asked for one, then
+// "data: [DONE]".
+func (s *Server) streamCompletion(w http.ResponseWriter, model string, includeUsage bool) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
@@ -303,14 +307,16 @@ func (s *Server) streamCompletion(w http.ResponseWriter, model string) {
 		s.sleep(s.opts.StreamChunkDelay)
 	}
 
-	usage, _ := json.Marshal(map[string]any{
-		"id":      "mock-cmpl-1",
-		"object":  "chat.completion.chunk",
-		"model":   model,
-		"choices": []any{},
-		"usage":   map[string]int{"prompt_tokens": 12, "completion_tokens": 11, "total_tokens": 23},
-	})
-	writeEvent(string(usage))
+	if includeUsage {
+		usage, _ := json.Marshal(map[string]any{
+			"id":      "mock-cmpl-1",
+			"object":  "chat.completion.chunk",
+			"model":   model,
+			"choices": []any{},
+			"usage":   map[string]int{"prompt_tokens": 12, "completion_tokens": 11, "total_tokens": 23},
+		})
+		writeEvent(string(usage))
+	}
 	writeEvent("[DONE]")
 }
 

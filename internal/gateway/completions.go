@@ -250,22 +250,38 @@ type CompletionsOptions struct {
 	Logger *slog.Logger
 }
 
-// priceOnFinalize registers the finalizer that prices the request once its
-// usage is known — after a buffered return, at stream end, or never (an
-// error before the provider answered leaves no usage and no cost). The
-// price is keyed by the served model, which the fallback chain preserves.
-func priceOnFinalize(req *core.Request, prices *pricing.Table) {
-	if prices == nil {
+// priceOnFinalize registers the finalizer that prices the request after a
+// buffered return or at stream end. A provider that answered without usage
+// is priced from the reservation; a request no provider answered has no
+// cost. The price is keyed by the served model, which the fallback chain
+// preserves.
+func priceOnFinalize(req *core.Request, cr completionRequest, opts CompletionsOptions) {
+	if opts.Prices == nil {
 		return
 	}
 	req.OnFinalize(func() {
-		if req.Usage == (core.Usage{}) {
-			return
+		usage, estimated := req.Usage, false
+		if usage == (core.Usage{}) {
+			if req.ServedProvider == "" {
+				return
+			}
+			usage = core.Usage{
+				PromptTokens:     estimateInputTokens(cr.Messages),
+				CompletionTokens: reservation(cr, opts.ReserveDefault),
+			}
+			estimated = true
 		}
-		if usd, ok := prices.Cost(req.ServedModel, req.Usage); ok {
-			req.Cost = core.Cost{USD: usd, TableVersion: prices.Version}
+		if usd, ok := opts.Prices.Cost(req.ServedModel, usage); ok {
+			req.Cost = core.Cost{USD: usd, TableVersion: opts.Prices.Version, Estimated: estimated}
 		}
 	})
+}
+
+func reservation(cr completionRequest, reserveDefault int) int {
+	if cr.MaxTokens != nil {
+		return *cr.MaxTokens
+	}
+	return reserveDefault
 }
 
 // offerShadow registers a finalizer that enqueues a shadow sample once the
@@ -341,7 +357,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		req.ServedModel = route.Model
 		req.FeatureTag = tag
 		req.RouteReason = reason
-		priceOnFinalize(req, opts.Prices)
+		priceOnFinalize(req, cr, opts)
 
 		// Policy runs after the alias is known and before anything is
 		// charged: a denied request costs the tenant nothing. Its content
@@ -405,10 +421,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 	if opts.Tokens == nil {
 		return nil
 	}
-	reserve := opts.ReserveDefault
-	if cr.MaxTokens != nil {
-		reserve = *cr.MaxTokens
-	}
+	reserve := reservation(cr, opts.ReserveDefault)
 	estimate := estimateInputTokens(cr.Messages)
 	if need, burst := float64(estimate)+float64(reserve), opts.Tokens.Limits().Burst; need > burst {
 		return core.Errorf(core.CodeInvalidRequest,
@@ -469,20 +482,21 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 }
 
 // viaChain walks the route's backend chain: skip open breakers without
-// paying an attempt, feed every answered attempt back to the breaker, serve
-// from the first success. A client cancellation stops the chain and feeds
+// paying an attempt, feed every failed attempt back to the breaker, and
+// return the first success with its backend's breaker, on which the caller
+// records the outcome. A client cancellation stops the chain and feeds
 // nothing; non-upstream errors stop the chain — they are not the backend's
 // fault.
-func viaChain[T any](ctx context.Context, providers map[string]provider.Provider, req *core.Request, route Route, opts CompletionsOptions, call func(provider.Provider) (T, error)) (T, error) {
+func viaChain[T any](ctx context.Context, providers map[string]provider.Provider, req *core.Request, route Route, opts CompletionsOptions, call func(provider.Provider) (T, error)) (T, *breaker.Breaker, error) {
 	var zero T
 	var lastErr error
 	for _, backend := range route.backends() {
 		if ctx.Err() != nil {
-			return zero, errClientCanceled()
+			return zero, nil, errClientCanceled()
 		}
 		p, ok := providers[backend]
 		if !ok {
-			return zero, core.Errorf(core.CodeInternal, "no provider registered for route")
+			return zero, nil, core.Errorf(core.CodeInternal, "no provider registered for route")
 		}
 		br := opts.breakerFor(backend)
 		if br != nil && !br.Allow() {
@@ -496,26 +510,27 @@ func viaChain[T any](ctx context.Context, providers map[string]provider.Provider
 			if br != nil {
 				br.Release()
 			}
-			return zero, errClientCanceled()
-		}
-		if br != nil {
-			br.Record(err == nil || core.AsError(err).Code != core.CodeUpstream)
+			return zero, nil, errClientCanceled()
 		}
 		if err == nil {
 			req.ServedProvider = backend
-			return out, nil
+			return out, br, nil
 		}
-		if core.AsError(err).Code != core.CodeUpstream {
-			return zero, err
+		upstreamFailure := core.AsError(err).Code == core.CodeUpstream
+		if br != nil {
+			br.Record(!upstreamFailure)
+		}
+		if !upstreamFailure {
+			return zero, nil, err
 		}
 		lastErr = err
 		opts.Logger.Warn("backend failed, trying next",
 			slog.String("request_id", req.ID), slog.String("backend", backend), slog.Any("error", err))
 	}
 	if lastErr != nil {
-		return zero, lastErr
+		return zero, nil, lastErr
 	}
-	return zero, core.NewError(core.CodeUpstream, "all upstream backends unavailable")
+	return zero, nil, core.NewError(core.CodeUpstream, "all upstream backends unavailable")
 }
 
 func errClientCanceled() error {
@@ -524,18 +539,22 @@ func errClientCanceled() error {
 
 func completeWithFallback(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, route Route, opts CompletionsOptions) (provider.ChatResponse, error) {
 	chatReq := upstreamRequest(cr, route)
-	return viaChain(ctx, providers, req, route, opts, func(p provider.Provider) (provider.ChatResponse, error) {
+	out, br, err := viaChain(ctx, providers, req, route, opts, func(p provider.Provider) (provider.ChatResponse, error) {
 		return p.Complete(ctx, chatReq)
 	})
+	if br != nil {
+		br.Record(true)
+	}
+	return out, err
 }
 
 // streamCompletion proxies a streaming completion with pre-first-byte
-// fallback: backend failures before a stream exists walk the chain; once a
-// stream has begun, mid-stream failures end it with the usual accounting —
-// a started stream is never silently restarted.
+// fallback: backend failures before a stream exists walk the chain; a
+// started stream is never restarted, and its outcome reaches the backend's
+// breaker when it ends.
 func streamCompletion(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, shape cacheShape, route Route, opts CompletionsOptions) (*core.Response, error) {
 	chatReq := upstreamRequest(cr, route)
-	upstream, err := viaChain(ctx, providers, req, route, opts, func(p provider.Provider) (io.ReadCloser, error) {
+	upstream, br, err := viaChain(ctx, providers, req, route, opts, func(p provider.Provider) (io.ReadCloser, error) {
 		return p.StreamComplete(ctx, chatReq)
 	})
 	if err != nil {
@@ -543,6 +562,7 @@ func streamCompletion(ctx context.Context, providers map[string]provider.Provide
 	}
 
 	scanner := &usageScanningStream{inner: upstream, req: req}
+	req.OnFinalize(func() { scanner.settle(br) })
 	offerShadow(req, shape, opts, scanner.completed, scanner.contentFingerprint)
 
 	resp := &core.Response{
@@ -556,16 +576,29 @@ func streamCompletion(ctx context.Context, providers map[string]provider.Provide
 	return resp, nil
 }
 
-// usageScanningStream forwards SSE bytes untouched while watching complete
-// "data:" lines for a usage object (landed on the envelope) and
-// accumulating delta content for the response fingerprint. Pusaq never
-// rewrites provider chunks — passthrough fidelity first.
+const maxEventBytes = 1 << 20
+
+var errEventTooLarge = errors.New("upstream stream event exceeds 1 MiB")
+
+const streamErrorEvent = "\n\ndata: " + `{"error":{"code":"upstream_error","message":"upstream stream failed"}}` + "\n\n"
+
+// usageScanningStream forwards SSE bytes untouched while parsing events for
+// the usage object (landed on the envelope), the delta content (for the
+// response fingerprint), and the [DONE] mark. A stream that fails upstream
+// or ends without [DONE] gets one terminal error event before its error; a
+// client disconnect gets nothing.
 type usageScanningStream struct {
 	inner   io.ReadCloser
 	req     *core.Request
-	buf     []byte
+	line    []byte
+	data    []byte
+	hasData bool
+	cr      bool
 	content strings.Builder
 	done    bool
+	failed  bool
+	tail    []byte
+	err     error
 }
 
 // completed reports whether the stream reached its [DONE] terminator — the
@@ -578,54 +611,141 @@ func (u *usageScanningStream) contentFingerprint() string {
 	return semcache.Fingerprint(u.content.String())
 }
 
-func (u *usageScanningStream) Read(p []byte) (int, error) {
-	n, err := u.inner.Read(p)
-	if n > 0 {
-		u.scan(p[:n])
+func (u *usageScanningStream) settle(br *breaker.Breaker) {
+	switch {
+	case br == nil:
+	case u.failed:
+		br.Record(false)
+	case u.done:
+		br.Record(true)
+	default:
+		br.Release()
 	}
-	return n, err
+}
+
+func (u *usageScanningStream) Read(p []byte) (int, error) {
+	if u.err != nil {
+		n := copy(p, u.tail)
+		u.tail = u.tail[n:]
+		if len(u.tail) > 0 {
+			return n, nil
+		}
+		return n, u.err
+	}
+	n, err := u.inner.Read(p)
+	if n > 0 && !u.done {
+		if scanErr := u.scan(p[:n]); scanErr != nil {
+			err = scanErr
+		}
+	}
+	if err != nil {
+		u.end(err)
+		if n == 0 {
+			return u.Read(p)
+		}
+	}
+	return n, nil
 }
 
 func (u *usageScanningStream) Close() error { return u.inner.Close() }
 
-// scan accumulates bytes and inspects each complete line for a usage chunk.
-func (u *usageScanningStream) scan(b []byte) {
-	u.buf = append(u.buf, b...)
-	for {
-		i := bytes.IndexByte(u.buf, '\n')
-		if i < 0 {
-			return
+func (u *usageScanningStream) end(err error) {
+	if errors.Is(err, io.EOF) {
+		u.flush()
+	}
+	switch {
+	case u.done:
+		u.err = io.EOF
+	case errors.Is(err, context.Canceled):
+		u.err = err
+	default:
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
 		}
-		line := bytes.TrimSpace(u.buf[:i])
-		u.buf = u.buf[i+1:]
+		u.failed, u.tail, u.err = true, []byte(streamErrorEvent), err
+	}
+}
 
-		payload, ok := bytes.CutPrefix(line, []byte("data:"))
-		if !ok {
-			continue
+// scan splits bytes into lines on any SSE terminator (CRLF, LF, CR); a CR at
+// the end of a read waits for the next byte to tell CRLF from CR.
+func (u *usageScanningStream) scan(b []byte) error {
+	if u.cr && b[0] == '\n' {
+		b = b[1:]
+	}
+	u.cr = false
+	for len(b) > 0 {
+		i := bytes.IndexAny(b, "\r\n")
+		if i < 0 {
+			u.line = append(u.line, b...)
+			break
 		}
-		payload = bytes.TrimSpace(payload)
-		if len(payload) == 0 {
-			continue
-		}
-		if bytes.Equal(payload, []byte("[DONE]")) {
-			u.done = true
-			continue
-		}
-		var chunk struct {
-			Usage   *core.Usage `json:"usage"`
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-		if err := json.Unmarshal(payload, &chunk); err == nil {
-			if chunk.Usage != nil {
-				u.req.Usage = *chunk.Usage
-			}
-			for _, c := range chunk.Choices {
-				u.content.WriteString(c.Delta.Content)
+		u.line = append(u.line, b[:i]...)
+		u.consume(u.line)
+		u.line = u.line[:0]
+		if b[i] == '\r' {
+			if i+1 == len(b) {
+				u.cr = true
+			} else if b[i+1] == '\n' {
+				i++
 			}
 		}
+		b = b[i+1:]
+	}
+	if len(u.line)+len(u.data) > maxEventBytes {
+		return errEventTooLarge
+	}
+	return nil
+}
+
+func (u *usageScanningStream) consume(line []byte) {
+	if len(line) == 0 {
+		u.dispatch()
+		return
+	}
+	value, ok := bytes.CutPrefix(line, []byte("data:"))
+	if !ok {
+		return
+	}
+	if u.hasData {
+		u.data = append(u.data, '\n')
+	}
+	u.data = append(u.data, bytes.TrimPrefix(value, []byte(" "))...)
+	u.hasData = true
+}
+
+func (u *usageScanningStream) flush() {
+	if len(u.line) > 0 {
+		u.consume(u.line)
+		u.line = u.line[:0]
+	}
+	u.dispatch()
+}
+
+func (u *usageScanningStream) dispatch() {
+	if !u.hasData {
+		return
+	}
+	data := bytes.TrimSpace(u.data)
+	u.data, u.hasData = u.data[:0], false
+	if bytes.Equal(data, []byte("[DONE]")) {
+		u.done = true
+		return
+	}
+	var chunk struct {
+		Usage   *core.Usage `json:"usage"`
+		Choices []struct {
+			Delta struct {
+				Content string `json:"content"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal(data, &chunk) != nil {
+		return
+	}
+	if chunk.Usage != nil {
+		u.req.Usage = *chunk.Usage
+	}
+	for _, c := range chunk.Choices {
+		u.content.WriteString(c.Delta.Content)
 	}
 }

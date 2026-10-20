@@ -71,7 +71,7 @@ For requests that reach the routing flow, the cost event SHALL record which upst
 
 ### Requirement: Completion events carry cost against a versioned price table
 
-When a price table is configured, the cost event of every completion whose provider-reported usage becomes known SHALL carry the request's cost in US dollars — prompt tokens at the served model's input rate plus completion tokens at its output rate — together with the version label of the table that priced it. Prices SHALL be keyed by physical model and SHALL come from configuration only. With a table configured, every physical model a route resolves to SHALL be priced, and the gateway SHALL refuse to start otherwise. A table SHALL require a version label. Without a table, events SHALL carry no cost fields and the gateway SHALL announce that once at startup.
+When a price table is configured, the cost event of every completion whose provider-reported usage becomes known SHALL carry the request's cost in US dollars — prompt tokens at the served model's input rate plus completion tokens at its output rate — together with the version label of the table that priced it. When a provider answered but its usage never becomes known (a stream without a usage chunk, a client disconnect, a mid-stream failure), the event SHALL carry a cost estimated from the request's reservation — the input estimate at the input rate plus `max_tokens` or the default reservation at the output rate — marked as estimated. Prices SHALL be keyed by physical model and SHALL come from configuration only. With a table configured, every physical model a route resolves to SHALL be priced, and the gateway SHALL refuse to start otherwise. A table SHALL require a version label. Without a table, events SHALL carry no cost fields and the gateway SHALL announce that once at startup.
 
 #### Scenario: Priced completion carries cost and table version
 
@@ -85,8 +85,13 @@ When a price table is configured, the cost event of every completion whose provi
 
 #### Scenario: Unknown usage means no cost fields
 
-- **WHEN** a request ends without provider-reported usage, such as an upstream error before any answer
+- **WHEN** a request ends without any provider answer, such as an upstream error before the first byte
 - **THEN** its cost event carries no cost fields
+
+#### Scenario: Answered request without usage carries an estimated cost
+
+- **WHEN** a provider answered but no usage arrived, as in a stream without a usage chunk or a client disconnect mid-stream
+- **THEN** the cost event carries the reservation's price, the table version, and the estimated mark
 
 #### Scenario: No price table means no cost fields and one startup notice
 

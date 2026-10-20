@@ -192,6 +192,22 @@ func TestPolicyBudgetIncrementsSpend(t *testing.T) {
 	}
 }
 
+func TestPolicyBudgetCountsEstimatedStream(t *testing.T) {
+	sp := &fakeSpend{}
+	p := okProvider()
+	p.sse = "data: [DONE]\n\n"
+	s, events := policyServer(t, p, nil, CompletionsOptions{
+		Policies: supportOnly(Policy{BudgetUSD: 1}), Spend: sp, Prices: testPrices(), ReserveDefault: 512,
+	})
+	if rec := postAs(s, "sk-support", `{"model":"pusaq/best","messages":[{"role":"user","content":"hello"}],"stream":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	want := estimatedCost(t, 512).USD
+	if len(sp.adds) != 1 || sp.adds[0] != want || (*events)[0].SpendUSDMonth != want {
+		t.Fatalf("adds = %v, event spend = %v; want one estimate of %v", sp.adds, (*events)[0].SpendUSDMonth, want)
+	}
+}
+
 func TestPolicyBudgetSkipsUnpricedAndFailed(t *testing.T) {
 	sp := &fakeSpend{}
 	failing := &fakeProvider{name: "mock", err: core.NewError(core.CodeUpstream, "upstream provider returned status 500")}

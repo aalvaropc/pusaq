@@ -75,6 +75,9 @@ func (s SlogSink) Write(event core.CostEvent) {
 			slog.Float64("cost_usd", event.Cost.USD),
 			slog.String("price_table_version", event.Cost.TableVersion),
 		)
+		if event.Cost.Estimated {
+			attrs = append(attrs, slog.Bool("cost_estimated", true))
+		}
 	}
 	if event.SpendUSDMonth > 0 {
 		attrs = append(attrs, slog.Float64("spend_usd_month", event.SpendUSDMonth))

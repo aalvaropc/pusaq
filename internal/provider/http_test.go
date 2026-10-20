@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -55,8 +56,8 @@ func TestCompleteRoundTrip(t *testing.T) {
 	if resp.Model != "mock-model" || len(resp.Choices) != 1 || resp.Usage.PromptTokens != 3 {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if gotBody == "" {
-		t.Fatal("upstream received empty body")
+	if gotBody == "" || strings.Contains(gotBody, "stream") {
+		t.Fatalf("buffered upstream body = %q, want no stream fields", gotBody)
 	}
 }
 
@@ -118,10 +119,15 @@ func TestCompleteMalformedUpstreamBodyIsUpstreamError(t *testing.T) {
 
 func TestStreamCompleteReturnsRawSSE(t *testing.T) {
 	const sse = "data: {\"object\":\"chat.completion.chunk\"}\n\ndata: [DONE]\n\n"
-	var sawStreamTrue bool
+	var sent struct {
+		Model         string `json:"model"`
+		Stream        bool   `json:"stream"`
+		StreamOptions struct {
+			IncludeUsage bool `json:"include_usage"`
+		} `json:"stream_options"`
+	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		sawStreamTrue = strings.Contains(string(body), `"stream":true`)
+		_ = json.NewDecoder(r.Body).Decode(&sent)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, sse)
 	}))
@@ -141,8 +147,8 @@ func TestStreamCompleteReturnsRawSSE(t *testing.T) {
 	if string(got) != sse {
 		t.Fatalf("stream = %q, want raw SSE passthrough", got)
 	}
-	if !sawStreamTrue {
-		t.Fatal("upstream request did not set stream:true")
+	if sent.Model != "mock-model" || !sent.Stream || !sent.StreamOptions.IncludeUsage {
+		t.Fatalf("upstream request = %+v, want stream with include_usage", sent)
 	}
 }
 

@@ -116,25 +116,34 @@ func TestSlogSinkWritesCostFieldsOnlyWhenPriced(t *testing.T) {
 	priced := event("priced")
 	priced.RequestedModel = "pusaq/fast"
 	priced.Cost = core.Cost{USD: 5.6e-6, TableVersion: "v1"}
+	estimated := event("estimated")
+	estimated.Cost = core.Cost{USD: 2.1e-4, TableVersion: "v1", Estimated: true}
 	sink.Write(priced)
 	sink.Write(event("unpriced"))
+	sink.Write(estimated)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want 2", len(lines))
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
 	}
-	var first, second map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatal(err)
+	parsed := make([]map[string]any, len(lines))
+	for i, line := range lines {
+		if err := json.Unmarshal([]byte(line), &parsed[i]); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
-		t.Fatal(err)
-	}
+	first, second, third := parsed[0], parsed[1], parsed[2]
 	if first["cost_usd"] != 5.6e-6 || first["price_table_version"] != "v1" {
 		t.Fatalf("priced line = %v, want cost_usd and price_table_version", first)
 	}
+	if _, ok := first["cost_estimated"]; ok {
+		t.Fatalf("measured line carries cost_estimated: %v", first)
+	}
 	if _, ok := second["cost_usd"]; ok {
 		t.Fatalf("unpriced line carries cost_usd: %v", second)
+	}
+	if third["cost_usd"] != 2.1e-4 || third["cost_estimated"] != true {
+		t.Fatalf("estimated line = %v, want cost_usd and cost_estimated", third)
 	}
 }
 

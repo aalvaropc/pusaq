@@ -130,12 +130,22 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 	return resp.ChatResponse, nil
 }
 
-// StreamComplete implements Provider. On success the returned stream is the
-// upstream's raw SSE body; the caller closes it. Failures before the stream
-// starts map to errors like buffered calls.
+type streamRequest struct {
+	ChatRequest
+	Stream        bool            `json:"stream"`
+	StreamOptions map[string]bool `json:"stream_options"`
+}
+
+// StreamComplete implements Provider. The call asks for a final usage chunk;
+// on success the returned stream is the upstream's raw SSE body, which the
+// caller closes. Failures before the stream starts map to errors like
+// buffered calls.
 func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadCloser, error) {
-	req.Stream = true
-	payload, err := json.Marshal(req)
+	payload, err := json.Marshal(streamRequest{
+		ChatRequest:   req,
+		Stream:        true,
+		StreamOptions: map[string]bool{"include_usage": true},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal upstream request: %w", err)
 	}

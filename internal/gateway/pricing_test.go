@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,7 +23,7 @@ func pricedServer(t *testing.T, p provider.Provider, prices *pricing.Table) (*Se
 	emit := func(e core.CostEvent) { events = append(events, e) }
 	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID())
 	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p},
-		CompletionsOptions{Prices: prices, Logger: discardLogger()})
+		CompletionsOptions{Prices: prices, ReserveDefault: 512, Logger: discardLogger()})
 	return NewServer(discardLogger(), pipeline, completions), &events
 }
 
@@ -62,6 +63,66 @@ func TestStreamedCompletionPricedAtStreamEnd(t *testing.T) {
 	want := core.Cost{USD: 2.5e-6, TableVersion: "v-test"}
 	if (*events)[0].Cost != want {
 		t.Fatalf("cost = %+v, want %+v", (*events)[0].Cost, want)
+	}
+}
+
+func estimatedCost(t *testing.T, completionTokens int) core.Cost {
+	t.Helper()
+	usd, ok := testPrices().Cost("mock-model", core.Usage{PromptTokens: 3, CompletionTokens: completionTokens})
+	if !ok {
+		t.Fatal("mock-model is not priced")
+	}
+	return core.Cost{USD: usd, TableVersion: "v-test", Estimated: true}
+}
+
+func TestStreamWithoutUsageIsPricedFromReservation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		output  int
+	}{
+		{"max_tokens", `{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}],"max_tokens":100,"stream":true}`, 100},
+		{"default reservation", string(streamingPayload()), 512},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := okProvider()
+			p.sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: [DONE]\n\n"
+			s, events := pricedServer(t, p, testPrices())
+
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.payload)))
+
+			e := (*events)[0]
+			if e.Outcome != core.OutcomeSuccess || e.Usage != (core.Usage{}) {
+				t.Fatalf("event = %+v, want success without provider usage", e)
+			}
+			if want := estimatedCost(t, tc.output); e.Cost != want {
+				t.Fatalf("cost = %+v, want %+v", e.Cost, want)
+			}
+		})
+	}
+}
+
+func TestInterruptedStreamIsPricedFromReservation(t *testing.T) {
+	p := okProvider()
+	p.sse = fakeSSE
+	var events []core.CostEvent
+	h := core.Chain(Accounting(func(e core.CostEvent) { events = append(events, e) }, discardLogger()), RequestID())(
+		CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p},
+			CompletionsOptions{Prices: testPrices(), ReserveDefault: 512, Logger: discardLogger()}))
+
+	resp, err := h(context.Background(), &core.Request{Op: "chat.completions", Payload: streamingPayload()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Stream.Close()
+
+	e := events[0]
+	if e.ErrorCode != core.CodeStreamInterrupted {
+		t.Fatalf("event = %+v, want %s", e, core.CodeStreamInterrupted)
+	}
+	if want := estimatedCost(t, 512); e.Cost != want {
+		t.Fatalf("cost = %+v, want %+v", e.Cost, want)
 	}
 }
 
