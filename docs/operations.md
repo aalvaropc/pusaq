@@ -29,6 +29,11 @@ make lint    # golangci-lint + go vet + lint-docs
 make down    # stop the local environment
 ```
 
+The gateway (8080), Redis (6379) and mock (9090) are published only on
+`127.0.0.1`. Containers reach each other by service name. Access from another
+machine requires an explicit Compose override of the service port bindings;
+the default stack does not expose these services to the surrounding network.
+
 The mock provider's admin routes are unauthenticated: `POST /admin/fail?for=5s` fails every completion for 5 s, `DELETE /admin/fail` clears it, `GET /stats` counts what reached it.
 
 ## Measurements and how to run them
