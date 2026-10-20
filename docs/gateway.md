@@ -75,7 +75,9 @@ Alongside RPM, each tenant has an LLM-token bucket.
 After model resolution a request is charged its input estimate (chars/4)
 plus an output reservation (`max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`);
 when actual usage is known the difference is reconciled back atomically —
-on success, on error, and at stream end. Unknown usage keeps the charge.
+on success, on error, and at stream end. A confirmed reservation is fully
+returned if no provider was invoked. After any provider invocation, unknown
+usage keeps the charge, including errors, timeouts and abandoned streams.
 Every cost event records `tokens_charged` next to actual usage, so the
 estimate's error is measurable from the event stream. Under overload the
 tokens actually consumed stay within the bucket over the window; the peak

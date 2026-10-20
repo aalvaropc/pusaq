@@ -279,7 +279,8 @@ design: **reserve on admission** (an input-token estimate plus an output
 reservation — the request's `max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`
 when absent), **reconcile on completion** (return the difference, another
 atomic Lua script) in a finalizer that runs on success, error, and stream
-end alike. A request whose usage never becomes known keeps its full charge;
+end alike. A confirmed reservation with zero provider attempts is fully
+returned. Once a provider was invoked, unknown usage keeps the full charge;
 idle buckets expire with the bucket's TTL. Between admission and
 reconciliation the bucket is wrong by the reservation error, so a tenant
 that under-reserves can consume more than its bucket allows before the
