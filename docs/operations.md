@@ -18,7 +18,8 @@ knob chaos runs use instead of deleting a service; each action is one
 
 ## Local environment
 
-Requirements: Go 1.26+, Docker with Compose, golangci-lint.
+Requirements: Go 1.26+, Docker with Compose, golangci-lint. Measurement
+commands and their fixture tests also use Bash, jq, bc, awk and GNU date.
 
 ```sh
 make up      # gateway + Redis + mock provider
@@ -26,6 +27,7 @@ make run     # run the gateway on :8080
 make smoke   # POST /v1/chat/completions with pusaq/fast
 make test    # go test -race -cover ./...
 make lint    # golangci-lint + go vet + lint-docs
+make test-loadtest  # shell fixtures for measurement verification
 make down    # stop the local environment
 ```
 
@@ -79,6 +81,16 @@ failure, by one reproducible command, and published with its protocol in
   phrasing, temporal cues) on a 176-row labeled EN/ES corpus with hard
   negatives, against floors the test suite enforces
   (`go test -v -run TestContentRulesCorpus ./internal/policy`).
+
+Local measurement commands keep one run id for execution and reporting, drain
+all gateway replicas before collecting their events, and attempt verification
+even when k6 fails. The first failing stage determines the exit code, with k6
+first. The limiter verifier requires exact agreement on admitted, rejected and
+unexpected counts for its run and tenant. Chaos compares main successes
+(including setup and retries), split admissions/rejections and completed
+streams by region. Local comparisons are exact; cloud main successes retain
+one shared tolerance of five events across regions. Platform, transport and
+pre-admission readiness refusals are reported without requiring cost events.
 
 ## Cloud
 

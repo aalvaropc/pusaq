@@ -13,7 +13,11 @@ here="$(cd "$(dirname "$0")" && pwd)"
 summary="$here/out/$run_id.json"
 [[ -f "$summary" ]] || { echo "missing $summary" >&2; exit 1; }
 
+jq -e '[.summary.exactness.admitted, .summary.exactness.rejected, .summary.exactness.other, .summary.exactness.mock_served, .summary.bound.lower, .summary.bound.upper] | all(type == "number" and . >= 0)' "$summary" >/dev/null || { echo "invalid limiter counters" >&2; exit 1; }
+
 compose=(docker compose --profile loadtest)
+
+jq -e --arg run "$run_id" '.summary.run_id == $run and (.summary.thresholds_passed | type == "boolean")' "$summary" >/dev/null || { echo "invalid summary for $run_id" >&2; exit 1; }
 
 jqs() { jq -r "$1" "$summary"; }
 
@@ -38,17 +42,24 @@ echo "toll:     limited p50/p95/p99=$(jqs "$r2"' .summary.toll.limited_ms | "\(.
 # Gateway side: cost events per replica, split by outcome. Tenant A is the
 # exactness tenant; only its events are compared with k6.
 echo "gateway cost events (tenant-a):"
-total_events=0
+gateway_admitted=0
+gateway_rejected=0
+gateway_other=0
 for svc in pusaq-a pusaq-b; do
   line=$("${compose[@]}" logs --no-log-prefix "$svc" 2>/dev/null \
-    | jq -R -s -c '
-        [split("\n")[] | select(length > 0) | fromjson? | select(.msg == "cost_event" and .tenant == "tenant-a")]
-        | { admitted: map(select(.error_code != "rate_limited")) | length,
-            rejected: map(select(.error_code == "rate_limited")) | length }')
+    | jq -R -s -c --arg run "$run_id" '
+        [split("\n")[] | select(length > 0) | fromjson? | select(.msg == "cost_event" and .tenant == "tenant-a" and .run_id == $run)]
+        | { admitted: map(select(.outcome == "success")) | length,
+            rejected: map(select(.error_code == "rate_limited")) | length,
+            other: map(select(.outcome != "success" and .error_code != "rate_limited")) | length }')
   a=$(jq -r '.admitted' <<<"$line"); r=$(jq -r '.rejected' <<<"$line")
-  echo "  $svc: admitted=$a rejected=$r"
-  total_events=$((total_events + a + r))
+  o=$(jq -r .other <<<"$line")
+  echo "  $svc: admitted=$a rejected=$r other=$o"
+  gateway_admitted=$((gateway_admitted + a))
+  gateway_rejected=$((gateway_rejected + r))
+  gateway_other=$((gateway_other + o))
 done
+total_events=$((gateway_admitted + gateway_rejected + gateway_other))
 echo "  log coverage: $total_events events for $((admitted + rejected + other)) requests"
 
 fail_open=0
@@ -71,6 +82,9 @@ if [[ "$requests_limited" -gt 0 ]]; then
 fi
 
 status=0
+if (( gateway_admitted != admitted )); then echo "FAIL: gateway admitted $gateway_admitted != k6 admitted $admitted"; status=1; fi
+if (( gateway_rejected != rejected )); then echo "FAIL: gateway rejected $gateway_rejected != k6 rejected $rejected"; status=1; fi
+if (( gateway_other != other )); then echo "FAIL: gateway other $gateway_other != k6 other $other"; status=1; fi
 if (( admitted > upper )); then echo "FAIL: admitted $admitted > upper bound $upper"; status=1; fi
 if (( admitted < lower )); then echo "FAIL: admitted $admitted < lower bound $lower"; status=1; fi
 if (( mock_served != admitted )); then echo "FAIL: mock served $mock_served != k6 admitted $admitted"; status=1; fi

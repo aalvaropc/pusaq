@@ -41,6 +41,7 @@ LOADTEST_MOCK_LATENCY ?= 0
 LOADTEST_MOCK_CHUNK_DELAY ?= 10ms
 LOADTEST_ADMIN_TOKEN ?= local-chaos-token-0123456789
 RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
+RUN_ID := $(RUN_ID)
 export LOADTEST_RPM LOADTEST_BURST LOADTEST_DURATION LOADTEST_RATE_MULT LOADTEST_TOLL_RPS LOADTEST_TOLL_DURATION LOADTEST_MODE LOADTEST_LEASE_SIZE \
        BREAKER_RPS BREAKER_WARMUP BREAKER_FAIL_FOR BREAKER_DURATION \
        LOADTEST_TPM_LIMIT LOADTEST_TPM_BURST LOADTEST_MOCK_LATENCY LOADTEST_MOCK_CHUNK_DELAY LOADTEST_ADMIN_TOKEN TPM_RPS TPM_DURATION RUN_ID \
@@ -54,7 +55,7 @@ TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
 # measurement run (created before it, destroyed the same day).
 TF_RUNTIME := terraform -chdir=infra/terraform/runtime
 
-.PHONY: help up down run mock test lint lint-docs tidy smoke calibrate loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
+.PHONY: help up down run mock test test-loadtest lint lint-docs tidy smoke calibrate loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
         infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate \
         runtime-init runtime-plan runtime-apply runtime-destroy
 
@@ -75,6 +76,9 @@ mock: ## Run the mock provider locally
 
 test: ## Run all tests with the race detector
 	go test -race -cover ./...
+
+test-loadtest:
+	bash loadtest/test.sh
 
 lint: lint-docs ## Run golangci-lint, go vet and lint-docs
 	golangci-lint run
@@ -107,15 +111,13 @@ loadtest: ## Limiter load test: 2 replicas behind nginx, k6 in Docker, cross-che
 		pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b mock-lt mock-lt-backup lb
 	docker compose exec -T redis redis-cli FLUSHALL
 	docker compose exec -T redis redis-cli CONFIG RESETSTAT
-	docker compose --profile loadtest run --rm --user "$$(id -u):$$(id -g)" k6
-	./loadtest/verify.sh $(RUN_ID)
+	bash loadtest/run-measurement.sh limiter $(RUN_ID)
 
 breakertest: ## Breaker detection/recovery run: primary mock fails on command, k6 keeps traffic flowing
 	docker compose --profile loadtest up -d --build --force-recreate \
 		pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b mock-lt mock-lt-backup lb
 	docker compose exec -T redis redis-cli FLUSHALL
-	docker compose --profile loadtest run --rm --user "$$(id -u):$$(id -g)" k6 run breaker.js
-	./loadtest/verify-breaker.sh $(RUN_ID)
+	bash loadtest/run-measurement.sh breaker $(RUN_ID)
 
 tpmtest: LOADTEST_TPM_LIMIT = $(TPM_LIMIT)
 tpmtest: LOADTEST_TPM_BURST = $(TPM_BURST)
@@ -126,8 +128,7 @@ tpmtest: ## Token-limit overrun run: under- and over-reserving tenants against a
 	docker compose --profile loadtest up -d --build --force-recreate \
 		pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b mock-lt mock-lt-backup lb
 	docker compose exec -T redis redis-cli FLUSHALL
-	docker compose --profile loadtest run --rm --user "$$(id -u):$$(id -g)" k6 run tpm.js
-	./loadtest/verify-tpm.sh $(RUN_ID)
+	bash loadtest/run-measurement.sh tpm $(RUN_ID)
 
 chaos-local: CHAOS_WARMUP = 20s
 chaos-local: CHAOS_FAIL_FOR = 20s
@@ -138,9 +139,7 @@ chaos-local: ## Failover harness against the Compose profile (no balancer health
 	docker compose --profile loadtest up -d --build --force-recreate \
 	    pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b mock-lt mock-lt-backup lb
 	docker compose exec -T redis redis-cli FLUSHALL
-	docker compose --profile loadtest run --rm --user "$$(id -u):$$(id -g)" k6 run --out json=out/$(RUN_ID)-chaos-points.json chaos.js
-	CHAOS_MODE=local ./loadtest/fetch-events.sh $(RUN_ID)
-	CHAOS_MODE=local ./loadtest/verify-chaos.sh $(RUN_ID)
+	bash loadtest/run-measurement.sh chaos $(RUN_ID)
 
 chaos-run: ## Regional failover run against the runtime module (k6 in Docker from here, events from Cloud Logging)
 	./loadtest/chaos-run.sh $(RUN_ID)
