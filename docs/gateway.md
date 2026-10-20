@@ -82,6 +82,12 @@ tokens actually consumed stay within the bucket over the window; the peak
 excess is bounded by the reservation error of the requests admitted before
 reconciliation caught up (measured, see Measurements).
 
+Refill uses Redis time inside each atomic Lua operation, with a timestamp
+that never moves backward. A stored timestamp ahead of Redis time pauses
+refill until catch-up; retry times include that delay. Buckets retain their
+keys and balances across the change. This requires Redis 7 or newer; gateways
+sharing a bucket use the same implementation.
+
 ### Resilience
 
 Each upstream backend is guarded by a circuit breaker

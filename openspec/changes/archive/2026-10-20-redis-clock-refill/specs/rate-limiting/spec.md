@@ -17,7 +17,7 @@ Admission, token adjustment and lease acquisition SHALL compute elapsed refill f
 #### Scenario: Existing timestamp is ahead
 
 - **WHEN** a non-full bucket from an earlier gateway has a timestamp ahead of store time
-- **THEN** its balance is preserved and refill resumes only after that timestamp
+- **THEN** its balance is preserved, refill resumes only after that timestamp, and retry guidance includes the catch-up delay
 
 #### Scenario: Concurrent replicas share one clock
 

@@ -8,7 +8,7 @@ All three bucket operations share one refill calculation. Changing quota policy,
 
 ## Decisions
 
-Read TIME in Lua and convert seconds/microseconds to integer milliseconds. Clamp the effective timestamp to the stored timestamp and persist it with the balance. Reuse small Lua prefixes/suffixes for refill and persistence, keeping one network round-trip and one atomic mutation.
+Read TIME in Lua and convert seconds/microseconds to integer milliseconds. Clamp the effective timestamp to the stored timestamp and persist it with the balance. Denial retry times include the delay until the saved timestamp is reached. Reuse small Lua prefixes/suffixes for refill and persistence, keeping one network round-trip and one atomic mutation.
 
 Remove the gateway-time argument and the strict limiter's test clock. Miniredis SetTime drives refill tests; the lease fixture advances its local clock and store time together, except in explicit clock-offset tests.
 

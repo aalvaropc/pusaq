@@ -143,9 +143,10 @@ these percentiles.
   managed Redis instance adds network latency this run does not see
   (docs/design.md §6). The number here isolates the limiter's mechanics, not
   a cloud round-trip.
-- **One host, one clock.** Both replicas read the same clock; skew between
-  replicas is not exercised. The bucket stores the replica-supplied
-  timestamp by design (docs/design.md §5.2).
+- **One host, shared store clock.** Historical runs in this report use the calling
+  replica's clock. The current implementation reads Redis time atomically
+  and preserves timestamps across rollback (docs/design.md §5.2); store
+  wall-clock jumps remain outside the load generator's control.
 - **Overload latency is not a latency number.** Rejected requests do no
   upstream work, so p99 during the `exactness` scenario says nothing about
   the serving path. Only the toll scenarios, under the limit, compare
