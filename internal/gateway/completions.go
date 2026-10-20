@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -58,6 +59,7 @@ func (r RoutingRules) resolve(requested, tag string) (alias, reason string) {
 type TokenLimiter interface {
 	Allow(ctx context.Context, tenant string, cost float64) (ratelimit.Decision, error)
 	Adjust(ctx context.Context, tenant string, delta float64) error
+	Limits() ratelimit.Limits
 }
 
 // estimateInputTokens approximates prompt tokens as ceil(chars/4) — crude,
@@ -92,14 +94,13 @@ func (r Route) backends() []string {
 // breaking for it. Satisfied by a map lookup in the composition root.
 type BreakerFor func(backend string) *breaker.Breaker
 
-// completionRequest is the accepted OpenAI request subset. Unknown fields
-// are ignored for SDK compatibility.
+// completionRequest is the accepted OpenAI request subset.
 type completionRequest struct {
-	Model     string             `json:"model"`
-	Messages  []provider.Message `json:"messages"`
-	MaxTokens int                `json:"max_tokens"`
-	// Temperature is forwarded as sent; a pointer keeps an explicit 0 and
-	// tells an omitted value apart (the provider default).
+	Model    string             `json:"model"`
+	Messages []provider.Message `json:"messages"`
+	// MaxTokens and Temperature are pointers so an explicit value is told
+	// apart from an omitted one (the provider default).
+	MaxTokens   *int     `json:"max_tokens"`
 	Temperature *float64 `json:"temperature"`
 	Stream      bool     `json:"stream"`
 	// Metadata is the OpenAI metadata map; feature_tag drives the router.
@@ -108,8 +109,8 @@ type completionRequest struct {
 	Metadata map[string]any `json:"metadata"`
 }
 
-// featureTag extracts metadata.feature_tag: absent means untagged, any
-// non-string value is a client error.
+// featureTag extracts metadata.feature_tag: absent means untagged, a
+// non-string, oversized or non-label value is a client error.
 func featureTag(cr completionRequest) (string, error) {
 	v, ok := cr.Metadata["feature_tag"]
 	if !ok || v == nil {
@@ -118,6 +119,10 @@ func featureTag(cr completionRequest) (string, error) {
 	s, ok := v.(string)
 	if !ok {
 		return "", core.NewError(core.CodeInvalidRequest, "metadata.feature_tag must be a string")
+	}
+	if s != "" && (len(s) > maxLabelLen || !labelChars.MatchString(s)) {
+		return "", core.Errorf(core.CodeInvalidRequest,
+			"metadata.feature_tag must be at most %d letters, digits, '.', '_' or '-'", maxLabelLen)
 	}
 	return s, nil
 }
@@ -138,12 +143,14 @@ type usagePayload struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-// parseCompletionRequest validates the request subset: valid JSON, a model,
-// and at least one message.
+// parseCompletionRequest validates the request subset.
 func parseCompletionRequest(payload []byte) (completionRequest, error) {
 	var req completionRequest
 	if err := json.Unmarshal(payload, &req); err != nil {
-		return req, core.NewError(core.CodeInvalidRequest, "request body is not valid JSON")
+		return req, decodeError(err)
+	}
+	if err := rejectUnsupported(payload); err != nil {
+		return req, err
 	}
 	if req.Model == "" {
 		return req, core.NewError(core.CodeInvalidRequest, "model is required")
@@ -151,7 +158,67 @@ func parseCompletionRequest(payload []byte) (completionRequest, error) {
 	if len(req.Messages) == 0 {
 		return req, core.NewError(core.CodeInvalidRequest, "messages must not be empty")
 	}
+	if req.MaxTokens != nil && *req.MaxTokens < 1 {
+		return req, errMaxTokens
+	}
 	return req, nil
+}
+
+var errMaxTokens = core.NewError(core.CodeInvalidRequest, "max_tokens must be a positive integer")
+
+func decodeError(err error) error {
+	var typeErr *json.UnmarshalTypeError
+	if !errors.As(err, &typeErr) {
+		return core.NewError(core.CodeInvalidRequest, "request body is not valid JSON")
+	}
+	switch typeErr.Field {
+	case "max_tokens":
+		return errMaxTokens
+	case "messages.content":
+		return core.NewError(core.CodeInvalidRequest, "message content must be a string; content parts are not supported")
+	}
+	return core.Errorf(core.CodeInvalidRequest, "%s has the wrong type", typeErr.Field)
+}
+
+var (
+	unsupportedFields = []string{
+		"tools", "tool_choice", "functions", "function_call", "parallel_tool_calls", "response_format",
+		"n", "logprobs", "top_logprobs", "audio", "modalities", "prediction", "web_search_options",
+		"max_completion_tokens",
+	}
+	unsupportedMessageFields = []string{"tool_calls", "tool_call_id", "function_call", "audio"}
+	harmlessValues           = map[string]string{"n": "1", "modalities": `["text"]`}
+)
+
+func rejectUnsupported(payload []byte) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &top); err != nil {
+		return core.NewError(core.CodeInvalidRequest, "request body is not valid JSON")
+	}
+	for _, f := range unsupportedFields {
+		if set(top[f], harmlessValues[f]) {
+			return core.Errorf(core.CodeInvalidRequest, "%s is not supported", f)
+		}
+	}
+	var messages []map[string]json.RawMessage
+	_ = json.Unmarshal(top["messages"], &messages)
+	for _, m := range messages {
+		for _, f := range unsupportedMessageFields {
+			if set(m[f], "") {
+				return core.Errorf(core.CodeInvalidRequest, "messages[].%s is not supported", f)
+			}
+		}
+	}
+	return nil
+}
+
+func set(raw json.RawMessage, harmless string) bool {
+	var compact bytes.Buffer
+	if json.Compact(&compact, raw) != nil {
+		return len(raw) > 0
+	}
+	v := compact.String()
+	return v != "" && v != "null" && v != "false" && v != harmless
 }
 
 // ShadowCache receives samples of successful completions for shadow-mode
@@ -226,10 +293,14 @@ func offerShadow(req *core.Request, shape cacheShape, opts CompletionsOptions, c
 // upstreamRequest is the one place the client's request becomes the
 // provider's, so the buffered and streaming paths cannot drift apart.
 func upstreamRequest(cr completionRequest, route Route) provider.ChatRequest {
+	var maxTokens int
+	if cr.MaxTokens != nil {
+		maxTokens = *cr.MaxTokens
+	}
 	return provider.ChatRequest{
 		Model:       route.Model,
 		Messages:    cr.Messages,
-		MaxTokens:   cr.MaxTokens,
+		MaxTokens:   maxTokens,
 		Temperature: cr.Temperature,
 	}
 }
@@ -335,10 +406,15 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 		return nil
 	}
 	reserve := opts.ReserveDefault
-	if cr.MaxTokens > 0 {
-		reserve = cr.MaxTokens
+	if cr.MaxTokens != nil {
+		reserve = *cr.MaxTokens
 	}
-	charged := estimateInputTokens(cr.Messages) + reserve
+	estimate := estimateInputTokens(cr.Messages)
+	if need, burst := float64(estimate)+float64(reserve), opts.Tokens.Limits().Burst; need > burst {
+		return core.Errorf(core.CodeInvalidRequest,
+			"request needs %.0f tokens (prompt estimate plus max_tokens), more than the token burst of %.0f", need, burst)
+	}
+	charged := estimate + reserve
 
 	limCtx, cancel := context.WithTimeout(ctx, limiterBudget)
 	d, err := opts.Tokens.Allow(limCtx, req.Tenant, float64(charged))

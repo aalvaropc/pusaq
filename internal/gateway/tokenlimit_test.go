@@ -20,6 +20,7 @@ type fakeTokenLimiter struct {
 	allowed    bool
 	retryAfter time.Duration
 	allowErr   error
+	burst      float64
 
 	charges []float64
 	adjusts []float64
@@ -36,6 +37,13 @@ func (f *fakeTokenLimiter) Allow(_ context.Context, _ string, cost float64) (rat
 func (f *fakeTokenLimiter) Adjust(_ context.Context, _ string, delta float64) error {
 	f.adjusts = append(f.adjusts, delta)
 	return nil
+}
+
+func (f *fakeTokenLimiter) Limits() ratelimit.Limits {
+	if f.burst == 0 {
+		return ratelimit.Limits{Burst: 1e6}
+	}
+	return ratelimit.Limits{Burst: f.burst}
 }
 
 // tokenServer builds a full pipeline server with TPM enabled.
@@ -214,5 +222,42 @@ func TestFinalizersRunExactlyOnceOnPanic(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Outcome != core.OutcomePanic {
 		t.Fatalf("events = %+v", events)
+	}
+}
+
+func TestReservationAboveBurstIsRejectedWithoutCharge(t *testing.T) {
+	for name, maxTokens := range map[string]string{"above burst": "1000000000", "max int64": "9223372036854775807"} {
+		t.Run(name, func(t *testing.T) {
+			tl := &fakeTokenLimiter{allowed: true, burst: 100000}
+			p := okProvider()
+			s, events := tokenServer(t, p, tl)
+
+			rec := post(s, `{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}],"max_tokens":`+maxTokens+`}`)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rec.Code)
+			}
+			if len(tl.charges) != 0 || len(tl.adjusts) != 0 {
+				t.Fatalf("charges = %v adjusts = %v, want none", tl.charges, tl.adjusts)
+			}
+			if p.got.Model != "" {
+				t.Fatal("provider was called for a reservation the bucket can never hold")
+			}
+			if e := (*events)[0]; e.ErrorCode != core.CodeInvalidRequest || e.TokensCharged != 0 {
+				t.Fatalf("event = %+v", e)
+			}
+		})
+	}
+}
+
+func TestReservationAtBurstIsCharged(t *testing.T) {
+	tl := &fakeTokenLimiter{allowed: true, burst: 35}
+	s, _ := tokenServer(t, okProvider(), tl)
+
+	if rec := post(s, string(validPayload())); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a reservation equal to the burst", rec.Code)
+	}
+	if len(tl.charges) != 1 || tl.charges[0] != 35 {
+		t.Fatalf("charges = %v, want [35]", tl.charges)
 	}
 }

@@ -115,7 +115,7 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name:    "lease size above burst rejected",
-			env:     map[string]string{"PUSAQ_RPM_BURST": "5", "PUSAQ_LEASE_SIZE": "6"},
+			env:     map[string]string{"PUSAQ_RATELIMIT_MODE": "lease", "PUSAQ_RPM_BURST": "5", "PUSAQ_LEASE_SIZE": "6"},
 			wantErr: true,
 		},
 		{
@@ -337,6 +337,7 @@ func TestRoutingRulesRejections(t *testing.T) {
 		"duplicate tag":     "classify=pusaq/fast,classify=pusaq/best,default=pusaq/fast",
 		"duplicate default": "default=pusaq/fast,default=pusaq/best",
 		"malformed pair":    "classify,default=pusaq/fast",
+		"tag charset":       "deep reason=pusaq/best,default=pusaq/fast",
 	} {
 		if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTING_RULES": v})); err == nil {
 			t.Fatalf("%s accepted: %q", name, v)
@@ -391,6 +392,47 @@ func TestBreakerConfigRejections(t *testing.T) {
 		"threshold zero":        {"PUSAQ_BREAKER_THRESHOLD": "0"},
 		"non-positive cooldown": {"PUSAQ_BREAKER_COOLDOWN": "0s"},
 		"zero probes":           {"PUSAQ_BREAKER_PROBES": "0"},
+	} {
+		if _, err := Load(lookupFrom(env)); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+}
+
+func TestSmallRequestBurstLoadsInStrictMode(t *testing.T) {
+	cfg, err := Load(lookupFrom(map[string]string{"PUSAQ_RPM_LIMIT": "5"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.RPMBurst != 5 || cfg.RateLimitMode != RateLimitStrict {
+		t.Fatalf("cfg = burst %g mode %s", cfg.RPMBurst, cfg.RateLimitMode)
+	}
+}
+
+func TestTokenReserveMustFitTheBurst(t *testing.T) {
+	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_TPM_BURST": "500"})); err == nil {
+		t.Fatal("a default reservation of 512 against a burst of 500 accepted")
+	}
+	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_TPM_BURST": "512"})); err != nil {
+		t.Fatalf("reservation equal to the burst rejected: %v", err)
+	}
+	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_TPM_LIMIT": "0"})); err != nil {
+		t.Fatalf("disabled token limiting rejected: %v", err)
+	}
+}
+
+func TestNonFiniteNumbersRejected(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"rpm limit NaN":      {"PUSAQ_RPM_LIMIT": "NaN"},
+		"rpm limit Inf":      {"PUSAQ_RPM_LIMIT": "Inf"},
+		"rpm burst NaN":      {"PUSAQ_RPM_BURST": "NaN"},
+		"breaker threshold":  {"PUSAQ_BREAKER_THRESHOLD": "NaN"},
+		"tpm limit NaN":      {"PUSAQ_TPM_LIMIT": "NaN"},
+		"tpm burst infinity": {"PUSAQ_TPM_BURST": "infinity"},
+		"cache tau":          {"PUSAQ_CACHE_TAU": "NaN"},
+		"price":              {"PUSAQ_PRICES": "mock-model=NaN/0.40", "PUSAQ_PRICE_TABLE_VERSION": "v1"},
+		"budget":             policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=NaN"}),
+		"budget infinity":    policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=Inf"}),
 	} {
 		if _, err := Load(lookupFrom(env)); err == nil {
 			t.Fatalf("%s accepted", name)

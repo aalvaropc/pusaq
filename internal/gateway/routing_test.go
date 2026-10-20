@@ -168,6 +168,25 @@ func TestNonStringFeatureTagRejected(t *testing.T) {
 	}
 }
 
+func TestFeatureTagBoundsRejected(t *testing.T) {
+	for name, tag := range map[string]string{"oversized": strings.Repeat("a", 65), "charset": "reason now"} {
+		t.Run(name, func(t *testing.T) {
+			p := okProvider()
+			s, events := routedServer(t, p)
+			rec := post(s, `{"model":"pusaq/auto","metadata":{"feature_tag":"`+tag+`"},"messages":[{"role":"user","content":"x"}]}`)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rec.Code)
+			}
+			if p.got.Model != "" {
+				t.Fatal("provider was called for a rejected request")
+			}
+			if e := (*events)[0]; e.ErrorCode != core.CodeInvalidRequest || e.FeatureTag != "" {
+				t.Fatalf("event = %+v, want invalid_request without the tag", e)
+			}
+		})
+	}
+}
+
 func TestAutoWithoutRulesIsUnknownModel(t *testing.T) {
 	h := CompletionsHandler(routedRoutes(), map[string]provider.Provider{"mock": okProvider()}, CompletionsOptions{Logger: discardLogger()})
 	_, err := h(t.Context(), &core.Request{Payload: []byte(`{"model":"pusaq/auto","messages":[{"role":"user","content":"x"}]}`)})

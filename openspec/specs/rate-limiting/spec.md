@@ -73,12 +73,22 @@ If the limiter's backing store is unreachable or errors, the gateway SHALL admit
 
 ### Requirement: Token-based limits with reservation and reconciliation
 
-With rate limiting enabled, the gateway SHALL additionally limit each tenant by LLM tokens per minute unless token limiting is explicitly disabled by configuration. After the request's model is resolved — and only then — the gateway SHALL atomically charge the tenant's token bucket with the request's input-token estimate plus an output reservation (the request's `max_tokens` when present, a configured default otherwise). When the request's actual usage becomes known, the gateway SHALL atomically reconcile the difference between charged and actual back into the bucket. Reconciliation SHALL happen exactly once per charged request — on success, on error, and at the end of a streamed response. When actual usage never becomes known, the full charge SHALL stand. Under sustained overload, the tokens actually consumed by admitted requests SHALL stay within the bucket bound over the window, and the excess at any instant SHALL be bounded by the reservation error of requests admitted before reconciliation caught up — at most the burst capacity times the ratio of under-reservation; a tenant that over-reserves SHALL show no excess. This SHALL be measurable by one reproducible command whose results are published with their protocol.
+With rate limiting enabled, the gateway SHALL additionally limit each tenant by LLM tokens per minute unless token limiting is explicitly disabled by configuration. After the request's model is resolved — and only then — the gateway SHALL atomically charge the tenant's token bucket with the request's input-token estimate plus an output reservation (the request's `max_tokens` when present, a configured default otherwise). A request whose input estimate plus reservation exceeds the bucket's capacity SHALL be rejected as `invalid_request` without any charge. The configured default reservation SHALL fit the bucket's capacity; a configuration where it does not SHALL be rejected at startup. When the request's actual usage becomes known, the gateway SHALL atomically reconcile the difference between charged and actual back into the bucket. Reconciliation SHALL happen exactly once per charged request — on success, on error, and at the end of a streamed response. When actual usage never becomes known, the full charge SHALL stand. Under sustained overload, the tokens actually consumed by admitted requests SHALL stay within the bucket bound over the window, and the excess at any instant SHALL be bounded by the reservation error of requests admitted before reconciliation caught up — at most the burst capacity times the ratio of under-reservation; a tenant that over-reserves SHALL show no excess. This SHALL be measurable by one reproducible command whose results are published with their protocol.
 
 #### Scenario: Token budget exhausted
 
 - **WHEN** a tenant's token bucket cannot cover a request's input estimate plus output reservation
 - **THEN** the request is rejected with 429 `rate_limited`, a positive `retry_after_ms`, and no provider is called
+
+#### Scenario: Reservation larger than the bucket
+
+- **WHEN** a request's input estimate plus `max_tokens` exceeds the token bucket's capacity
+- **THEN** the gateway responds 400 `invalid_request`, charges nothing, and calls no provider
+
+#### Scenario: Default reservation must fit the bucket
+
+- **WHEN** the configured default reservation exceeds the token burst while token limiting is on
+- **THEN** the gateway fails to start with a configuration error
 
 #### Scenario: Unused reservation is returned
 

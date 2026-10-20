@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -37,8 +38,8 @@ const (
 // guards failure injection on a reachable service, so it must not be trivial.
 const MinAdminTokenLen = 16
 
-// regionLabel is the shape PUSAQ_REGION must have: header-safe and
-// log-safe (a Cloud Run region name, or any short label locally).
+// regionLabel is the shape PUSAQ_REGION and routing-rule tags must have:
+// header-safe and log-safe.
 var regionLabel = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // Rate-limit modes.
@@ -382,7 +383,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		cfg.RedisAddr = v
 	}
 	if v, ok := lookup("PUSAQ_RPM_LIMIT"); ok {
-		n, err := strconv.ParseFloat(v, 64)
+		n, err := parseFinite(v)
 		if err != nil || n <= 0 {
 			return Config{}, fmt.Errorf("PUSAQ_RPM_LIMIT: must be a positive number, got %q", v)
 		}
@@ -390,7 +391,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 	cfg.RPMBurst = cfg.RPMLimit
 	if v, ok := lookup("PUSAQ_RPM_BURST"); ok {
-		n, err := strconv.ParseFloat(v, 64)
+		n, err := parseFinite(v)
 		if err != nil || n <= 0 {
 			return Config{}, fmt.Errorf("PUSAQ_RPM_BURST: must be a positive number, got %q", v)
 		}
@@ -412,7 +413,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 		cfg.LeaseSize = n
 	}
-	if float64(cfg.LeaseSize) > cfg.RPMBurst {
+	if cfg.RateLimitMode == RateLimitLease && float64(cfg.LeaseSize) > cfg.RPMBurst {
 		return Config{}, fmt.Errorf("PUSAQ_LEASE_SIZE: %d exceeds the request bucket capacity %g", cfg.LeaseSize, cfg.RPMBurst)
 	}
 	cfg.LeaseTTL = DefaultLeaseTTL
@@ -450,7 +451,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("PUSAQ_BREAKER_MIN_SAMPLES: %d exceeds the window %d", cfg.BreakerMinSamples, cfg.BreakerWindow)
 	}
 	if v, ok := lookup("PUSAQ_BREAKER_THRESHOLD"); ok {
-		n, err := strconv.ParseFloat(v, 64)
+		n, err := parseFinite(v)
 		if err != nil || n <= 0 || n >= 1 {
 			return Config{}, fmt.Errorf("PUSAQ_BREAKER_THRESHOLD: must be in (0,1), got %q", v)
 		}
@@ -476,7 +477,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 
 	cfg.TPMLimit = DefaultTPMLimit
 	if v, ok := lookup("PUSAQ_TPM_LIMIT"); ok {
-		n, err := strconv.ParseFloat(v, 64)
+		n, err := parseFinite(v)
 		if err != nil || n < 0 {
 			return Config{}, fmt.Errorf("PUSAQ_TPM_LIMIT: must be a non-negative number (0 disables token limiting), got %q", v)
 		}
@@ -489,7 +490,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		if cfg.TPMLimit == 0 {
 			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: meaningless when PUSAQ_TPM_LIMIT is 0 (token limiting disabled)")
 		}
-		n, err := strconv.ParseFloat(v, 64)
+		n, err := parseFinite(v)
 		if err != nil || n <= 0 {
 			return Config{}, fmt.Errorf("PUSAQ_TPM_BURST: must be a positive number, got %q", v)
 		}
@@ -503,6 +504,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 		cfg.TPMReserveDefault = n
 	}
+	if cfg.TPMLimit > 0 && float64(cfg.TPMReserveDefault) > cfg.TPMBurst {
+		return Config{}, fmt.Errorf("PUSAQ_TPM_RESERVE_DEFAULT: %d exceeds the token bucket capacity %g", cfg.TPMReserveDefault, cfg.TPMBurst)
+	}
 
 	cfg.CacheMode = CacheOff
 	if v, ok := lookup("PUSAQ_CACHE_MODE"); ok && v != "" {
@@ -513,7 +517,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 	cfg.CacheTau = DefaultCacheTau
 	if v, ok := lookup("PUSAQ_CACHE_TAU"); ok {
-		n, err := strconv.ParseFloat(v, 64)
+		n, err := parseFinite(v)
 		if err != nil || n <= 0 || n > 1 {
 			return Config{}, fmt.Errorf("PUSAQ_CACHE_TAU: must be in (0,1], got %q", v)
 		}
@@ -685,7 +689,7 @@ func parsePolicyFields(tenant, fields string, routes map[string]Route) (TenantPo
 			}
 			p.MaxPromptChars = n
 		case "budget_usd":
-			n, err := strconv.ParseFloat(val, 64)
+			n, err := parseFinite(val)
 			if err != nil || n <= 0 {
 				return p, fmt.Errorf("tenant %q: budget_usd must be a positive number, got %q", tenant, val)
 			}
@@ -751,8 +755,8 @@ func parseUpstreams(v string) ([]Upstream, error) {
 }
 
 // parsePrices parses "model=input/output" comma-separated rates in USD per
-// million tokens, failing fast on malformed pairs, negative rates, and
-// duplicates.
+// million tokens, failing fast on malformed pairs, negative or non-finite
+// rates, and duplicates.
 func parsePrices(v string) (map[string]Price, error) {
 	prices := make(map[string]Price)
 	for pair := range strings.SplitSeq(v, ",") {
@@ -768,11 +772,11 @@ func parsePrices(v string) (map[string]Price, error) {
 		if !ok {
 			return nil, fmt.Errorf("malformed pair %q, want model=input/output", pair)
 		}
-		inputPerM, err := strconv.ParseFloat(in, 64)
+		inputPerM, err := parseFinite(in)
 		if err != nil || inputPerM < 0 {
 			return nil, fmt.Errorf("model %q: input rate must be a non-negative number, got %q", model, in)
 		}
-		outputPerM, err := strconv.ParseFloat(out, 64)
+		outputPerM, err := parseFinite(out)
 		if err != nil || outputPerM < 0 {
 			return nil, fmt.Errorf("model %q: output rate must be a non-negative number, got %q", model, out)
 		}
@@ -817,6 +821,17 @@ func applyRouteModels(routes map[string]Route, v string) error {
 // parseRoutingRules parses "tag=alias" comma-separated rules for the auto
 // alias. The whole table is replaced: a "default" entry is required, every
 // target must be a concrete configured alias, and tags must be unique.
+func parseFinite(s string) (float64, error) {
+	n, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return 0, fmt.Errorf("%q is not a finite number", s)
+	}
+	return n, nil
+}
+
 func parseRoutingRules(v string, routes map[string]Route) (map[string]string, string, error) {
 	rules := make(map[string]string)
 	def := ""
@@ -828,6 +843,9 @@ func parseRoutingRules(v string, routes map[string]Route) (map[string]string, st
 		tag, alias, ok := strings.Cut(pair, "=")
 		if !ok || tag == "" || alias == "" {
 			return nil, "", fmt.Errorf("malformed pair %q, want tag=alias", pair)
+		}
+		if !regionLabel.MatchString(tag) {
+			return nil, "", fmt.Errorf("rule %q: tags use letters, digits, '.', '_' and '-'", tag)
 		}
 		if alias == AutoAlias {
 			return nil, "", fmt.Errorf("rule %q: target must be a concrete alias, not %q", tag, alias)
