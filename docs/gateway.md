@@ -62,7 +62,8 @@ atomic store decision per request, exact across replicas. **`lease`**: each
 replica takes up to `PUSAQ_LEASE_SIZE` request tokens per round-trip and
 admits locally; unused tokens return when the lease passes `PUSAQ_LEASE_TTL`
 or the replica drains, and a store denial is cached locally until its retry
-time or the lease TTL, whichever is sooner. Cumulative admissions never exceed the bucket in either mode; in lease
+time or the lease TTL, whichever is sooner. Cleanup revalidates entry ownership
+and never waits for a tenant while holding the shared tenant-map mutex. Cumulative admissions never exceed the bucket in either mode; in lease
 mode up to `replicas × lease size` tokens can sit unspent in leases at any
 moment, and a replica that dies without draining strands at most one lease
 per tenant (under-admission, never overrun). Lease mode covers request

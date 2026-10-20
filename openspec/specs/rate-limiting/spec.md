@@ -131,7 +131,7 @@ RPM and TPM SHALL be separate buckets per tenant: exhausting one dimension SHALL
 
 ### Requirement: Lease mode trades per-window exactness for fewer store round-trips
 
-With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K request tokens (`PUSAQ_LEASE_SIZE`) from a tenant's bucket in one atomic store operation and admit up to K requests locally without consulting the store. Cumulative admissions from a full bucket SHALL never exceed the bucket capacity plus accrued refill. Within any window, the admitted count MAY fall short of strict accounting by at most `M·K` tokens across M replicas (tokens taken but not yet spent) and SHALL never exceed it. Tokens unused when a lease expires (`PUSAQ_LEASE_TTL`) or when the replica drains SHALL be returned to the shared bucket; a replica that stops without draining loses at most K tokens per tenant, which under-admits and never overruns. A store denial SHALL be cached locally until the store-computed retry time. Lease mode SHALL apply to request limits only; token limits SHALL remain strict. The mode SHALL be announced at startup and its configuration validated.
+With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K request tokens (`PUSAQ_LEASE_SIZE`) from a tenant's bucket in one atomic store operation and admit up to K requests locally without consulting the store. Cumulative admissions from a full bucket SHALL never exceed the bucket capacity plus accrued refill. Within any window, the admitted count MAY fall short of strict accounting by at most `M·K` tokens across M replicas (tokens taken but not yet spent) and SHALL never exceed it. Tokens unused when a lease expires (`PUSAQ_LEASE_TTL`) or when the replica drains SHALL be returned to the shared bucket; a replica that stops without draining loses at most K tokens per tenant, which under-admits and never overruns. A store denial SHALL be cached locally until the smaller of the store-computed retry duration and the lease TTL has elapsed. Cleanup SHALL NOT detach an entry used by an admission or wait for a tenant while holding the shared tenant-map lock. Lease mode SHALL apply to request limits only; token limits SHALL remain strict. The mode SHALL be announced at startup and its configuration validated.
 
 #### Scenario: Lease acquired once per K requests
 
@@ -166,7 +166,7 @@ With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K reque
 #### Scenario: Denial cached until retry
 
 - **WHEN** the store denies a lease with a retry time
-- **THEN** the replica rejects that tenant's requests locally until the retry time passes, making no further store round-trip for them
+- **THEN** the replica rejects that tenant's requests locally until the smaller of the retry duration and lease TTL passes, making no further store round-trip for them
 
 #### Scenario: Mode is explicit at startup
 
@@ -177,6 +177,21 @@ With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K reque
 
 - **WHEN** the mode is neither `strict` nor `lease`, the lease size is not a positive integer, exceeds the request bucket capacity, or the lease TTL is not positive
 - **THEN** the gateway fails to start with a configuration error
+
+#### Scenario: Admission races idle cleanup
+
+- **WHEN** cleanup retires an idle entry after an admission captured its reference
+- **THEN** the admission uses a current entry and draining leaves no unreferenced tokens
+
+#### Scenario: Busy tenant does not block another tenant
+
+- **WHEN** cleanup encounters a tenant whose admission is waiting on the store
+- **THEN** another tenant can acquire its own entry and complete admission without waiting for that tenant
+
+#### Scenario: Denial outlives lease TTL
+
+- **WHEN** store retry is longer than lease TTL and tokens are returned during the local denial interval
+- **THEN** the replica consults the store again after lease TTL and can use those tokens
 
 ### Requirement: Limiter measurement sources agree
 
