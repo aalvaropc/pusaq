@@ -11,19 +11,6 @@ import (
 // sweepBudget bounds one sweep of refunds, by the janitor or by Close.
 const sweepBudget = 250 * time.Millisecond
 
-// Leased trades per-window exactness for fewer store round-trips: each
-// replica takes a lease of up to K tokens from the shared bucket in one
-// atomic operation and admits up to K requests locally. Cumulative
-// admissions from a full bucket never exceed the bucket (tokens are taken
-// before they are spent); within a window the admitted count can exceed
-// strict accounting by at most M·K across M replicas, because tokens held
-// in leases are counted as spent by the store. Unused tokens go back on
-// lease expiry and on Close; a replica that dies without closing loses at
-// most K tokens per tenant, which under-admits and never overruns. Denials
-// are cached locally until the store-computed retry time, so an overloaded
-// tenant costs one round-trip per retry interval instead of one per
-// request.
-//
 // Leased satisfies the same Allow surface as Limiter; it is meant for the
 // request dimension, whose cost is always 1.
 type Leased struct {
@@ -97,8 +84,7 @@ func NewLeased(inner *Limiter, size int, ttl time.Duration) *Leased {
 // the store when it cannot. An error means the store was unreachable — the
 // caller decides the degraded-mode policy (the gateway fails open).
 func (l *Leased) Allow(ctx context.Context, tenant string, cost float64) (Decision, error) {
-	ls := l.leaseFor(tenant)
-	ls.mu.Lock()
+	ls := l.lockLease(tenant, l.leaseFor(tenant))
 	defer ls.mu.Unlock()
 
 	now := l.now()
@@ -161,6 +147,35 @@ func (l *Leased) Close() {
 		defer cancel()
 		l.sweep(ctx, true)
 	})
+}
+
+func (l *Leased) lockLease(tenant string, ls *lease) *lease {
+	for {
+		ls.mu.Lock()
+		l.mu.Lock()
+		current := l.leases[tenant] == ls
+		l.mu.Unlock()
+		if current {
+			return ls
+		}
+		ls.mu.Unlock()
+		ls = l.leaseFor(tenant)
+	}
+}
+
+func (l *Leased) retireLease(tenant string, ls *lease) {
+	if !ls.mu.TryLock() {
+		return
+	}
+	defer ls.mu.Unlock()
+	if ls.tokens != 0 || ls.pending != 0 || l.now().Before(ls.denyUntil) {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.leases[tenant] == ls {
+		delete(l.leases, tenant)
+	}
 }
 
 func (l *Leased) leaseFor(tenant string) *lease {
@@ -232,17 +247,7 @@ func (l *Leased) sweep(ctx context.Context, all bool) {
 			}
 		}
 		if idle {
-			// Forget quiet tenants so the map does not grow without bound;
-			// the next request simply creates a fresh entry.
-			l.mu.Lock()
-			if cur := l.leases[d.tenant]; cur == d.ls {
-				d.ls.mu.Lock()
-				if d.ls.tokens == 0 && d.ls.pending == 0 {
-					delete(l.leases, d.tenant)
-				}
-				d.ls.mu.Unlock()
-			}
-			l.mu.Unlock()
+			l.retireLease(d.tenant, d.ls)
 		}
 	}
 }
