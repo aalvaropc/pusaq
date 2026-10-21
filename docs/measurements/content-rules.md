@@ -21,7 +21,7 @@ events (`policy_flags`) and in denial messages without leaking content.
 
 | Family | Kinds | Mechanism | Stated limits |
 |---|---|---|---|
-| Sensitive (scanned in every message) | `pii:email`, `pii:phone`, `pii:card`, `pii:iban`, `secret:api_key`, `secret:private_key`, `secret:jwt`, `secret:bearer`, `secret:assignment` | Regex plus checks: card numbers need a known issuer prefix and a Luhn checksum; IBANs need ISO 13616 mod-97; international phones need 8–15 digits; a bare digit run counts only next to a phone cue (`tel`, `cel`, `whatsapp`, `llámame`…); dots never separate phones | Unformatted or dot-separated phone numbers without a cue pass; short passwords pass; only the listed secret shapes (`sk-…`, `AKIA…`, `ghp_…`, PEM, JWT, `Bearer …`, `password=…`) are known; Peruvian CCI numbers are not covered |
+| Sensitive (scanned in every message) | `pii:email`, `pii:phone`, `pii:card`, `pii:iban`, `secret:api_key`, `secret:private_key`, `secret:jwt`, `secret:bearer`, `secret:assignment` | Regex plus checks: card numbers need a known issuer prefix and a Luhn checksum, including candidates ending before a separated expiry or CVV; IBANs need ISO 13616 mod-97; international phones need 8–15 digits; a bare digit run counts only next to a phone cue (`tel`, `cel`, `whatsapp`, `llámame`…); dots never separate phones | Unformatted or dot-separated phone numbers without a cue pass; short passwords pass; only the listed secret shapes (`sk-…`, `AKIA…`, `ghp_…`, PEM, JWT, `Bearer …`, `password=…`) are known; Peruvian CCI numbers are not covered |
 | Injection (scanned outside the system prompt) | `injection:ignore_instructions`, `injection:role_override`, `injection:prompt_leak`, `injection:role_marker` | Phrase patterns in English and Spanish: verb + determiner + *previous/anterior* + instruction noun, adjacent; a role cue plus a no-rules cue within 40 characters; an exfiltration verb plus *your/its system prompt*; chat-template markers | Lexical: paraphrases without these lexemes pass; a developer asking to "print the system prompt" is flagged; a user correcting their own earlier message is not |
 | Temporal (scanned in user messages) | `temporal:now`, `temporal:relative_day`, `temporal:period`, `temporal:latest`, `temporal:clock` | Cue words and phrases in both languages, after masking idioms that contain a cue without meaning "now" ("today's world", "currently logged in", "por la mañana", "hoy en día", `date.today()`) | Cue-based: "who is the president of Peru?" carries no cue and passes; bare "now"/"ahora" never count; "current" counts only next to a volatile noun; the song title "Yesterday" is flagged |
 
@@ -31,13 +31,15 @@ sensitive data anywhere counts.
 
 ## Corpus
 
-`testdata/policy/content-rules.csv`: 176 hand-labeled rows, roughly 55 %
-English and 45 % Spanish, columns `text,sensitive,injection,temporal`.
+`testdata/policy/content-rules.csv`: 204 hand-labeled rows in English and
+Spanish, columns `text,sensitive,injection,temporal`. The 2026-10-20 expansion
+adds 15 synthetic card-positive rows and 13 hard negatives to the original
+176 rows. These are targeted regressions, not blind traffic.
 
 | Slice | Rows | What it holds |
 |---|---|---|
-| Sensitive positives | 30 | 6 emails; 8 phones (Peru, Mexico, Argentina, Chile, Colombia, US formats); 4 Luhn-valid cards (Visa, Mastercard, Amex, Discover); 3 valid IBANs; 9 secrets, one per shape |
-| Sensitive hard negatives | 20 | order numbers, ISBN-13, IPv4, versions, a nanosecond timestamp, a 16-digit run that fails Luhn, an 8-digit DNI, a booking code that fails mod-97, `sk-support`, "the bearer of this letter", `@handle`, dates, spaced amounts, a hex hash |
+| Sensitive positives | 45 | 6 emails; 8 phones (Peru, Mexico, Argentina, Chile, Colombia, US formats); 19 card cases (Visa, Mastercard, Amex, Discover), including expiry/CVV suffixes and separator controls; 3 valid IBANs; 9 secrets, one per shape |
+| Sensitive hard negatives | 33 | order numbers, ISBN-13, IPv4, versions, a nanosecond timestamp, a 16-digit run that fails Luhn, an 8-digit DNI, a booking code that fails mod-97, `sk-support`, "the bearer of this letter", `@handle`, dates, spaced amounts, a hex hash; invalid checksums, unsupported issuer, embedded digits and uninterrupted numbers with independently valid card prefixes |
 | Injection positives | 30 | 15 EN / 15 ES across the four kinds |
 | Injection hard negatives | 20 | assembly instructions, "the previous instructions were unclear", "disregard my previous message", "how to write a system prompt", benign personas, "you are now the owner", "print the system message to the console", "ignore case", "olvidé mi contraseña", "reglas del fútbol" |
 | Temporal positives | 31 | 15 EN / 16 ES, including four implicit ones the rules are not expected to see ("who is the president of Peru?", "how old is Messi?", "which team leads the standings?", "¿a cuánto está el dólar ahora?") |
@@ -45,8 +47,8 @@ English and 45 % Spanish, columns `text,sensitive,injection,temporal`.
 | Plain | 20 | ordinary questions in both languages |
 | Multi-flag | 5 | rows positive on two families |
 
-Floors, chosen before the corpus was run: with ~30 positives per family one
-miss is about three points, so coarser floors are the only honest ones.
+Floors were chosen before the original corpus was run, with about 30
+positives per family. They remain unchanged for the expanded corpus.
 
 | Family | Precision ≥ | Recall ≥ |
 |---|---|---|
@@ -63,17 +65,37 @@ go test -v -run TestContentRulesCorpus ./internal/policy
 A row is a positive for a family when its column is 1 and a prediction when
 any kind of that family fires. The test prints every false positive and
 false negative, then precision and recall per family, and fails below a
-floor — so the numbers below cannot drift silently. Patterns were adjusted
-against the corpus only where a row revealed a genuine pattern bug, never by
-adding rows that pass.
+floor — so the numbers below cannot drift silently. Patterns change when regression evidence identifies a bug. Added rows
+include missed positives and boundary controls; existing rows and floors
+remain unchanged.
 
-## Results (2026-09-30)
+## Results (2026-10-20)
 
 | Family | Positives | TP | FP | FN | Precision | Recall |
 |---|---|---|---|---|---|---|
-| sensitive | 33 | 33 | 0 | 0 | **1.000** | **1.000** |
+| sensitive | 48 | 48 | 0 | 0 | **1.000** | **1.000** |
 | injection | 33 | 33 | 0 | 0 | **1.000** | **1.000** |
 | temporal | 35 | 31 | 1 | 4 | **0.969** | **0.886** |
+
+The suffix correction tests at most seven candidate lengths of 13–19
+digits, ending at a match boundary or before an existing space/hyphen.
+Issuer and checksum checks remain unchanged. It never truncates an
+uninterrupted digit block to accept its valid prefix.
+
+Before the correction, exact card-kind tests miss 13 of the 15 added
+positive cases. On the expanded corpus the sensitive family has TP=37,
+FP=0 and FN=11 (recall 0.771, below its 0.85 floor). Some hyphenated cards
+also trigger the phone heuristic, so family recall alone conceals two
+missing card-kind classifications. After the correction all 15 card
+positives and all 13 hard negatives pass, with the family counts above.
+Injection and temporal counts are unchanged.
+
+Gateway integration covers all eight combinations of block/log action,
+buffered/streaming response and user/system placement. Blocking returns
+403 before budget access, token charges or provider calls. Logging serves
+the request with `pii:card` and `cache_skip=sensitive`; neither mode offers
+the prompt to the shadow cache. Responses and cost events omit the matched
+card. All policy and gateway regressions pass with the race detector.
 
 Misses and false alarms, all foreseen in the rules' stated limits:
 

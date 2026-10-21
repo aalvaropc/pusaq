@@ -162,11 +162,19 @@ func onlyDigits(s string) string {
 	return b.String()
 }
 
-// cardNumber accepts a 13–19 digit run with a known issuer prefix and a
-// valid Luhn checksum — what keeps timestamps, tracking codes and random
-// digit runs out.
 func cardNumber(m string) bool {
-	d := onlyDigits(m)
+	for end := len(m); end > 0; end-- {
+		if end < len(m) && m[end] != ' ' && m[end] != '-' {
+			continue
+		}
+		if validCardNumber(onlyDigits(m[:end])) {
+			return true
+		}
+	}
+	return false
+}
+
+func validCardNumber(d string) bool {
 	if len(d) < 13 || len(d) > 19 {
 		return false
 	}
