@@ -458,9 +458,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 	req.TokensCharged = charged
 
 	req.OnFinalize(func() {
-		// Actual usage unknown → the full charge stands (refunding on
-		// unknown actuals would let clients zero charges by aborting).
-		if req.Usage == (core.Usage{}) {
+		if req.Usage == (core.Usage{}) && req.Attempts > 0 {
 			return
 		}
 		actual := req.Usage.PromptTokens + req.Usage.CompletionTokens
