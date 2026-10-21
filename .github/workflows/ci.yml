@@ -60,3 +60,14 @@ jobs:
       - run: terraform -chdir=infra/terraform/foundation validate
       - run: terraform -chdir=infra/terraform/runtime init -backend=false -input=false
       - run: terraform -chdir=infra/terraform/runtime validate
+
+  ci-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    if: always()
+    needs: [lint, test, terraform]
+    steps:
+      - name: Require successful checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
