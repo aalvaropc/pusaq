@@ -1,6 +1,6 @@
 module github.com/aalvaropc/pusaq
 
-go 1.26
+go 1.26.10
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
