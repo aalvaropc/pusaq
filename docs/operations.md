@@ -115,10 +115,13 @@ make infra-apply
 
 After the first apply, set the two repository variables the publishing
 workflow reads (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`) from
-the Terraform outputs. From then on every push to `main` publishes
-`pusaq` and `mockprovider` images tagged with the commit SHA and `main`
+the Terraform outputs. A push to `main` publishes
+`pusaq` and `mockprovider` images tagged with the verified commit SHA only
+after all mandatory CI checks succeed
 ([`release-image.yml`](../.github/workflows/release-image.yml)). CI checks
-Terraform formatting and validity without credentials.
+Terraform formatting and validity without credentials. Publication uses a reusable
+workflow with job-scoped OIDC permissions; federation requires the numeric
+repository and owner IDs, main ref, push event, and both approved workflow paths.
 
 The **runtime module** ([`infra/terraform/runtime/`](../infra/terraform/runtime/))
 is the two-region deployment a failover measurement runs against, and it

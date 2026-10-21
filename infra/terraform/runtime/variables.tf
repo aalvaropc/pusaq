@@ -24,7 +24,10 @@ variable "registry" {
 variable "image_tag" {
   description = "Tag of the pusaq and mockprovider images to deploy. Pin the commit SHA for a published run."
   type        = string
-  default     = "main"
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.image_tag))
+    error_message = "The image tag must be a full lowercase commit SHA."
+  }
 }
 
 variable "min_instances" {
