@@ -33,4 +33,3 @@ The policy filter SHALL classify every completion request's messages with stated
 
 - **WHEN** an uninterrupted number fails card validation but has a prefix that would validate independently
 - **THEN** that prefix alone does not produce a card match
-
