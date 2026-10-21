@@ -96,14 +96,14 @@ func RateLimit(limiter Admitter, policies PolicyFor, logger *slog.Logger) core.S
 					logger.Warn("rate limiter store unavailable, failing closed",
 						slog.String("request_id", req.ID),
 						slog.String("tenant", req.Tenant),
-						slog.Any("error", err),
+						slog.String("error_code", string(core.AsError(err).Code)),
 					)
 					return nil, &core.Error{Code: core.CodeStoreUnavailable, Message: "rate limiter store unavailable", Err: err}
 				}
 				logger.Warn("rate limiter store unavailable, failing open",
 					slog.String("request_id", req.ID),
 					slog.String("tenant", req.Tenant),
-					slog.Any("error", err),
+					slog.String("error_code", string(core.AsError(err).Code)),
 				)
 				return next(ctx, req)
 			}
@@ -160,7 +160,6 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					logger.Error("panic recovered",
 						slog.String("request_id", req.ID),
 						slog.String("op", req.Op),
-						slog.Any("panic", r),
 					)
 					event.Outcome = core.OutcomePanic
 					event.ErrorCode = core.CodeInternal

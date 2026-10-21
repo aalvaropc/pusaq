@@ -437,14 +437,14 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 			opts.Logger.Warn("token limiter store unavailable, failing closed",
 				slog.String("request_id", req.ID),
 				slog.String("tenant", req.Tenant),
-				slog.Any("error", err),
+				slog.String("error_code", string(core.AsError(err).Code)),
 			)
 			return &core.Error{Code: core.CodeStoreUnavailable, Message: "token limiter store unavailable", Err: err}
 		}
 		opts.Logger.Warn("token limiter store unavailable, failing open",
 			slog.String("request_id", req.ID),
 			slog.String("tenant", req.Tenant),
-			slog.Any("error", err),
+			slog.String("error_code", string(core.AsError(err).Code)),
 		)
 		return nil
 	}
@@ -472,7 +472,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 			opts.Logger.Warn("token reconciliation failed; charge stands until bucket TTL",
 				slog.String("request_id", req.ID),
 				slog.String("tenant", req.Tenant),
-				slog.Any("error", err),
+				slog.String("error_code", string(core.AsError(err).Code)),
 			)
 		}
 	})
@@ -523,7 +523,7 @@ func viaChain[T any](ctx context.Context, providers map[string]provider.Provider
 		}
 		lastErr = err
 		opts.Logger.Warn("backend failed, trying next",
-			slog.String("request_id", req.ID), slog.String("backend", backend), slog.Any("error", err))
+			slog.String("request_id", req.ID), slog.String("backend", backend), slog.String("error_code", string(core.AsError(err).Code)))
 	}
 	if lastErr != nil {
 		return zero, nil, lastErr
