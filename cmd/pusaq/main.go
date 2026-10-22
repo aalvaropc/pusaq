@@ -229,6 +229,8 @@ func run(logger *slog.Logger) error {
 		gateway.WithRegion(cfg.Region),
 		gateway.WithAdminToken(cfg.AdminToken),
 	)
+	srv.BodyReadTimeout = cfg.BodyReadTimeout
+	srv.WriteIdleTimeout = cfg.WriteIdleTimeout
 	if cfg.AdminToken != "" {
 		logger.Warn("admin endpoints enabled: readiness can be failed on purpose with the admin token")
 	}

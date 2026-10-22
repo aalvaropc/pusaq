@@ -286,9 +286,8 @@ func TestRunIDIsValidated(t *testing.T) {
 			t.Fatalf("payload %s: status %d body %s", payload, rec.Code, rec.Body.String())
 		}
 	}
-	// Rejected before admission, like an oversized body: no cost event.
-	if len(*events) != 0 {
-		t.Fatalf("events = %d, want none for pre-admission rejections", len(*events))
+	if len(*events) != 2 {
+		t.Fatalf("events = %d, want one per invalid request", len(*events))
 	}
 }
 
@@ -300,7 +299,7 @@ func TestRunIDPresentWhenAnEarlyStageRejects(t *testing.T) {
 			return nil, core.NewError(core.CodeRateLimited, "rejected before the handler")
 		}
 	})
-	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID(), rejecting)
+	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID(), Auth(nil), rejecting)
 	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": okProvider()}, CompletionsOptions{Logger: discardLogger()})
 	s := NewServer(discardLogger(), pipeline, completions)
 	s.SetReady(true)

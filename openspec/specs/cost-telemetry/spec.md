@@ -25,7 +25,7 @@ When the telemetry buffer is full, the gateway SHALL drop new cost events rather
 
 ### Requirement: Cost events carry the accounting fields
 
-Every cost event SHALL include at least: request ID, timestamp, operation, tenant, outcome (success, error code, or panic), and total latency. For requests that resolve a model, the event SHALL additionally include the requested model (alias) and the served model, and — when the provider reports usage — prompt and completion token counts. When the replica is labeled with a region, every event SHALL carry it; when the request declared a run id, the event SHALL carry it — so a multi-region measurement run can be read back per region and per run from the event stream alone. The schema SHALL remain extensible so price fields can be added without breaking consumers.
+Every cost event SHALL include at least: request ID, timestamp, operation, tenant, outcome (success, error code, or panic), and total latency. For requests that resolve a model, the event SHALL additionally include the requested model (alias) and the served model, and — when the provider reports usage — prompt and completion token counts. When the replica is labeled with a region, every event SHALL carry it; when the authenticated payload declares a valid run id, the event SHALL carry it — so a multi-region measurement run can be read back per region and per run from the event stream alone. The schema SHALL remain extensible so price fields can be added without breaking consumers.
 
 #### Scenario: Minimum fields present
 

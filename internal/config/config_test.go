@@ -249,6 +249,8 @@ func TestLoad(t *testing.T) {
 			gotUpstreams := got.Upstreams
 			got.Routes, got.Upstreams = nil, nil
 			tt.want.DevMode = len(tt.want.APIKeys) == 0
+			tt.want.BodyReadTimeout = DefaultBodyReadTimeout
+			tt.want.WriteIdleTimeout = DefaultWriteIdleTimeout
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Load() = %+v, want %+v", got, tt.want)
 			}
