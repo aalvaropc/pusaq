@@ -218,3 +218,10 @@ text is never logged and flagged prompts never reach the cache); scanning
 responses for secrets; tool calling and response formats; and a standing
 deployment (the two-region runtime
 module exists for measurement runs only and is destroyed after each one).
+
+### Stream error handling
+
+The gateway validates each complete SSE event before forwarding it and limits
+event framing to 1 MiB. Provider error events are replaced by one generic
+`upstream_error`; no fallback occurs after streaming begins. Content fingerprints
+use incremental hashing, so the scanner does not retain the full response.
