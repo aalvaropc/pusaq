@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"math"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -577,8 +578,8 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	cfg.EmbedderKind = "local"
 	if v, ok := lookup("PUSAQ_EMBEDDER"); ok && v != "" && v != "local" {
 		rawURL, found := strings.CutPrefix(v, "openai:")
-		u, err := url.Parse(rawURL)
-		if !found || err != nil || u.Scheme == "" || u.Host == "" {
+		_, err := parseEndpoint(rawURL)
+		if !found || err != nil {
 			return Config{}, fmt.Errorf("PUSAQ_EMBEDDER: must be \"local\" or \"openai:<absolute url>\"")
 		}
 		cfg.EmbedderKind, cfg.EmbedURL = "openai", strings.TrimRight(rawURL, "/")
@@ -617,6 +618,17 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if !cfg.DevMode && len(cfg.APIKeys) == 0 {
 		return Config{}, fmt.Errorf("PUSAQ_API_KEYS: required unless PUSAQ_DEV_MODE=true")
+	}
+
+	for _, up := range cfg.Upstreams {
+		if err := validateCredentialTransport(up.URL, up.APIKey, cfg.DevMode); err != nil {
+			return Config{}, fmt.Errorf("%s: %w", envKeyName(up.Name), err)
+		}
+	}
+	if cfg.EmbedURL != "" {
+		if err := validateCredentialTransport(cfg.EmbedURL, cfg.EmbedKey, cfg.DevMode); err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_EMBED_KEY: %w", err)
+		}
 	}
 
 	if v, ok := lookup("PUSAQ_TENANT_POLICIES"); ok && v != "" {
@@ -796,9 +808,8 @@ func parseUpstreams(v string) ([]Upstream, error) {
 		if !ok || name == "" || rawURL == "" {
 			return nil, fmt.Errorf("pair %d is malformed, want name=url", position)
 		}
-		u, err := url.Parse(rawURL)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return nil, fmt.Errorf("upstream %q: not an absolute URL", name)
+		if _, err := parseEndpoint(rawURL); err != nil {
+			return nil, fmt.Errorf("upstream %q: %w", name, err)
 		}
 		keyVar := envKeyName(name)
 		if other, taken := keyVars[keyVar]; taken {
@@ -959,4 +970,36 @@ func parseAPIKeys(v string) (map[string]string, error) {
 		return nil, fmt.Errorf("no valid key:tenant pairs")
 	}
 	return keys, nil
+}
+
+func parseEndpoint(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		return nil, fmt.Errorf("must be an absolute HTTP or HTTPS base URL without user information, query or fragment")
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n <= 0 || n > 65535 {
+			return nil, fmt.Errorf("invalid endpoint port")
+		}
+	} else if strings.HasSuffix(u.Host, ":") {
+		return nil, fmt.Errorf("invalid endpoint port")
+	}
+	return u, nil
+}
+
+func validateCredentialTransport(raw, key string, devMode bool) error {
+	u, err := parseEndpoint(raw)
+	if err != nil {
+		return err
+	}
+	if key == "" || u.Scheme == "https" {
+		return nil
+	}
+	host := u.Hostname()
+	ip := net.ParseIP(host)
+	if devMode && (strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())) {
+		return nil
+	}
+	return fmt.Errorf("credentials require HTTPS except explicit loopback development")
 }

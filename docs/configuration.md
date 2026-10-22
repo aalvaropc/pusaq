@@ -73,3 +73,11 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_EMBEDDER` | `local` | `local` or `openai:<url>`, an OpenAI-compatible API base with its version segment; embeddings go to `<url>/embeddings`. Independent of `PUSAQ_UPSTREAMS`. |
 | `PUSAQ_EMBED_MODEL` | unset | Embedding model; required with an `openai:` embedder. |
 | `PUSAQ_EMBED_KEY` | unset | Bearer key for the `openai:` embedder; never logged. Set without an `openai:` embedder, startup fails. |
+
+## Outbound endpoint policy
+
+Gateway provider and embedding bases accept only absolute HTTP/HTTPS URLs
+without user information, query strings, or fragments. API keys require HTTPS;
+explicit development mode allows keyed HTTP only for localhost or literal
+loopback IPs. Keyless HTTP mocks remain supported. Neither client follows
+redirects, including 307 and 308. Versioned base paths are preserved.
