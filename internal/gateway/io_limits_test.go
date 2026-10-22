@@ -147,7 +147,11 @@ func TestStalledClientReleasesStreamOnce(t *testing.T) {
 		return &core.Response{Status: 200, Stream: stream}, nil
 	})
 	s.WriteIdleTimeout = 30 * time.Millisecond
-	srv := httptest.NewServer(s)
+	handlerDone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerDone)
+		s.ServeHTTP(w, r)
+	}))
 	defer srv.Close()
 	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
 	if err != nil {
@@ -166,6 +170,11 @@ func TestStalledClientReleasesStreamOnce(t *testing.T) {
 	case <-finalized:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stalled client retained request")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("handler retained resources after finalization")
 	}
 	if stream.closed.Load() != 1 || len(finalized) != 0 {
 		t.Fatalf("close count=%d finalizers=%d", stream.closed.Load(), len(finalized))
