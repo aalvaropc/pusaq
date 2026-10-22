@@ -203,8 +203,8 @@ func TestUsageScannerBoundsEventSize(t *testing.T) {
 	if !errors.Is(err, errEventTooLarge) || !scanner.failed {
 		t.Fatalf("err = %v, failed = %v; want errEventTooLarge", err, scanner.failed)
 	}
-	if !strings.HasSuffix(out, streamErrorEvent) || len(out) > maxEventBytes+4096+len(streamErrorEvent) {
-		t.Fatalf("forwarded %d bytes, want the read stopped near %d with an error event", len(out), maxEventBytes)
+	if out != streamErrorEvent {
+		t.Fatalf("forwarded %d bytes, want the oversized event withheld (cap %d) and one error event", len(out), maxEventBytes)
 	}
 }
 

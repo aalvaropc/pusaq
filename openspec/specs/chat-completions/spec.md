@@ -147,7 +147,7 @@ Provider errors SHALL map to the normalized error code `upstream_error` with HTT
 
 ### Requirement: Streaming completions over SSE
 
-When a chat-completions request sets `"stream": true`, the gateway SHALL respond with Server-Sent Events (`Content-Type: text/event-stream`): OpenAI-shaped `chat.completion.chunk` events passed through from the provider as they arrive, terminated by a `data: [DONE]` event. The provider request SHALL ask for usage (`stream_options.include_usage`). Streamed responses SHALL carry the same `X-Pusaq-Model` and request-ID headers as buffered ones. Chunks SHALL be forwarded without waiting for the stream to complete. A stream completes only when the provider sends `[DONE]`; when the provider fails mid-stream or ends without `[DONE]`, the gateway SHALL append one SSE event carrying the normalized error shape with code `upstream_error` and end the stream.
+When a chat-completions request sets `"stream": true`, the gateway SHALL respond with Server-Sent Events (`Content-Type: text/event-stream`): OpenAI-shaped `chat.completion.chunk` events forwarded byte-for-byte after each complete event is validated, terminated by a `data: [DONE]` event. The provider request SHALL ask for usage (`stream_options.include_usage`). Streamed responses SHALL carry the same `X-Pusaq-Model` and request-ID headers as buffered ones. Chunks SHALL be forwarded without waiting for the stream to complete. A stream completes only when the provider sends `[DONE]`; when the provider fails mid-stream or ends without `[DONE]`, the gateway SHALL append one SSE event carrying the normalized error shape with code `upstream_error` and end the stream.
 
 #### Scenario: Streamed round-trip
 
@@ -156,7 +156,7 @@ When a chat-completions request sets `"stream": true`, the gateway SHALL respond
 
 #### Scenario: Pre-stream failures are normal errors
 
-- **WHEN** a streaming request fails validation, names an unknown model, or the provider refuses the stream before any chunk is delivered
+- **WHEN** a streaming request fails validation, names an unknown model, or the provider rejects the request before a successful streaming HTTP response
 - **THEN** the gateway responds with the normalized JSON error shape and status, not an SSE response
 
 #### Scenario: Provider asked for usage
@@ -168,6 +168,21 @@ When a chat-completions request sets `"stream": true`, the gateway SHALL respond
 
 - **WHEN** the provider fails after chunks were delivered, or its stream ends without `[DONE]`
 - **THEN** the client receives an SSE event whose data is `{"error":{"code":"upstream_error",…}}`, no `[DONE]`, and the cost event records `upstream_error`
+
+#### Scenario: Provider error payload is withheld
+
+- **WHEN** an event contains a non-null top-level error or declares event type error
+- **THEN** none of that event's bytes are forwarded, one generic upstream_error event terminates the stream, the breaker records failure, no fallback is attempted after streaming starts, and no sample enters the shadow cache
+
+#### Scenario: Event memory is bounded
+
+- **WHEN** a response streams at least 64 MiB of content in bounded events
+- **THEN** retained scanner memory does not grow with total content and the fingerprint matches the buffered content hash
+
+#### Scenario: Oversized event is withheld
+
+- **WHEN** an event exceeds 1 MiB including its framing
+- **THEN** its bytes are withheld and the stream ends with one generic error event
 
 ### Requirement: Upstream calls are authenticated when configured
 
@@ -225,3 +240,22 @@ Each upstream URL SHALL be the base of an OpenAI-compatible API with its version
 
 - **WHEN** an upstream is configured as `https://host/v1beta/openai/`
 - **THEN** its buffered and streamed chat calls go to `https://host/v1beta/openai/chat/completions`
+
+### Requirement: Outbound provider endpoints restrict credential transport
+
+Configured provider base URLs SHALL be absolute HTTP or HTTPS URLs without user information, query strings, fragments, or invalid ports. Endpoints carrying credentials SHALL use HTTPS, except explicit development mode with localhost or a literal loopback IP. Keyless HTTP mocks SHALL remain supported. Provider clients SHALL reject redirects without forwarding any body or credentials to the redirect destination. Configuration errors SHALL not echo endpoint URLs or credentials.
+
+#### Scenario: Redirect does not resend private data
+
+- **WHEN** a buffered or streaming provider returns a 307 or 308 redirect
+- **THEN** the destination receives zero requests and the original attempt becomes a normalized upstream error
+
+#### Scenario: Invalid or plaintext keyed endpoint
+
+- **WHEN** an endpoint violates URL restrictions or uses credentials over HTTP outside the explicit loopback development exception
+- **THEN** startup fails without echoing its URL or key
+
+#### Scenario: Compatible versioned endpoint
+
+- **WHEN** a valid HTTPS base URL contains its API version path
+- **THEN** requests preserve the configured path and carry credentials only to that endpoint

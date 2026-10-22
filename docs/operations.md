@@ -1,14 +1,32 @@
 # Operations
 
-Running, observing, measuring and deploying the gateway.
+Run locally, inspect telemetry, verify changes and operate temporary
+measurement environments. Start with the [documentation index](README.md)
+or consult [configuration](configuration.md) for all settings.
 
 ## Telemetry and health
 
-Every request admitted to the pipeline emits one `cost_event` JSON line on
-stdout — success, error, panic, or stream end — including requested/served
-model and token usage for completions; requests refused before admission
-(oversized body, malformed `run_id`, injected not-ready window) emit none. `GET /healthz` is liveness; `GET /readyz` is
-readiness and turns 503 during the drain window on SIGTERM. With
+Each completion request entering the accounting pipeline produces one
+`cost_event`, finalized on success, error, panic or stream end. Missing or
+unknown API keys are accounted before body reads and have no payload-derived
+run ID. Authenticated body failures and malformed run IDs are accounted as
+`invalid_request`; valid run IDs survive RPM rejection. Injected not-ready
+refusals happen before accounting and produce no cost event or request ID.
+
+Events are offered to a bounded asynchronous emitter that writes JSON lines
+to stdout. Saturation drops events rather than waiting for the sink;
+`telemetry_dropped` reports the count at shutdown. A produced event therefore
+does not guarantee a persisted log record. Completion events include resolved
+model and usage when available; configured prices add `cost_usd`,
+`price_table_version` and, for estimated costs, `cost_estimated`.
+
+Prompt text, raw provider bodies, URL-bearing transport errors and recovered
+panic values are omitted from gateway diagnostics. Policy events carry rule
+kinds rather than matched content. Treat metadata and retained logs as
+sensitive. External embedding services receive eligible shadow prompts.
+
+`GET /healthz` is liveness; `GET /readyz` is readiness. Neither requires
+credentials. Readiness turns 503 during the drain window on SIGTERM. With
 `PUSAQ_ADMIN_TOKEN` set, `POST /admin/readiness?state=down&for=<duration>`
 (bearer token) fails readiness on purpose for that long — `/readyz` answers
 503 and new requests are refused with `not_ready` while in-flight requests
@@ -16,25 +34,94 @@ and streams finish; `state=up` ends it early. It is the failure-injection
 knob chaos runs use instead of deleting a service; each action is one
 `readiness_window` log record.
 
+Shutdown marks the replica not ready, serves during `PUSAQ_DRAIN_DELAY`,
+then gives in-flight requests `PUSAQ_SHUTDOWN_GRACE` to finish. Lease tokens
+are returned, shadow evaluations drained and telemetry flushed. During a
+readiness injection, in-flight work continues; hard process or regional
+failure can interrupt it.
+
 ## Local environment
 
-Requirements: Go 1.26+, Docker with Compose, golangci-lint. Measurement
-commands and their fixture tests also use Bash, jq, bc, awk and GNU date.
+### Docker Compose
+
+Requires Docker with Compose, Make and curl. Go is supplied by the image
+build. The default stack starts the gateway, Redis and two mocks:
 
 ```sh
-make up      # gateway + Redis + mock provider
-make run     # run the gateway on :8080
-make smoke   # POST /v1/chat/completions with pusaq/fast
-make test    # go test -race -cover ./...
-make lint    # golangci-lint + go vet + lint-docs
-make test-loadtest  # shell fixtures for measurement verification
-make down    # stop the local environment
+make up
+curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://localhost:8080/readyz
+make smoke
 ```
+
+This service explicitly sets `PUSAQ_DEV_MODE=true`. Requests are
+unauthenticated and attributed to `dev`. It also enables shadow sampling
+with the local embedder and synthetic mock prices. Stop with `make down`.
 
 The gateway (8080), Redis (6379) and mock (9090) are published only on
 `127.0.0.1`. Containers reach each other by service name. Access from another
 machine requires an explicit Compose override of the service port bindings;
 the default stack does not expose these services to the surrounding network.
+
+### Gateway from source
+
+Requires Go 1.26.10+ (see [go.mod](../go.mod)). Start only the dependencies
+so the containerized gateway does not compete for port 8080:
+
+```sh
+docker compose up -d --build redis mockprovider mockbackup
+PUSAQ_ADDR=127.0.0.1:8080 PUSAQ_REDIS_ADDR=127.0.0.1:6379 make run
+```
+
+`make run` explicitly enables unauthenticated development mode. Run
+`make smoke` in another terminal, then stop the process with Ctrl+C and the
+containers with `make down`. If the complete stack is already running, stop
+its gateway with `docker compose stop pusaq` before starting the host process.
+
+### Authenticated local requests
+
+Use the same dependencies and run the gateway directly, with development
+mode disabled. Set `PUSAQ_CLIENT_KEY` to a local client key in the gateway
+and client terminals. The required-value expression below refuses an unset
+or empty key:
+
+```sh
+PUSAQ_DEV_MODE=false \
+PUSAQ_API_KEYS="${PUSAQ_CLIENT_KEY:?set PUSAQ_CLIENT_KEY}:local" \
+PUSAQ_ADDR=127.0.0.1:8080 \
+PUSAQ_REDIS_ADDR=127.0.0.1:6379 \
+go run ./cmd/pusaq
+```
+
+In the client terminal:
+
+```sh
+curl --fail-with-body http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer ${PUSAQ_CLIENT_KEY:?set PUSAQ_CLIENT_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}]}'
+```
+
+This example uses a keyless local mock upstream. For real providers,
+configure aliases, HTTPS upstream bases and separate provider credentials
+as described in [configuration](configuration.md#upstreams-and-routing).
+
+### Development checks
+
+Use Go 1.26.10+ and golangci-lint 2.12.x. The shell measurement fixtures also
+require Bash, jq, bc, awk and GNU date. These checks do not require a cloud
+account:
+
+```sh
+make test
+make lint
+make test-loadtest
+go build ./...
+```
+
+`make test` includes the race detector and coverage. `make lint` runs
+golangci-lint, go vet and the repository documentation guard.
+
+### Container boundaries
 
 Image builds admit only Dockerfile, the Go module manifests, `cmd/` and
 `internal/` as context. Other checkout files, including Terraform variables,
@@ -44,9 +131,10 @@ The mock provider's admin routes are unauthenticated: `POST /admin/fail?for=5s` 
 
 ## Measurements and how to run them
 
-Every property the gateway claims is measured under load or under injected
-failure, by one reproducible command, and published with its protocol in
-[`docs/measurements/`](measurements/):
+The [measurement index](measurements/README.md) identifies all nine reports,
+their dates and the commands that exercise each mechanism. Run load tests
+against the local mock stack; their Make targets flush the stack's Redis.
+Commands and reports include:
 
 - [`limiter-exactness.md`](measurements/limiter-exactness.md) — the
   request limit across two gateway replicas under 10× overload, co-tenant
@@ -78,9 +166,18 @@ failure, by one reproducible command, and published with its protocol in
   `make chaos-local` checks the harness on the Compose profile.
 - [`content-rules.md`](measurements/content-rules.md) — precision and
   recall of the policy filter's content rules (sensitive data, injection
-  phrasing, temporal cues) on a 176-row labeled EN/ES corpus with hard
+  phrasing, temporal cues) on a 204-row labeled EN/ES corpus with hard
   negatives, against floors the test suite enforces
   (`go test -v -run TestContentRulesCorpus ./internal/policy`).
+
+The 2026-10-20 reports additionally cover
+[shared Redis time](measurements/shared-store-clock.md),
+[lease ownership](measurements/lease-lifecycle.md),
+[unattempted-reservation settlement](measurements/reservation-settlement.md)
+and [independent evidence verification](measurements/measurement-verification.md).
+Historical figures retain their original conditions and do not measure the
+current checkout. `make chaos-local` validates the harness with nginx
+round-robin; it does not measure health-based cloud failover.
 
 Local measurement commands keep one run id for execution and reporting, drain
 all gateway replicas before collecting their events, and attempt verification
@@ -92,7 +189,37 @@ streams by region. Local comparisons are exact; cloud main successes retain
 one shared tolerance of five events across regions. Platform, transport and
 pre-admission readiness refusals are reported without requiring cost events.
 
-## Cloud
+## CI and image publication
+
+The [CI workflow](../.github/workflows/ci.yml) runs on pull requests and
+pushes to `main`. Its required `ci-gate` succeeds only when all mandatory
+jobs succeed:
+
+| Area | Checks |
+|---|---|
+| Go | golangci-lint, go vet, race tests, build and measurement fixtures |
+| Documentation | Repository documentation guard |
+| Infrastructure | Terraform formatting, validation and foundation mock tests |
+| Security | govulncheck, actionlint, zizmor and PR dependency review |
+| Static analysis | CodeQL for Go and Actions |
+| Images | Trivy for both image targets; fixable HIGH/CRITICAL findings fail CI |
+
+Actions are pinned to full commit SHAs; Docker build/runtime bases use
+digests. Checkout credentials are not persisted. Dependabot checks Go,
+Docker, Actions and Terraform dependencies weekly. See the [security policy](../SECURITY.md)
+for private reporting and support boundaries.
+
+Publication is conditional on a successful push-to-main gate and both GCP
+repository variables being configured. An unset variable skips publication.
+Pull requests do not publish images. The reusable publisher checks out the
+verified SHA, uses job-scoped OIDC and publishes only full commit-SHA tags;
+it does not deploy the runtime.
+
+## Cloud measurement environment
+
+Terraform creates infrastructure only when its apply targets are invoked.
+These modules are temporary measurement tooling, not production deployment
+templates. The steps below incur cloud resource charges.
 
 The cloud side is declared as code in [`infra/terraform/foundation/`](../infra/terraform/foundation/)
 and creates only what publishing needs — nothing that runs continuously:
@@ -123,6 +250,9 @@ Terraform formatting and validity without credentials. Publication uses a reusab
 workflow with job-scoped OIDC permissions; federation requires the numeric
 repository and owner IDs, main ref, push event, and both approved workflow paths.
 
+The publisher's registry path is configured in the workflow. Keep it aligned
+with the foundation outputs when adapting the modules to another project.
+
 The **runtime module** ([`infra/terraform/runtime/`](../infra/terraform/runtime/))
 is the two-region deployment a failover measurement runs against, and it
 exists only for that run: the gateway in two Cloud Run regions (one
@@ -135,12 +265,16 @@ on a global address, throwaway API keys, a generated admin token; nothing
 here is a standing deployment.
 
 ```sh
-cp infra/terraform/runtime/terraform.tfvars.example infra/terraform/runtime/terraform.tfvars   # pin the image SHA
-make runtime-init && make runtime-plan && make runtime-apply       # ~10 min
-make chaos-run CHAOS_EXPERIMENT=none                               # control run
-make chaos-run                                                     # fail region A's readiness under load
-make runtime-destroy                                               # the same day
+cp infra/terraform/runtime/terraform.tfvars.example infra/terraform/runtime/terraform.tfvars
+make runtime-init && make runtime-plan && make runtime-apply
+make chaos-run CHAOS_EXPERIMENT=none
+make chaos-run
+make runtime-destroy
 ```
+
+Before applying, set `image_tag` to an actually published **40-character
+lowercase commit SHA** in the runtime variables file. Mutable tags and
+abbreviated SHAs are rejected. Destroy the runtime the same day as the run.
 
 `make chaos-run` drives [`loadtest/chaos.js`](../loadtest/chaos.js) with k6 in
 Docker from the machine it runs on, collects the gateways' events from Cloud

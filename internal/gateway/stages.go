@@ -50,6 +50,7 @@ const DevTenant = core.DevTenant
 // downstream stage runs; with no keys, every request belongs to DevTenant.
 func Auth(apiKeys map[string]string) core.Stage {
 	return func(next core.Handler) core.Handler {
+		next = loadPayload(next)
 		return func(ctx context.Context, req *core.Request) (*core.Response, error) {
 			if len(apiKeys) == 0 {
 				req.Tenant = DevTenant
@@ -257,4 +258,23 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			SpendUSDMonth:  f.req.SpendUSDMonth,
 		})
 	})
+}
+
+func loadPayload(next core.Handler) core.Handler {
+	return func(ctx context.Context, req *core.Request) (*core.Response, error) {
+		if req.ReadPayload != nil {
+			read := req.ReadPayload
+			req.ReadPayload = nil
+			body, err := read()
+			if err != nil {
+				return nil, err
+			}
+			runID, err := runIDFromPayload(body)
+			if err != nil {
+				return nil, err
+			}
+			req.Payload, req.RunID = body, runID
+		}
+		return next(ctx, req)
+	}
 }

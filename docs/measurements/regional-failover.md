@@ -33,6 +33,12 @@ From the design (docs/design.md §5.6, §7) and the change's design notes:
 
 ## Protocol
 
+The results below describe the 2026-10-07 deployment. Current runtime
+configuration requires a published 40-character lowercase image SHA; the
+abbreviated image identifier in the historical environment table is a run
+identifier, not a valid value for the current `image_tag` setting. See
+[operations](../operations.md#cloud-measurement-environment) for setup.
+
 ```
 make runtime-init && make runtime-apply          # infra/terraform/runtime: two regions, global LB
 make chaos-run CHAOS_EXPERIMENT=none   CHAOS_QPS=4                                        # control
