@@ -46,7 +46,7 @@ func run(logger *slog.Logger) error {
 	emitter := telemetry.NewEmitter(telemetry.SlogSink{Logger: logger}, cfg.TelemetryBuffer)
 
 	if len(cfg.APIKeys) == 0 {
-		logger.Warn("authentication disabled: no PUSAQ_API_KEYS configured, all requests attributed to the dev tenant")
+		logger.Warn("authentication disabled: explicit development mode, all requests attributed to the dev tenant")
 	}
 
 	// Every event carries this replica's region label, so a multi-region
@@ -103,13 +103,15 @@ func run(logger *slog.Logger) error {
 	var leased *ratelimit.Leased
 	if cfg.CacheMode == config.CacheShadow {
 		embedder := newEmbedder(cfg)
-		shadow = semcache.NewShadow(embedder, semcache.NewIndex(cfg.CacheMaxEntries),
-			logger, cfg.CacheTau, 8, 256)
+		shadow = semcache.NewShadow(embedder, semcache.NewIndex(cfg.CacheMaxEntries, cfg.CacheMaxBytes),
+			logger, cfg.CacheTau, 8, 256, cfg.CacheQueueMaxBytes)
 		completionsOpts.Shadow = shadow
 		logger.Info("semantic cache in shadow mode: measuring, never serving",
 			slog.String("embedder", embedder.Name()),
 			slog.Float64("tau", cfg.CacheTau),
 			slog.Int("max_entries", cfg.CacheMaxEntries),
+			slog.Int64("max_bytes", cfg.CacheMaxBytes),
+			slog.Int64("pending_max_bytes", cfg.CacheQueueMaxBytes),
 		)
 	}
 	if cfg.RedisAddr != "" {
@@ -229,6 +231,8 @@ func run(logger *slog.Logger) error {
 		gateway.WithRegion(cfg.Region),
 		gateway.WithAdminToken(cfg.AdminToken),
 	)
+	srv.BodyReadTimeout = cfg.BodyReadTimeout
+	srv.WriteIdleTimeout = cfg.WriteIdleTimeout
 	if cfg.AdminToken != "" {
 		logger.Warn("admin endpoints enabled: readiness can be failed on purpose with the admin token")
 	}

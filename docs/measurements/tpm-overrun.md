@@ -80,6 +80,11 @@ tokens held in flight, or when any reconciliation failed.
 
 ## Results
 
+The [shared-store-clock](shared-store-clock.md#tpm-reconciliation) and
+[reservation-settlement](reservation-settlement.md#local-tpm-run-2026-10-20)
+reports record the 2026-10-20 runs. The values below retain their 2026-09-28
+conditions.
+
 Runs of 2026-09-28. Every run: k6 thresholds passed, `verify-tpm.sh` OK.
 
 | Run | Latency | Arm | Charge / actual | Admitted (k6 = mock = events) | Rejected | Σcharged | Σactual | End overrun | Peak overrun | Max in flight | Shortfall vs nominal |

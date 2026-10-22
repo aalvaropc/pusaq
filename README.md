@@ -1,53 +1,65 @@
 # Pusaq
 
-A Go gateway for OpenAI-compatible chat completions. Put it between your app
-and model providers to control access, quotas, routing and cost.
+[![CI](https://github.com/aalvaropc/pusaq/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aalvaropc/pusaq/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/aalvaropc/pusaq)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**One gateway for model routing, tenant quotas and AI cost accounting.**
+
+Point your app at Pusaq's OpenAI-compatible chat endpoint. Choose a model
+alias; Pusaq handles access, limits and provider fallback.
+
+[Documentation](docs/README.md) · [Configuration](docs/configuration.md) · [Security](SECURITY.md)
 
 ```text
-Your app → Pusaq → Model providers
+Your app → Pusaq → Primary provider
+                ↘ Fallback providers
 ```
 
-## Capabilities
+## What you get
 
-- Configurable model aliases, routing rules, circuit breakers and fallback.
-- Tenant API keys, model permissions and monthly spending limits.
-- Request and token quotas enforced through atomic Redis Lua scripts.
-- Buffered and SSE responses, token usage and cost events.
-- Content rules for sensitive data, injection phrases and temporal queries.
+| Capability | Included |
+|---|---|
+| Routing | Configurable aliases, feature rules, circuit breakers and fallback |
+| Tenant controls | API keys, model permissions and monthly spending limits |
+| Quotas | Request and token buckets with atomic Redis operations |
+| Visibility | Buffered and SSE responses, token usage and JSON cost events |
+| Policy filter | Content heuristics and a semantic cache in shadow mode |
 
-## Run locally
+## Quick start
 
-Requires Docker Compose and Make. The default stack starts the gateway,
-Redis and mock providers; no provider API key is needed.
+Requires Docker Compose, Make and curl. Starts Redis and mock providers with no
+provider API key or cloud account.
 
 ```sh
 git clone https://github.com/aalvaropc/pusaq.git
 cd pusaq
 make up
+curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://localhost:8080/readyz
 
-curl http://localhost:8080/v1/chat/completions \
+curl --fail-with-body http://localhost:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-Use `http://localhost:8080/v1` as your client's base URL and a configured
-alias such as `pusaq/fast` as the model. Run `make down` to stop the stack.
+Client base URL: `http://localhost:8080/v1`. Model: `pusaq/fast`,
+`pusaq/best` or `pusaq/auto`. Stop with `make down`.
 
-## Limits
+The local stack explicitly enables **unauthenticated development mode** and
+binds ports to loopback. Outside that mode, API keys are required. See
+[setup and authentication](docs/operations.md#local-environment).
 
-The API supports chat completions and SSE; tool calling and structured
-outputs are not implemented. The semantic cache runs in shadow mode and
-never serves responses. Content rules are heuristics. Quotas are regional
-during failover, and abrupt regional failures can interrupt streams.
+## Scope
 
-## Development and docs
+Supports a [chat-completions subset](docs/gateway.md#api); tool calling and
+structured outputs are not implemented. The cache never serves responses.
+Quotas are regional during failover; abrupt failures can interrupt streams.
 
-Go 1.26+ is required for local development. Run `make test` for tests with
-the race detector and `make lint` for static checks.
+## Development
 
-- [Gateway](docs/gateway.md) · [Configuration](docs/configuration.md)
-- [Architecture](docs/design.md) · [Operations](docs/operations.md)
-- [Measurement reports](docs/measurements/): results, commands and limitations
+Requires **Go 1.26.10+**. Run `make test` for race tests and `make lint` for
+static checks. See [operations](docs/operations.md) and
+[measured results](docs/measurements/README.md) for commands and limitations.
 
 ## License
 

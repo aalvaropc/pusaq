@@ -88,12 +88,22 @@ Every shadow evaluation with at least one candidate neighbor SHALL record: the r
 
 ### Requirement: The index is bounded
 
-The shadow index SHALL cap its entry count and evict least-recently-used entries at the cap. The cap SHALL be configurable.
+The shadow index SHALL cap both entry count and retained data bytes, evicting least-recently-used entries to satisfy both caps. It SHALL retain vectors and fingerprints without raw prompts and SHALL release references on eviction. The default retained-data budget SHALL be 64 MiB, configurable as a positive byte count. An individual entry exceeding that budget SHALL be skipped and counted.
 
 #### Scenario: Cap enforced
 
 - **WHEN** the index is at capacity and a new entry is inserted
 - **THEN** the least-recently-used entry is evicted and the count stays at the cap
+
+#### Scenario: Byte cap enforced
+
+- **WHEN** an entry fits the byte budget but requires eviction
+- **THEN** enough least-recently-used entries are removed to keep retained data within the configured cap
+
+#### Scenario: Oversized entry is skipped
+
+- **WHEN** one entry exceeds the entire byte budget
+- **THEN** it is not inserted and a skip is counted without changing the served response
 
 ### Requirement: τ is chosen by reproducible calibration with a precision floor
 
@@ -116,7 +126,7 @@ The similarity threshold τ SHALL be chosen by a calibration procedure over a la
 
 ### Requirement: The embedder is configured on its own
 
-The shadow cache SHALL embed with the local embedder by default, or with an OpenAI-compatible endpoint given by its own base URL, model, and optional bearer key, which it calls at the base URL followed by `/embeddings`. The embedder SHALL NOT depend on the chat upstreams. Its key SHALL never appear in logs or cost events, configuration errors SHALL never echo its URL, and a key without an endpoint embedder SHALL fail startup.
+The shadow cache SHALL embed with the local embedder by default, or with an OpenAI-compatible endpoint given by its own base URL, model, and optional bearer key, which it calls at the base URL followed by `/embeddings`. The embedder SHALL NOT depend on the chat upstreams. Its endpoint SHALL follow the same URL and credential-transport restrictions as provider endpoints, and its client SHALL reject redirects without resending its payload or credentials. Its key SHALL never appear in logs or cost events, configuration errors SHALL never echo its URL, and a key without an endpoint embedder SHALL fail startup.
 
 #### Scenario: Endpoint embedder
 
@@ -127,3 +137,17 @@ The shadow cache SHALL embed with the local embedder by default, or with an Open
 
 - **WHEN** the embedder endpoint is not an absolute URL, has no model, or a key is set for the local embedder
 - **THEN** the gateway fails to start, and the error does not contain the URL
+
+### Requirement: Pending shadow samples have a byte budget
+
+Queued and in-progress shadow samples SHALL share a positive configurable retained-data budget, defaulting to 16 MiB. Samples that exceed available capacity SHALL be dropped and counted without waiting for a worker. Capacity SHALL be returned on processing completion or failed enqueue. Closing the evaluator concurrently with an offer SHALL not panic or retain unprocessed samples.
+
+#### Scenario: Pending prompt bytes exceed capacity
+
+- **WHEN** an offer exceeds the available byte budget even though a queue slot exists
+- **THEN** it is dropped immediately and counted
+
+#### Scenario: Processing and shutdown return capacity
+
+- **WHEN** accepted evaluations complete or the evaluator drains during shutdown
+- **THEN** their reserved bytes are returned and the index retains no raw prompt

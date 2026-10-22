@@ -7,6 +7,7 @@ package gateway
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"math"
@@ -20,8 +21,6 @@ import (
 	"github.com/aalvaropc/pusaq/internal/core"
 )
 
-// maxBodyBytes bounds every request body before the tenant is known; the
-// per-tenant prompt cap applies after authentication.
 const maxBodyBytes = 1 << 20 // 1 MiB
 
 // RegionHeader reports the region label of the replica that answered
@@ -37,11 +36,6 @@ const maxLabelLen = 64
 
 var labelChars = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// runIDFromPayload reads metadata.run_id before the request is admitted, so
-// every cost event of the request — including a rejection by an early stage
-// such as the rate limiter — carries the run it belongs to. Absent means
-// untagged; a non-string or oversized value is a client error. A body that
-// is not JSON at all is left for the operation to report.
 func runIDFromPayload(body []byte) (string, error) {
 	var envelope struct {
 		Metadata struct {
@@ -67,10 +61,12 @@ func runIDFromPayload(body []byte) (string, error) {
 
 // Server wires the pipeline into an http.Handler and controls readiness.
 type Server struct {
-	logger   *slog.Logger
-	pipeline core.Stage
-	ready    atomic.Bool
-	mux      *http.ServeMux
+	BodyReadTimeout  time.Duration
+	WriteIdleTimeout time.Duration
+	logger           *slog.Logger
+	pipeline         core.Stage
+	ready            atomic.Bool
+	mux              *http.ServeMux
 
 	region     string
 	adminToken string
@@ -101,7 +97,7 @@ func WithAdminToken(token string) ServerOption {
 // the terminal handler for chat completions. The server starts not-ready;
 // call SetReady(true) once serving begins.
 func NewServer(logger *slog.Logger, pipeline core.Stage, completions core.Handler, opts ...ServerOption) *Server {
-	s := &Server{logger: logger, pipeline: pipeline, mux: http.NewServeMux(), now: time.Now}
+	s := &Server{BodyReadTimeout: 10 * time.Second, WriteIdleTimeout: 30 * time.Second, logger: logger, pipeline: pipeline, mux: http.NewServeMux(), now: time.Now}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -227,7 +223,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, v any) {
 // handler, stamps the request-ID header on every outcome, and renders
 // normalized errors.
 func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler {
-	h := s.pipeline(terminal)
+	h := s.pipeline(loadPayload(terminal))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// An injected not-ready window refuses requests before admission:
 		// no cost event, a retry hint for the window's remainder. Requests
@@ -237,28 +233,33 @@ func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler 
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
-		if err != nil {
-			s.writeError(w, "", core.NewError(core.CodeInvalidRequest, "failed to read request body"))
-			return
+		payloadIncomplete := true
+		req := &core.Request{ArrivedAt: time.Now().UTC(), Op: op}
+		req.ReadPayload = func() ([]byte, error) {
+			rc := http.NewResponseController(w)
+			if err := rc.SetReadDeadline(time.Now().Add(s.BodyReadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				return nil, core.NewError(core.CodeInvalidRequest, "failed to read request body")
+			}
+			defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
+			body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+			if err != nil {
+				return nil, core.NewError(core.CodeInvalidRequest, "failed to read request body")
+			}
+			if len(body) > maxBodyBytes {
+				return nil, core.NewError(core.CodeInvalidRequest, "request body too large")
+			}
+			payloadIncomplete = false
+			return body, nil
 		}
-		if len(body) > maxBodyBytes {
-			s.writeError(w, "", core.NewError(core.CodeInvalidRequest, "request body too large"))
-			return
-		}
-
-		runID, err := runIDFromPayload(body)
-		if err != nil {
-			s.writeError(w, "", err.(*core.Error))
-			return
-		}
-
-		req := &core.Request{ArrivedAt: time.Now().UTC(), Op: op, Payload: body, RunID: runID}
 		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 			req.APIKey = strings.TrimSpace(token)
 		}
 		resp, err := h(r.Context(), req)
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.WriteIdleTimeout))
 		if err != nil {
+			if r.ProtoMajor == 1 && payloadIncomplete {
+				w.Header().Set("Connection", "close")
+			}
 			// After model resolution, even errors report the attempted model.
 			if req.ServedModel != "" {
 				w.Header().Set(ServedModelHeader, req.ServedModel)
@@ -298,10 +299,13 @@ func (s *Server) copyStream(w http.ResponseWriter, stream io.ReadCloser) {
 	for {
 		n, err := stream.Read(buf)
 		if n > 0 {
+			_ = rc.SetWriteDeadline(time.Now().Add(s.WriteIdleTimeout))
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				return // client went away; Close marks the interruption
 			}
-			_ = rc.Flush()
+			if rc.Flush() != nil {
+				return
+			}
 		}
 		if err != nil {
 			return

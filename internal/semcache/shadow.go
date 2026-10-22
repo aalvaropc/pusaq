@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,19 +38,28 @@ type Shadow struct {
 	logger   *slog.Logger
 	tau      float64
 
-	queue   chan Sample
-	dropped atomic.Uint64
-	skipped atomic.Uint64
-	wg      sync.WaitGroup
+	intake       sync.RWMutex
+	closed       bool
+	maxBytes     int64
+	pendingBytes atomic.Int64
+	queue        chan Sample
+	dropped      atomic.Uint64
+	skipped      atomic.Uint64
+	wg           sync.WaitGroup
 
 	closeOnce sync.Once
 }
 
 // NewShadow starts a shadow evaluator with the given worker count and
 // queue capacity.
-func NewShadow(embedder embed.Embedder, index *Index, logger *slog.Logger, tau float64, workers, queueCap int) *Shadow {
+func NewShadow(embedder embed.Embedder, index *Index, logger *slog.Logger, tau float64, workers, queueCap int, byteLimits ...int64) *Shadow {
+	maxBytes := int64(16 << 20)
+	if len(byteLimits) > 0 {
+		maxBytes = byteLimits[0]
+	}
 	s := &Shadow{
 		embedder: embedder,
+		maxBytes: maxBytes,
 		index:    index,
 		logger:   logger,
 		tau:      tau,
@@ -65,23 +75,48 @@ func NewShadow(embedder embed.Embedder, index *Index, logger *slog.Logger, tau f
 // Offer enqueues a sample without ever blocking; saturation drops it and
 // counts the drop.
 func (s *Shadow) Offer(sample Sample) {
+	s.intake.RLock()
+	defer s.intake.RUnlock()
+	if s.closed {
+		s.dropped.Add(1)
+		return
+	}
+	size := sampleBytes(sample)
+	for {
+		current := s.pendingBytes.Load()
+		if size > s.maxBytes-current {
+			s.dropped.Add(1)
+			return
+		}
+		if s.pendingBytes.CompareAndSwap(current, current+size) {
+			break
+		}
+	}
+	sample.Prompt = strings.Clone(sample.Prompt)
+	sample.RequestID = strings.Clone(sample.RequestID)
+	sample.Namespace = strings.Clone(sample.Namespace)
+	sample.Fingerprint = strings.Clone(sample.Fingerprint)
 	select {
 	case s.queue <- sample:
 	default:
+		s.pendingBytes.Add(-size)
 		s.dropped.Add(1)
 	}
 }
 
-// Dropped reports samples lost to saturation; Skipped reports evaluations
-// abandoned on embedder failure.
+func sampleBytes(sample Sample) int64 {
+	return int64(len(sample.Prompt)) + int64(len(sample.RequestID)) + int64(len(sample.Namespace)) + int64(len(sample.Fingerprint))
+}
+
+// Dropped reports samples lost to saturation or closed intake.
 func (s *Shadow) Dropped() uint64 { return s.dropped.Load() }
 
-// Skipped reports evaluations abandoned because the embedder failed.
+// Skipped reports evaluations abandoned without an index insertion.
 func (s *Shadow) Skipped() uint64 { return s.skipped.Load() }
 
 // Close stops intake and waits for queued evaluations to finish.
 func (s *Shadow) Close() {
-	s.closeOnce.Do(func() { close(s.queue) })
+	s.closeOnce.Do(func() { s.intake.Lock(); s.closed = true; close(s.queue); s.intake.Unlock() })
 	s.wg.Wait()
 }
 
@@ -89,6 +124,7 @@ func (s *Shadow) worker() {
 	defer s.wg.Done()
 	for sample := range s.queue {
 		s.evaluate(sample)
+		s.pendingBytes.Add(-sampleBytes(sample))
 	}
 }
 
@@ -124,13 +160,14 @@ func (s *Shadow) evaluate(sample Sample) {
 		)
 	}
 
-	s.index.Insert(&Entry{
+	if !s.index.Insert(&Entry{
 		ID:          sample.RequestID,
 		Namespace:   sample.Namespace,
 		Vector:      vec,
-		Prompt:      sample.Prompt,
 		Fingerprint: sample.Fingerprint,
-	})
+	}) {
+		s.skipped.Add(1)
+	}
 }
 
 // PolicyVersion names the generation of eligibility rules entries were
