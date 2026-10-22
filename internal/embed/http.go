@@ -30,7 +30,7 @@ func NewHTTP(name, baseURL, model, apiKey string, timeout time.Duration) *HTTP {
 		baseURL: baseURL,
 		model:   model,
 		apiKey:  apiKey,
-		client:  &http.Client{Timeout: timeout},
+		client:  &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 }
 

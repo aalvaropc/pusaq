@@ -1,10 +1,14 @@
 package gateway
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"hash"
 	"io"
 	"log/slog"
 	"net/http"
@@ -437,14 +441,14 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 			opts.Logger.Warn("token limiter store unavailable, failing closed",
 				slog.String("request_id", req.ID),
 				slog.String("tenant", req.Tenant),
-				slog.Any("error", err),
+				slog.String("error_code", string(core.AsError(err).Code)),
 			)
 			return &core.Error{Code: core.CodeStoreUnavailable, Message: "token limiter store unavailable", Err: err}
 		}
 		opts.Logger.Warn("token limiter store unavailable, failing open",
 			slog.String("request_id", req.ID),
 			slog.String("tenant", req.Tenant),
-			slog.Any("error", err),
+			slog.String("error_code", string(core.AsError(err).Code)),
 		)
 		return nil
 	}
@@ -472,7 +476,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 			opts.Logger.Warn("token reconciliation failed; charge stands until bucket TTL",
 				slog.String("request_id", req.ID),
 				slog.String("tenant", req.Tenant),
-				slog.Any("error", err),
+				slog.String("error_code", string(core.AsError(err).Code)),
 			)
 		}
 	})
@@ -523,7 +527,7 @@ func viaChain[T any](ctx context.Context, providers map[string]provider.Provider
 		}
 		lastErr = err
 		opts.Logger.Warn("backend failed, trying next",
-			slog.String("request_id", req.ID), slog.String("backend", backend), slog.Any("error", err))
+			slog.String("request_id", req.ID), slog.String("backend", backend), slog.String("error_code", string(core.AsError(err).Code)))
 	}
 	if lastErr != nil {
 		return zero, nil, lastErr
@@ -580,33 +584,29 @@ var errEventTooLarge = errors.New("upstream stream event exceeds 1 MiB")
 
 const streamErrorEvent = "\n\ndata: " + `{"error":{"code":"upstream_error","message":"upstream stream failed"}}` + "\n\n"
 
-// usageScanningStream forwards SSE bytes untouched while parsing events for
-// the usage object (landed on the envelope), the delta content (for the
-// response fingerprint), and the [DONE] mark. A stream that fails upstream
-// or ends without [DONE] gets one terminal error event before its error; a
-// client disconnect gets nothing.
 type usageScanningStream struct {
-	inner   io.ReadCloser
-	req     *core.Request
-	line    []byte
-	data    []byte
-	hasData bool
-	cr      bool
-	content strings.Builder
-	done    bool
-	failed  bool
-	tail    []byte
-	err     error
+	inner      io.ReadCloser
+	req        *core.Request
+	reader     *bufio.Reader
+	event      []byte
+	data       []byte
+	hasData    bool
+	eventError bool
+	digest     hash.Hash
+	ready      []byte
+	done       bool
+	failed     bool
+	err        error
 }
 
-// completed reports whether the stream reached its [DONE] terminator — the
-// gate that keeps aborted streams out of the shadow cache.
 func (u *usageScanningStream) completed() bool { return u.done }
 
-// contentFingerprint hashes the content the scanner has seen; called at
-// finalize time, after the stream ended.
 func (u *usageScanningStream) contentFingerprint() string {
-	return semcache.Fingerprint(u.content.String())
+	if u.digest == nil {
+		sum := sha256.Sum256(nil)
+		return hex.EncodeToString(sum[:8])
+	}
+	return hex.EncodeToString(u.digest.Sum(nil)[:8])
 }
 
 func (u *usageScanningStream) settle(br *breaker.Breaker) {
@@ -622,82 +622,82 @@ func (u *usageScanningStream) settle(br *breaker.Breaker) {
 }
 
 func (u *usageScanningStream) Read(p []byte) (int, error) {
-	if u.err != nil {
-		n := copy(p, u.tail)
-		u.tail = u.tail[n:]
-		if len(u.tail) > 0 {
-			return n, nil
-		}
-		return n, u.err
+	if len(p) == 0 {
+		return 0, nil
 	}
-	n, err := u.inner.Read(p)
-	if n > 0 && !u.done {
-		if scanErr := u.scan(p[:n]); scanErr != nil {
-			err = scanErr
-		}
+	if u.reader == nil {
+		u.reader = bufio.NewReaderSize(u.inner, 4096)
 	}
-	if err != nil {
-		u.end(err)
-		if n == 0 {
-			return u.Read(p)
-		}
+	for len(u.ready) == 0 && u.err == nil {
+		u.readEvent()
 	}
-	return n, nil
+	if len(u.ready) > 0 {
+		n := copy(p, u.ready)
+		u.ready = u.ready[n:]
+		return n, nil
+	}
+	return 0, u.err
 }
 
 func (u *usageScanningStream) Close() error { return u.inner.Close() }
 
-func (u *usageScanningStream) end(err error) {
-	if errors.Is(err, io.EOF) {
-		u.flush()
-	}
-	switch {
-	case u.done:
-		u.err = io.EOF
-	case errors.Is(err, context.Canceled):
-		u.err = err
-	default:
-		if errors.Is(err, io.EOF) {
-			err = io.ErrUnexpectedEOF
+func (u *usageScanningStream) readEvent() {
+	u.event, u.data = u.event[:0], u.data[:0]
+	u.hasData, u.eventError = false, false
+	for {
+		line, terminated, err := u.readLine()
+		if err != nil && !errors.Is(err, io.EOF) {
+			u.end(err)
+			return
 		}
-		u.failed, u.tail, u.err = true, []byte(streamErrorEvent), err
+		if len(line) > 0 {
+			u.consume(line)
+		}
+		if (terminated && len(line) == 0) || errors.Is(err, io.EOF) {
+			if dispatchErr := u.dispatch(); dispatchErr != nil {
+				u.end(dispatchErr)
+				return
+			}
+			u.ready = u.event
+			if u.done || errors.Is(err, io.EOF) {
+				u.end(io.EOF)
+			}
+			return
+		}
 	}
 }
 
-// scan splits bytes into lines on any SSE terminator (CRLF, LF, CR); a CR at
-// the end of a read waits for the next byte to tell CRLF from CR.
-func (u *usageScanningStream) scan(b []byte) error {
-	if u.cr && b[0] == '\n' {
-		b = b[1:]
-	}
-	u.cr = false
-	for len(b) > 0 {
-		i := bytes.IndexAny(b, "\r\n")
-		if i < 0 {
-			u.line = append(u.line, b...)
-			break
+func (u *usageScanningStream) readLine() ([]byte, bool, error) {
+	start := len(u.event)
+	for {
+		b, err := u.reader.ReadByte()
+		if err != nil {
+			return u.event[start:], false, err
 		}
-		u.line = append(u.line, b[:i]...)
-		u.consume(u.line)
-		u.line = u.line[:0]
-		if b[i] == '\r' {
-			if i+1 == len(b) {
-				u.cr = true
-			} else if b[i+1] == '\n' {
-				i++
+		if len(u.event) >= maxEventBytes {
+			return nil, false, errEventTooLarge
+		}
+		u.event = append(u.event, b)
+		if b != '\r' && b != '\n' {
+			continue
+		}
+		end := len(u.event) - 1
+		if b == '\r' {
+			if next, err := u.reader.Peek(1); err == nil && next[0] == '\n' {
+				if len(u.event) >= maxEventBytes {
+					return nil, false, errEventTooLarge
+				}
+				_, _ = u.reader.ReadByte()
+				u.event = append(u.event, '\n')
 			}
 		}
-		b = b[i+1:]
+		return u.event[start:end], true, nil
 	}
-	if len(u.line)+len(u.data) > maxEventBytes {
-		return errEventTooLarge
-	}
-	return nil
 }
 
 func (u *usageScanningStream) consume(line []byte) {
-	if len(line) == 0 {
-		u.dispatch()
+	if value, ok := bytes.CutPrefix(line, []byte("event:")); ok {
+		u.eventError = bytes.Equal(bytes.TrimSpace(value), []byte("error"))
 		return
 	}
 	value, ok := bytes.CutPrefix(line, []byte("data:"))
@@ -711,26 +711,21 @@ func (u *usageScanningStream) consume(line []byte) {
 	u.hasData = true
 }
 
-func (u *usageScanningStream) flush() {
-	if len(u.line) > 0 {
-		u.consume(u.line)
-		u.line = u.line[:0]
+func (u *usageScanningStream) dispatch() error {
+	if u.eventError {
+		return errors.New("upstream stream error event")
 	}
-	u.dispatch()
-}
-
-func (u *usageScanningStream) dispatch() {
 	if !u.hasData {
-		return
+		return nil
 	}
 	data := bytes.TrimSpace(u.data)
-	u.data, u.hasData = u.data[:0], false
 	if bytes.Equal(data, []byte("[DONE]")) {
 		u.done = true
-		return
+		return nil
 	}
 	var chunk struct {
-		Usage   *core.Usage `json:"usage"`
+		Error   json.RawMessage `json:"error"`
+		Usage   *core.Usage     `json:"usage"`
 		Choices []struct {
 			Delta struct {
 				Content string `json:"content"`
@@ -738,12 +733,34 @@ func (u *usageScanningStream) dispatch() {
 		} `json:"choices"`
 	}
 	if json.Unmarshal(data, &chunk) != nil {
-		return
+		return nil
+	}
+	if len(chunk.Error) > 0 && !bytes.Equal(bytes.TrimSpace(chunk.Error), []byte("null")) {
+		return errors.New("upstream stream error event")
 	}
 	if chunk.Usage != nil {
 		u.req.Usage = *chunk.Usage
 	}
-	for _, c := range chunk.Choices {
-		u.content.WriteString(c.Delta.Content)
+	if u.digest == nil {
+		u.digest = sha256.New()
+	}
+	for _, choice := range chunk.Choices {
+		_, _ = u.digest.Write([]byte(choice.Delta.Content))
+	}
+	return nil
+}
+
+func (u *usageScanningStream) end(err error) {
+	switch {
+	case u.done:
+		u.err = io.EOF
+	case errors.Is(err, context.Canceled):
+		u.err = err
+	default:
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
+		}
+		u.failed, u.err = true, err
+		u.ready = append(u.ready, streamErrorEvent...)
 	}
 }

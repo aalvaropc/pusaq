@@ -69,7 +69,7 @@ down: ## Stop local environment
 	docker compose down
 
 run: ## Run the gateway locally
-	go run ./cmd/pusaq
+	PUSAQ_DEV_MODE=true go run ./cmd/pusaq
 
 mock: ## Run the mock provider locally
 	go run ./cmd/mockprovider --latency-p50 200ms --latency-p99 2s

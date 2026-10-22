@@ -50,6 +50,7 @@ const DevTenant = core.DevTenant
 // downstream stage runs; with no keys, every request belongs to DevTenant.
 func Auth(apiKeys map[string]string) core.Stage {
 	return func(next core.Handler) core.Handler {
+		next = loadPayload(next)
 		return func(ctx context.Context, req *core.Request) (*core.Response, error) {
 			if len(apiKeys) == 0 {
 				req.Tenant = DevTenant
@@ -96,14 +97,14 @@ func RateLimit(limiter Admitter, policies PolicyFor, logger *slog.Logger) core.S
 					logger.Warn("rate limiter store unavailable, failing closed",
 						slog.String("request_id", req.ID),
 						slog.String("tenant", req.Tenant),
-						slog.Any("error", err),
+						slog.String("error_code", string(core.AsError(err).Code)),
 					)
 					return nil, &core.Error{Code: core.CodeStoreUnavailable, Message: "rate limiter store unavailable", Err: err}
 				}
 				logger.Warn("rate limiter store unavailable, failing open",
 					slog.String("request_id", req.ID),
 					slog.String("tenant", req.Tenant),
-					slog.Any("error", err),
+					slog.String("error_code", string(core.AsError(err).Code)),
 				)
 				return next(ctx, req)
 			}
@@ -160,7 +161,6 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					logger.Error("panic recovered",
 						slog.String("request_id", req.ID),
 						slog.String("op", req.Op),
-						slog.Any("panic", r),
 					)
 					event.Outcome = core.OutcomePanic
 					event.ErrorCode = core.CodeInternal
@@ -258,4 +258,23 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			SpendUSDMonth:  f.req.SpendUSDMonth,
 		})
 	})
+}
+
+func loadPayload(next core.Handler) core.Handler {
+	return func(ctx context.Context, req *core.Request) (*core.Response, error) {
+		if req.ReadPayload != nil {
+			read := req.ReadPayload
+			req.ReadPayload = nil
+			body, err := read()
+			if err != nil {
+				return nil, err
+			}
+			runID, err := runIDFromPayload(body)
+			if err != nil {
+				return nil, err
+			}
+			req.Payload, req.RunID = body, runID
+		}
+		return next(ctx, req)
+	}
 }

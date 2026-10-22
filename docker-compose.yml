@@ -45,6 +45,7 @@ services:
       context: .
       target: pusaq
     environment:
+      PUSAQ_DEV_MODE: "true"
       PUSAQ_REDIS_ADDR: redis:6379
       PUSAQ_UPSTREAMS: mock=http://mockprovider:9090/v1,backup=http://mockbackup:9090/v1
       PUSAQ_RPM_LIMIT: "60"
