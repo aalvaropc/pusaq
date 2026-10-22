@@ -130,9 +130,9 @@ is at 0.252 s; the longest interval between successful sends is 0.501 s.
 These are local harness observations, not cloud failover guarantees. They
 do not exercise a hard regional outage or loss of an in-flight stream.
 
-## Repository checks
+## Repository checks, 2026-10-20
 
-All Go packages pass `make test` with the race detector (256 test functions
-in the repository), and all 53 measurement fixture checks pass.
+At the recorded checkout, all Go packages pass `make test` with the race
+detector (256 test functions), and all 53 measurement fixture checks pass.
 `make lint`, `shellcheck loadtest/*.sh`, `go build ./...`, documentation
 lint and strict OpenSpec validation pass locally.

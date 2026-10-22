@@ -1,49 +1,101 @@
 # Gateway reference
 
-How the gateway behaves, mechanism by mechanism. Every variable named here is listed in [configuration.md](configuration.md); the measurements that back the claims are in [measurements/](measurements/).
+Request and response contracts for the implemented gateway. See
+[configuration](configuration.md) for environment variables,
+[operations](operations.md) for setup, and
+[measurements](measurements/README.md) for dated evidence.
 
 ## API
 
-`POST /v1/chat/completions` — OpenAI request subset (`model`, `messages`,
-`max_tokens`, `temperature`, `stream`, `metadata`). `max_tokens`, when
-present, is a positive integer. `temperature` is forwarded to the provider
-exactly as sent (an explicit 0 included) and is part of the cache key.
-Fields that would change the response contract — `tools`, `tool_choice`,
-`response_format`, `n` other than 1, `logprobs`, `audio`, message
-`tool_calls`/`tool_call_id`, content given as an array of parts, and the
-rest of that family — are rejected with 400 `invalid_request` naming the
-field; other fields are ignored, and a field set to `null` or `false`
-counts as absent. With `"stream": true` the response is Server-Sent
-Events: `chat.completion.chunk` deltas passed through from the provider,
-a final usage chunk (requested upstream with `stream_options.include_usage`),
-then `data: [DONE]`. A stream completes only with `[DONE]`: when the provider
-fails mid-stream, ends without `[DONE]`, or sends an event over 1 MiB, the
-stream ends with one event carrying the error shape below with code
-`upstream_error`, and no `[DONE]`. The `model` field takes an alias:
-`pusaq/fast` and `pusaq/best` resolve to physical models in configuration;
-`pusaq/auto` resolves through routing rules keyed by the request's
-`metadata.feature_tag` (`PUSAQ_ROUTING_RULES`, default
-`classify`/`extract` → fast, `reason`/`code` → best, everything else →
-fast). Responses carry `X-Pusaq-Model` (the physical model served),
-`X-Pusaq-Route-Reason` (`direct`, `rule:<tag>`, `default:untagged`, or
-`default:unknown_tag`), `X-Pusaq-Request-Id`, and — when the replica is
-labeled with `PUSAQ_REGION` — `X-Pusaq-Region`; the cost event records the
-same as `route_reason`, `feature_tag`, and `region`. A feature tag is at
-most 64 letters, digits, `.`, `_` or `-`; anything else is 400. A request may declare
-`metadata.run_id` (a string of at most 64 characters), read before
-admission and recorded on its cost event as `run_id` — also when the rate
-limiter rejects it — so a measurement run can be read back from the events.
-All errors share one JSON shape: `{"error":{"code":"...","message":"..."}}`
-— provider failures surface as `upstream_error` (502) and a provider's
-rejection of the request (400, 413, 422) as `invalid_request` (400), neither
-leaking upstream responses; a request whose client left before any answer is
-recorded as `client_canceled`; a tenant policy denial is `policy_denied` (403); an
-exhausted monthly budget is `budget_exceeded` (402, with `retry_after_ms`
-until the next UTC month); a store outage for a fail-closed tenant is
-`store_unavailable` (503); a replica inside an injected not-ready window
-answers `not_ready` (503, with `Retry-After`).
+`POST /v1/chat/completions` accepts this OpenAI-compatible subset:
 
-### Rate limiting
+| Field | Contract |
+|---|---|
+| `model` | Required alias: `pusaq/fast`, `pusaq/best` or `pusaq/auto`. Physical models are configuration. |
+| `messages` | Required nonempty array; message content is a string. |
+| `max_tokens` | Optional positive integer; also determines the output reservation. |
+| `temperature` | Optional number forwarded as sent, including explicit zero; omission has its own cache namespace. |
+| `stream` | Optional boolean; `true` selects Server-Sent Events. |
+| `metadata.feature_tag` | Optional routing label, at most 64 letters, digits, `.`, `_` or `-`. |
+| `metadata.run_id` | Optional string, at most 64 bytes, recorded before RPM admission for measurement filtering. |
+
+The default `pusaq/auto` rules map `classify`/`extract` to `pusaq/fast`,
+`reason`/`code` to `pusaq/best`, and absent or unknown tags to `pusaq/fast`.
+`PUSAQ_ROUTING_RULES` replaces that table.
+
+Tool and function calling, `response_format`, multiple choices, logprobs,
+audio, non-text modalities, prediction, web search and
+`max_completion_tokens` are rejected with 400 `invalid_request` naming the
+unsupported field. Message tool/function/audio fields and arrays of content
+parts are also rejected. For unsupported fields, `null` or `false` is
+treated as absent; `n: 1` and `modalities: ["text"]` are harmless accepted
+values. Other unrecognized fields are ignored rather than forwarded.
+
+### Response headers
+
+| Header | Meaning |
+|---|---|
+| `X-Pusaq-Model` | Route's physical model; also present on errors after resolution. |
+| `X-Pusaq-Route-Reason` | `direct`, `rule:<tag>`, `default:untagged` or `default:unknown_tag`, once resolved. |
+| `X-Pusaq-Request-Id` | Correlation ID for requests that enter the accounting pipeline. |
+| `X-Pusaq-Region` | Replica label when `PUSAQ_REGION` is configured. |
+
+### Errors
+
+All gateway errors use `{"error":{"code":"...","message":"..."}}`.
+Retryable quota and readiness errors also carry `retry_after_ms` and a
+`Retry-After` header. Provider bodies and diagnostic strings are not exposed.
+
+| Code | HTTP status | Meaning |
+|---|---|---|
+| `invalid_request` | 400 | Invalid payload, unsupported field, oversized body or provider rejection (400/413/422). |
+| `unauthorized` | 401 | Missing or unknown tenant key. |
+| `budget_exceeded` | 402 | Monthly budget exhausted; retry guidance reaches the next UTC month. |
+| `policy_denied` | 403 | Tenant model, prompt-size or content policy rejected the request. |
+| `rate_limited` | 429 | Request or token bucket cannot admit the request. |
+| `client_canceled` | 499 | Client left before a response was established. |
+| `internal` | 500 | Internal failure normalized by the gateway. |
+| `upstream_error` | 502 | Provider transport, timeout, response or stream failure. |
+| `store_unavailable` | 503 | Store unavailable for a tenant configured to fail closed. |
+| `not_ready` | 503 | An injected readiness window refuses new requests before accounting. |
+
+### Streaming
+
+With `stream: true`, responses carry `text/event-stream`. The provider is
+asked for a usage chunk with `stream_options.include_usage`; a successful
+stream ends with `data: [DONE]`.
+
+Each complete SSE event is validated before forwarding. Event framing is
+capped at 1 MiB. A provider error event, premature EOF or oversized event
+terminates the stream with one generic `upstream_error` event and no
+`[DONE]`. An established stream is never retried on another backend.
+Content fingerprints are hashed incrementally without retaining the full
+response. A client disconnect or failed write/flush closes the upstream and
+finalizes accounting; interrupted streams record `stream_interrupted`.
+
+## Authentication and I/O limits
+
+Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`; clients send
+`Authorization: Bearer <key>`. Missing or unknown keys return 401 before the
+body is read, and their accounting events have no payload-derived run ID.
+
+Authenticated bodies are limited to 1 MiB and read within
+`PUSAQ_BODY_READ_TIMEOUT` (default 10 s). Body failures and malformed run IDs
+produce one accounted `invalid_request` error before RPM admission. Valid
+run IDs are retained even when RPM rejects the request. The body deadline
+is cleared before the response stream begins.
+
+`PUSAQ_WRITE_IDLE_TIMEOUT` defaults to 30 s per response write/flush and is
+refreshed during SSE. It is not a total stream lifetime limit. The HTTP
+server also uses a 10 s header timeout and a 120 s idle-connection timeout.
+
+With `PUSAQ_DEV_MODE=true` and `PUSAQ_API_KEYS` unset, requests belong to
+the unauthenticated `dev` tenant and startup logs a warning. Missing keys
+outside development mode, an empty key setting, or combining development
+mode with keys prevents startup. Configuration errors identify positions
+or tenants without printing keys. `/healthz` and `/readyz` are public.
+
+## Rate limiting
 
 With `PUSAQ_REDIS_ADDR` set, each tenant gets a token
 bucket in Redis decided by one atomic Lua script shared by every replica —
@@ -63,7 +115,8 @@ replica takes up to `PUSAQ_LEASE_SIZE` request tokens per round-trip and
 admits locally; unused tokens return when the lease passes `PUSAQ_LEASE_TTL`
 or the replica drains, and a store denial is cached locally until its retry
 time or the lease TTL, whichever is sooner. Cleanup revalidates entry ownership
-and never waits for a tenant while holding the shared tenant-map mutex. Cumulative admissions never exceed the bucket in either mode; in lease
+and never waits for a tenant while holding the shared tenant-map mutex.
+With successful store operations, admissions follow the bucket in both modes; in lease
 mode up to `replicas × lease size` tokens can sit unspent in leases at any
 moment, and a replica that dies without draining strands at most one lease
 per tenant (under-admission, never overrun). Lease mode covers request
@@ -73,17 +126,21 @@ the same load test.
 ### Token limits (TPM)
 
 Alongside RPM, each tenant has an LLM-token bucket.
-After model resolution a request is charged its input estimate (chars/4)
+After model resolution and tenant policy checks, a request is charged its
+input estimate (message role and content bytes divided by four, rounded up)
 plus an output reservation (`max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`);
 when actual usage is known the difference is reconciled back atomically —
 on success, on error, and at stream end. A confirmed reservation is fully
 returned if no provider was invoked. After any provider invocation, unknown
 usage keeps the charge, including errors, timeouts and abandoned streams.
 Every cost event records `tokens_charged` next to actual usage, so the
-estimate's error is measurable from the event stream. Under overload the
-tokens actually consumed stay within the bucket over the window; the peak
-excess is bounded by the reservation error of the requests admitted before
-reconciliation caught up (measured, see Measurements).
+estimate's error is measurable from the event stream. In the
+[mock experiment](measurements/tpm-overrun.md), window consumption stays
+within the stated tolerance and peak excess stays below the experiment's
+reservation-error bound. Those numerical bounds depend on the recorded
+usage and concurrency; the gateway does not know actual output length at
+admission.
+`tokens_charged` is the initial reservation, not net consumption after settlement.
 
 Refill uses Redis time inside each atomic Lua operation, with a timestamp
 that never moves backward. A stored timestamp ahead of Redis time pauses
@@ -91,7 +148,7 @@ refill until catch-up; retry times include that delay. Buckets retain their
 keys and balances across the change. This requires Redis 7 or newer; gateways
 sharing a bucket use the same implementation.
 
-### Resilience
+## Resilience
 
 Each upstream backend is guarded by a circuit breaker
 (closed / open / half-open). Defaults: opens on a >50% failure rate over a
@@ -111,17 +168,19 @@ and so does a client that leaves. Failover is observable per request: every
 cost event records `served_provider` and `attempts`. Backends come from
 `PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
 
-### Semantic cache (shadow mode)
+## Semantic cache (shadow mode)
 
 `PUSAQ_CACHE_MODE=shadow` turns on the
 measurement instrument: eligible completions are evaluated
-asynchronously — embed, nearest-neighbor within an exhaustive namespace
+asynchronously — embed, nearest-neighbor within a namespace
 (tenant | served model | system prompt | temperature | rules version),
 record, insert — without ever
-serving a cached answer and without touching request latency (bounded
-workers; saturation drops are counted). Every `cache_shadow` record carries
-`best_similarity` plus both response fingerprints, so precision/recall for
-any τ is computable offline from the log stream alone; `PUSAQ_CACHE_TAU`
+serving a cached answer. Bounded workers process samples independently of
+the provider response; saturated intake drops and counts samples.
+`cache_shadow` records are emitted when a neighbor exists and carry
+`best_similarity` plus both response fingerprints. Different fingerprints
+identify candidates for offline equivalence review; they do not prove a
+semantic false positive. `PUSAQ_CACHE_TAU`
 (default 0.95) only labels records. Embedders: `local` (deterministic,
 $0 — measures the machinery, not paraphrase quality) or
 `openai:<url>` + `PUSAQ_EMBED_MODEL` (and `PUSAQ_EMBED_KEY`) for real
@@ -134,6 +193,20 @@ event as `cache_skip`: `tenant_off` (policy `cache=off`), `multi_turn`,
 `temperature` (an explicit value above 0.7); an omitted temperature is
 eligible under its own key.
 
+The standalone default is `off`; Compose explicitly enables `shadow`.
+Namespaces also contain fixed `tools=none` and `format=none` markers.
+Language and an independent model version are not explicit namespace fields.
+The cache remains a measurement instrument and provides no serving guarantee.
+
+The index retains vectors, IDs, namespaces and fingerprints without raw
+prompts or responses. It has a 10,000-entry LRU cap and a separate 64 MiB
+retained-data cap by default. Queued and active samples temporarily retain
+eligible prompts for embedding within a shared 16 MiB budget, eight workers
+and a 256-item queue. An external embedder receives that eligible prompt.
+Evaluations have a 5 s context budget. Oversized index entries are skipped;
+saturated intake and skipped evaluations are counted at shutdown. These data
+caps exclude allocator and collection metadata and do not bound process RSS.
+
 ### Calibrating τ
 
 The threshold is never a judgment call: `make calibrate`
@@ -145,21 +218,7 @@ lexical, often cannot: that failure is the harness working). The seed
 dataset (60 pairs) exercises the harness; it is not a production corpus,
 and `PUSAQ_CACHE_TAU` only labels the shadow records.
 
-### Authentication
-
-Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
-clients send `Authorization: Bearer <key>`, and every cost event carries the
-tenant. Missing/unknown keys get a normalized `unauthorized` (401) before the body is read;
-those events have no payload-derived run ID. Authenticated payload failures
-produce one accounted `invalid_request` error. With
-`PUSAQ_DEV_MODE=true` and `PUSAQ_API_KEYS` unset the gateway runs in **dev mode** — no auth,
-everything attributed to the `dev` tenant, and a warning logged at startup;
-absent both settings or set but empty, it refuses to start. Development mode
-and configured API keys cannot be combined. Configuration errors name positions and
-tenants, never a key.
-`/healthz` and `/readyz` never require credentials.
-
-### Tenant policies
+## Tenant policies
 
 `PUSAQ_TENANT_POLICIES="tenant:key=value,...;tenant2:..."`
 gives a tenant up to seven policies: `models=pusaq/fast|pusaq/best` (the
@@ -167,15 +226,16 @@ concrete aliases it may be served by — `pusaq/auto` is checked against the
 alias it resolves to and denied rather than rerouted), `max_prompt_chars`
 (bytes of message content), `budget_usd` (monthly ceiling; spend is
 counted in Redis from `cost_usd` per completion, estimated ones included,
-read before admission, and
+read before token reservation and provider invocation, and
 reset at the UTC month boundary — requests already in flight when the
 budget is reached may complete, so the overrun is bounded by their cost),
 `fail_closed=true` (reject with 503 instead of admitting when the store
 is down), `sensitive=log|block` and `injection=log|block` (what a content
 rule match does: flag the event, the default, or answer 403), and
 `cache=on|off` (keep the tenant out of the semantic cache). Policies are
-enforced after the alias is resolved and before any token is charged, so a
-denied request costs nothing. Tenants without an entry are unrestricted.
+enforced after the alias is resolved and before TPM reservation or provider
+invocation. RPM admission has already counted the request. Tenants without
+an entry are unrestricted.
 Every entry is validated at startup; a budget needs `PUSAQ_PRICES` and
 `PUSAQ_REDIS_ADDR`. Budgeted tenants' cost events carry `spend_usd_month`.
 A request that a provider answered without usage (a stream without a usage
@@ -209,7 +269,15 @@ completions go to `POST <url>/chat/completions`, buffered or streamed. The
 shadow cache's `openai:<url>` embedder has its own base URL and calls
 `POST <url>/embeddings`. `PUSAQ_ROUTES` maps each alias to the physical
 model sent upstream. `PUSAQ_UPSTREAM_KEY_<NAME>` (the upper-cased upstream
-name) is the bearer key for that upstream and is never logged.
+name, with non-alphanumeric characters replaced by `_`) is the bearer key
+for that upstream and is never logged.
+
+Gateway configuration accepts only absolute HTTP/HTTPS bases without URL
+userinfo, queries or fragments. Provider and embedding API keys require
+HTTPS; explicit development mode permits keyed HTTP only on localhost or
+literal loopback addresses. Keyless HTTP mocks are supported. Both clients
+disable redirects, including 307 and 308, so a configured endpoint cannot
+redirect credentials or request payloads to another destination.
 
 ## Not implemented
 
@@ -218,10 +286,3 @@ text is never logged and flagged prompts never reach the cache); scanning
 responses for secrets; tool calling and response formats; and a standing
 deployment (the two-region runtime
 module exists for measurement runs only and is destroyed after each one).
-
-### Stream error handling
-
-The gateway validates each complete SSE event before forwarding it and limits
-event framing to 1 MiB. Provider error events are replaced by one generic
-`upstream_error`; no fallback occurs after streaming begins. Content fingerprints
-use incremental hashing, so the scanner does not retain the full response.

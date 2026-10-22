@@ -18,4 +18,3 @@ Every cost event SHALL include at least: request ID, timestamp, operation, tenan
 
 - **WHEN** a replica labeled `us-east1` serves a request whose `metadata.run_id` is `r1`, and the request fails after parsing
 - **THEN** its cost event carries `region` `us-east1` and `run_id` `r1`
-

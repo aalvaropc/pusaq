@@ -249,6 +249,8 @@ func TestLoad(t *testing.T) {
 			gotUpstreams := got.Upstreams
 			got.Routes, got.Upstreams = nil, nil
 			tt.want.DevMode = len(tt.want.APIKeys) == 0
+			tt.want.CacheMaxBytes = DefaultCacheMaxBytes
+			tt.want.CacheQueueMaxBytes = DefaultCacheQueueMaxBytes
 			tt.want.BodyReadTimeout = DefaultBodyReadTimeout
 			tt.want.WriteIdleTimeout = DefaultWriteIdleTimeout
 			if !reflect.DeepEqual(got, tt.want) {
@@ -294,7 +296,7 @@ func TestLoadExplicitDevelopmentMode(t *testing.T) {
 
 func TestUpstreamKeysAttached(t *testing.T) {
 	got, err := Load(developmentLookupFrom(map[string]string{
-		"PUSAQ_UPSTREAMS":           "gemini=http://g:1,mock=http://m:2",
+		"PUSAQ_UPSTREAMS":           "gemini=https://g:1,mock=http://m:2",
 		"PUSAQ_UPSTREAM_KEY_GEMINI": "sk-gem",
 	}))
 	if err != nil {

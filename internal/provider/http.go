@@ -49,8 +49,8 @@ func NewHTTP(name, baseURL string, timeout time.Duration, logger *slog.Logger, o
 	h := &HTTP{
 		name:         name,
 		baseURL:      baseURL,
-		client:       &http.Client{Timeout: timeout},
-		streamClient: &http.Client{Transport: streamTransport(timeout)},
+		client:       &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		streamClient: &http.Client{Transport: streamTransport(timeout), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		idleTimeout:  timeout,
 		logger:       logger,
 	}

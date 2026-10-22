@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"math"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -19,21 +20,23 @@ import (
 
 // Defaults applied when the corresponding variable is unset.
 const (
-	DefaultAddr             = ":8080"
-	DefaultDrainDelay       = 1 * time.Second
-	DefaultShutdownGrace    = 10 * time.Second
-	DefaultTelemetryBuffer  = 1024
-	DefaultUpstreamTimeout  = 30 * time.Second
-	DefaultBodyReadTimeout  = 10 * time.Second
-	DefaultWriteIdleTimeout = 30 * time.Second
-	DefaultRPMLimit         = 60.0
-	DefaultTPMLimit         = 100000.0
-	DefaultTPMReserve       = 512
-	DefaultBucketTTL        = 10 * time.Minute
-	DefaultCacheTau         = 0.95
-	DefaultCacheMaxEntries  = 10000
-	DefaultLeaseSize        = 10
-	DefaultLeaseTTL         = 1 * time.Second
+	DefaultAddr               = ":8080"
+	DefaultDrainDelay         = 1 * time.Second
+	DefaultShutdownGrace      = 10 * time.Second
+	DefaultTelemetryBuffer    = 1024
+	DefaultUpstreamTimeout    = 30 * time.Second
+	DefaultBodyReadTimeout    = 10 * time.Second
+	DefaultWriteIdleTimeout   = 30 * time.Second
+	DefaultRPMLimit           = 60.0
+	DefaultTPMLimit           = 100000.0
+	DefaultTPMReserve         = 512
+	DefaultBucketTTL          = 10 * time.Minute
+	DefaultCacheTau           = 0.95
+	DefaultCacheMaxEntries    = 10000
+	DefaultCacheMaxBytes      = 64 << 20
+	DefaultCacheQueueMaxBytes = 16 << 20
+	DefaultLeaseSize          = 10
+	DefaultLeaseTTL           = 1 * time.Second
 )
 
 // MinAdminTokenLen is the shortest PUSAQ_ADMIN_TOKEN accepted: the token
@@ -238,7 +241,9 @@ type Config struct {
 	// of other thresholds happen offline from the records.
 	CacheTau float64
 	// CacheMaxEntries caps the shadow index (PUSAQ_CACHE_MAX_ENTRIES).
-	CacheMaxEntries int
+	CacheMaxEntries    int
+	CacheMaxBytes      int64
+	CacheQueueMaxBytes int64
 	// EmbedderKind is "local" or "openai" (PUSAQ_EMBEDDER, "local" or
 	// "openai:<url>"); an openai embedder calls EmbedURL with EmbedModel
 	// (PUSAQ_EMBED_MODEL) and the bearer key EmbedKey (PUSAQ_EMBED_KEY),
@@ -546,6 +551,22 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 		cfg.CacheTau = n
 	}
+	cfg.CacheMaxBytes, cfg.CacheQueueMaxBytes = DefaultCacheMaxBytes, DefaultCacheQueueMaxBytes
+	for _, setting := range []struct {
+		name  string
+		value *int64
+	}{
+		{"PUSAQ_CACHE_MAX_BYTES", &cfg.CacheMaxBytes},
+		{"PUSAQ_CACHE_QUEUE_MAX_BYTES", &cfg.CacheQueueMaxBytes},
+	} {
+		if v, ok := lookup(setting.name); ok {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n <= 0 {
+				return Config{}, fmt.Errorf("%s: must be a positive byte count", setting.name)
+			}
+			*setting.value = n
+		}
+	}
 	cfg.CacheMaxEntries = DefaultCacheMaxEntries
 	if v, ok := lookup("PUSAQ_CACHE_MAX_ENTRIES"); ok {
 		n, err := strconv.Atoi(v)
@@ -557,8 +578,8 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	cfg.EmbedderKind = "local"
 	if v, ok := lookup("PUSAQ_EMBEDDER"); ok && v != "" && v != "local" {
 		rawURL, found := strings.CutPrefix(v, "openai:")
-		u, err := url.Parse(rawURL)
-		if !found || err != nil || u.Scheme == "" || u.Host == "" {
+		_, err := parseEndpoint(rawURL)
+		if !found || err != nil {
 			return Config{}, fmt.Errorf("PUSAQ_EMBEDDER: must be \"local\" or \"openai:<absolute url>\"")
 		}
 		cfg.EmbedderKind, cfg.EmbedURL = "openai", strings.TrimRight(rawURL, "/")
@@ -597,6 +618,17 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if !cfg.DevMode && len(cfg.APIKeys) == 0 {
 		return Config{}, fmt.Errorf("PUSAQ_API_KEYS: required unless PUSAQ_DEV_MODE=true")
+	}
+
+	for _, up := range cfg.Upstreams {
+		if err := validateCredentialTransport(up.URL, up.APIKey, cfg.DevMode); err != nil {
+			return Config{}, fmt.Errorf("%s: %w", envKeyName(up.Name), err)
+		}
+	}
+	if cfg.EmbedURL != "" {
+		if err := validateCredentialTransport(cfg.EmbedURL, cfg.EmbedKey, cfg.DevMode); err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_EMBED_KEY: %w", err)
+		}
 	}
 
 	if v, ok := lookup("PUSAQ_TENANT_POLICIES"); ok && v != "" {
@@ -776,9 +808,8 @@ func parseUpstreams(v string) ([]Upstream, error) {
 		if !ok || name == "" || rawURL == "" {
 			return nil, fmt.Errorf("pair %d is malformed, want name=url", position)
 		}
-		u, err := url.Parse(rawURL)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return nil, fmt.Errorf("upstream %q: not an absolute URL", name)
+		if _, err := parseEndpoint(rawURL); err != nil {
+			return nil, fmt.Errorf("upstream %q: %w", name, err)
 		}
 		keyVar := envKeyName(name)
 		if other, taken := keyVars[keyVar]; taken {
@@ -939,4 +970,36 @@ func parseAPIKeys(v string) (map[string]string, error) {
 		return nil, fmt.Errorf("no valid key:tenant pairs")
 	}
 	return keys, nil
+}
+
+func parseEndpoint(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		return nil, fmt.Errorf("must be an absolute HTTP or HTTPS base URL without user information, query or fragment")
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n <= 0 || n > 65535 {
+			return nil, fmt.Errorf("invalid endpoint port")
+		}
+	} else if strings.HasSuffix(u.Host, ":") {
+		return nil, fmt.Errorf("invalid endpoint port")
+	}
+	return u, nil
+}
+
+func validateCredentialTransport(raw, key string, devMode bool) error {
+	u, err := parseEndpoint(raw)
+	if err != nil {
+		return err
+	}
+	if key == "" || u.Scheme == "https" {
+		return nil
+	}
+	host := u.Hostname()
+	ip := net.ParseIP(host)
+	if devMode && (strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())) {
+		return nil
+	}
+	return fmt.Errorf("credentials require HTTPS except explicit loopback development")
 }

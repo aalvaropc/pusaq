@@ -1,18 +1,15 @@
 # Pusaq — an intelligent, cost-aware AI gateway
 
-> **Pusaq** (Quechua: "the one who guides"). Pusaq guides every message to the
-> right model, along the most convenient route.
->
-> **In one sentence:** an LLM gateway between applications and models —
-> rule-based routing across configured aliases, distributed rate limiting with
-> token buckets in Redis, circuit breakers with fallback, a policy filter, and
-> a semantic cache in shadow mode — a hand-built LiteLLM/Portkey whose claims
-> are **distributed-systems properties, each measured with a published
-> protocol**.
+Pusaq sits between applications and OpenAI-compatible model providers.
+It combines configurable model aliases, tenant authentication, Redis quotas,
+cost accounting, provider fallback and a policy filter. Its semantic cache
+is a shadow measurement instrument and never serves responses.
+
+[Documentation](README.md) · [API reference](gateway.md) · [Configuration](configuration.md) · [Measurements](measurements/README.md)
 
 - Language: Go. State: Redis (rate-limit buckets, monthly spend). Upstreams: OpenAI-compatible servers; a mock provider for development and measurement. Measurement runtime: Cloud Run in two regions, one Memorystore per region.
 - Development runs locally against Redis in Docker and a mock provider; cloud resources exist only for measurement runs.
-- Work is spec-driven — see [`../openspec/`](../openspec/) and the design rules in [`../CLAUDE.md`](../CLAUDE.md). Current capabilities are listed in the [README](../README.md).
+- Work is spec-driven — see [`../openspec/`](../openspec/) and the design rules in [`../AGENTS.md`](../AGENTS.md). Current capabilities are listed in the [README](../README.md).
 
 ---
 
@@ -133,7 +130,7 @@ flowchart LR
     RA --> PIPE
     RB --> PIPE
     subgraph PIPE[Per-request path, every replica]
-        AUTH[Authentication] --> RPM[Request rate limit] --> ALIAS[Alias resolution] --> POLICY[Policy filter] --> ELIG[Cache eligibility] --> TPM[Token reservation] --> CALL[Provider call<br/>breaker + fallback]
+        AUTH[Authentication] --> BODY[Bounded payload read] --> RPM[Request rate limit] --> ALIAS[Alias resolution] --> POLICY[Policy filter] --> ELIG[Cache eligibility] --> TPM[Token reservation] --> CALL[Provider call<br/>breaker + fallback]
     end
     RPM <--> REDIS[(Redis, one per region)]
     POLICY <--> REDIS
@@ -147,18 +144,24 @@ Telemetry path: every event is one JSON line on stdout; on Cloud Run that is
 Cloud Logging, read back by `run_id`. In the measurement runtime, Cloud Run
 reaches Memorystore through
 [Direct VPC egress](https://docs.cloud.google.com/memorystore/docs/redis/connect-redis-instance-cloud-run),
-which Google recommends over the older connectors for latency, throughput, and
-cost.
+as configured by the runtime module.
 
 ## 4. The path of a request
 
-0. **Admission (HTTP adapter).** Before the pipeline: an injected not-ready
-   window refuses the request with `not_ready`, bodies are capped at 1 MiB,
-   and `metadata.run_id` is validated. Refusals here emit no cost event.
+0. **Readiness injection (HTTP adapter).** An injected not-ready window
+   refuses new completion requests with `not_ready` before the pipeline.
+   These refusals emit no cost event and have no request ID.
 1. **Accounting and request ID.** The outermost stage starts the clock and
-   guarantees that every request admitted to the pipeline emits exactly one
-   cost event; the next stage assigns the request ID.
-2. **Authentication.** The API key resolves the tenant. Its policy (allowed
+   owns the request's single cost event; the next stage assigns the request
+   ID. Event production and delivery are distinct: the emitter can drop
+   records when its buffer is full.
+2. **Authentication and payload read.** The API key resolves the tenant
+   before any body read. Missing or unknown keys return 401 and generate an
+   event without a payload-derived run ID. Explicit development mode assigns
+   the `dev` tenant. Authenticated bodies are capped at 1 MiB, read within
+   `PUSAQ_BODY_READ_TIMEOUT` and checked for a valid `metadata.run_id`
+   before RPM limiting. Read failures, oversized bodies and malformed run
+   IDs produce one accounted `invalid_request` error. The tenant's policy (allowed
    models, prompt cap, monthly budget, fail-closed flag, content-rule actions,
    cache opt-out — `PUSAQ_TENANT_POLICIES`) is read by the steps that enforce
    it; a tenant without a policy is unrestricted.
@@ -172,7 +175,8 @@ cost.
 5. **Policy filter.** In order: allowed models (checked on the resolved alias,
    so a `pusaq/auto` request is denied rather than rerouted), the prompt cap,
    the content rules, and the monthly budget (a Redis read). A denial happens
-   before the token charge, so it costs nothing. The content rules are measured
+   before the token charge and provider invocation. The earlier RPM admission
+   still counts. The content rules are measured
    heuristics (regex, checksums, cue words;
    [measurements](measurements/content-rules.md)) that flag personal data and
    secrets, instruction-override phrasing, and time-dependent questions; the
@@ -190,15 +194,16 @@ cost.
    feeds that backend's breaker, a started stream when it ends.
 9. **Finalizers and event.** In registration order: price, monthly spend, TPM
    reconciliation (return the unused reservation — in a `defer`, so it runs on
-   success, error, timeout, and cancellation alike), and the shadow-cache
-   offer for eligible completions; then the cost event is emitted
-   **asynchronously**.
+   success, error, timeout, and cancellation alike), stream settlement when
+   applicable, and the shadow-cache offer for eligible successful completions.
+   The event is offered once to asynchronous telemetry; buffer saturation can
+   drop it and is counted.
 
-Ordering is not negotiable: the RPM limiter runs first because rejecting is
-the cheapest thing the gateway can do; the policy filter runs before cache
+Ordering is fixed: authentication precedes payload reads, and RPM admission
+precedes model resolution and cache work. The policy filter runs before cache
 eligibility because the cache must never see content the filter flagged; TPM
-is charged after alias resolution and policy so a denied request costs
-nothing.
+is charged after alias resolution and policy so policy denials consume no
+TPM reservation or provider call.
 
 ## 5. Theory and key mechanisms
 
@@ -282,25 +287,26 @@ atomic Lua script) in a finalizer that runs on success, error, and stream
 end alike. A confirmed reservation with zero provider attempts is fully
 returned. Once a provider was invoked, unknown usage keeps the full charge;
 idle buckets expire with the bucket's TTL. Between admission and
-reconciliation the bucket is wrong by the reservation error, so a tenant
-that under-reserves can consume more than its bucket allows before the
-correction lands: the window total still stays within the bound, and the
-peak excess is bounded by the burst's worth of under-reserved admissions —
-measured, not asserted ([measurements](measurements/tpm-overrun.md)).
+reconciliation the bucket differs from actual consumption by the reservation
+error. Under-reserving can admit work whose consumption exceeds the running
+bucket bound before corrections land; reconciliation can make the balance
+negative. The [mock experiment](measurements/tpm-overrun.md) quantifies
+window consumption and peak excess for fixed usage and recorded concurrency.
+Those experiment bounds are not a universal ceiling for arbitrary providers.
 
 ### 5.4 Semantic cache
 
 An exact cache only matches byte-identical prompts. A semantic cache matches
 meaning: "How do I cancel my subscription?" and "I want to close my account"
 — embed the prompt, search the nearest neighbor among answered prompts. Pusaq's
-index is an exact, in-process flat cosine index per replica, namespaced and
-capped by entry count (`PUSAQ_CACHE_MAX_ENTRIES`, LRU); per-replica counts
-undercount the hits a shared index would see.
+index is an exact, in-process flat cosine index per replica. A global LRU
+bounds both entry count (`PUSAQ_CACHE_MAX_ENTRIES`, default 10,000) and
+retained vector/string bytes (`PUSAQ_CACHE_MAX_BYTES`, default 64 MiB).
+Per-replica counts observe only each replica's own traffic.
 
-**The central danger: false positives.** "What is the capital of Peru?" and
-"What is the capital of Bolivia?" can score ~0.93 similarity — *between* real
-paraphrases (0.95–0.98) and noise (0.88). A semantic cache can lie with
-confidence; an exact cache never lies. Therefore:
+**The central danger: false positives.** Questions about different entities
+can be similar in the embedding space while requiring different answers.
+Similarity alone does not establish equivalence. Therefore:
 
 - τ is calibrated on a labeled dataset of equivalent pairs and trap pairs
   (swapped entities, negations, dates) — chosen as
@@ -312,13 +318,22 @@ confidence; an exact cache never lies. Therefore:
   explicitly; a hit-rate is only published next to its false-positive rate. A
   hit-rate without its FP rate is marketing, not engineering.
 
-**The cache key** (constitution rule 2): tenant | the route's physical model |
+**The implemented shadow namespace:** tenant | the route's physical model |
 system prompt | the request's temperature (or `none` when absent) | the
 eligibility-rules version, plus fixed `tools=none` and `format=none` markers —
 the accepted request subset carries neither tools nor a response format.
-Language is content, not configuration: it lives in the embedding space.
-Entries have no TTL and there is no purge; the LRU cap bounds the index and a
-restart empties it.
+There is no explicit language or independent model-version field in this
+namespace; model identifiers come from configuration. The implementation is
+limited to shadow measurement. Entries have no TTL or purge endpoint;
+eviction enforces both caps and a restart empties the index.
+
+The index stores vectors, request IDs, namespaces and response fingerprints,
+without raw prompts or response bodies. Shadow samples temporarily retain
+the eligible user prompt for embedding. Eight workers and a 256-item queue
+share `PUSAQ_CACHE_QUEUE_MAX_BYTES` (default 16 MiB) across queued and active
+samples. Saturation drops and counts samples; evaluations have a 5 s context
+budget. Entries larger than the index budget are skipped. These caps account
+for retained data, not allocator overhead or total process RSS.
 
 **What is never offered to the cache:** requests of a tenant that opted out,
 multi-turn conversations (turn N depends on N−1), prompts the content rules
@@ -327,12 +342,14 @@ and requests with an explicit temperature above 0.7. The decision is made
 once per request and the single reason is recorded on the cost event as
 `cache_skip`, so what the cache never saw is auditable next to what it did.
 
-**The business metric** is a subtraction, not a percentage:
-`net savings = (hits × avoided model cost) − (all requests × embedding cost) − index infra cost`.
-The embedding toll is paid on *every* request, hit or miss — there is a
-minimum hit-rate below which a cache loses money. The shadow cache records the
-embedder latency of every evaluation (`embed_latency_ms`); cost events do not
-price the embedding toll.
+**Serving-cache economics:**
+`net savings = avoided model cost − embedding cost − index infrastructure cost`.
+Embedding cost applies to evaluated samples. There is a minimum hit-rate
+below which a serving cache loses money. Pusaq serves no
+cached answers, so shadow sampling produces no avoided-provider savings.
+`cache_shadow` records include `embed_latency_ms` when a neighbor exists;
+cost events do not price the embedding toll. Different response fingerprints
+identify candidates for review, not a semantic false-positive verdict.
 
 ### 5.5 Routing
 
@@ -421,7 +438,7 @@ monthly spend counts that estimate. Shadow-cache evaluations are separate
 `cache_shadow` records (similarity, neighbor, response fingerprints, embedder
 latency), and breaker transitions are `breaker_state` records.
 
-The write is asynchronous and may **never** block or slow the response path:
+Cost events are enqueued without waiting for the telemetry sink:
 a single goroutine drains a bounded buffer and writes one line per event;
 overflow drops the event and counts it, and the count is logged at shutdown
 (`telemetry_dropped`) — losing an observability record is acceptable,
@@ -429,6 +446,17 @@ degrading a user request is not.
 
 There is no dashboard and no metrics endpoint; reports are computed from the
 event stream (`loadtest/verify-*.sh`).
+
+Authentication runs before body reads. Authenticated body failures are
+accounted; readiness-injection refusals happen outside the pipeline. Logs
+omit prompt text, provider response bodies, URL-bearing transport errors and
+panic values. Content-rule events carry rule kinds, not matched content.
+
+Provider and embedding bases accept absolute HTTP/HTTPS URLs without
+credentials, queries or fragments. Keys require HTTPS except for explicit
+development mode against localhost or literal loopback addresses. Both
+clients disable redirects. SSE events are validated before forwarding,
+framing is capped at 1 MiB, and response fingerprints are hashed incrementally.
 
 ## 6. Technology choices
 
@@ -442,7 +470,7 @@ event stream (`loadtest/verify-*.sh`).
 | Lua scripts | Atomicity | Read-decide-decrement as one operation; races removed by construction |
 | Embedders | Shadow-cache vectors | `local` (character trigrams, $0, deterministic) or any OpenAI-compatible `/embeddings` endpoint; the same code serves the gateway and `cmd/cachecal` |
 | Terraform | IaC | The foundation and the two-region runtime, created and destroyed per measurement run |
-| GitHub Actions + workload identity federation | CI and image publishing | Lint, race tests and Terraform validation on every PR; images published without stored keys |
+| GitHub Actions + workload identity federation | CI and image publishing | Lint, race tests, Terraform checks, dependency and container scans, CodeQL and workflow analysis feed `ci-gate`; publication uses short-lived credentials only after a successful push to main |
 | k6 | Load and chaos | Concurrency tests and failure injection |
 | Mock provider | $0 experiments | Limiter and failover experiments need no real models — configurable latency and error rates |
 | jq and shell | Verification | Every report is recomputed from k6 output, the mock's counters, and the cost events |
@@ -483,12 +511,17 @@ disappointing numbers included.
 
 | Metric | Protocol | Reported |
 |---|---|---|
-| Limiter exactness ([report](measurements/limiter-exactness.md)) | `make loadtest` (strict, and `LOADTEST_MODE=lease`): two replicas behind nginx, one tenant at 10× its limit for 120 s and 300 s, a co-tenant under its limit, against the mock | Admitted vs bound, co-tenant 429s, Lua calls per request, limiter toll p50/p95/p99 per mode |
+| Limiter exactness ([report](measurements/limiter-exactness.md), [shared-clock runs](measurements/shared-store-clock.md)) | `make loadtest` (strict, and `LOADTEST_MODE=lease`): two replicas behind nginx, one tenant at 10× its limit for 120 s and 300 s, a co-tenant under its limit, against the mock | Admitted vs bound, co-tenant 429s, Lua calls per request, limiter toll p50/p95/p99 per mode |
 | Token-limit overrun ([report](measurements/tpm-overrun.md)) | `make tpmtest`: token limiting on, emulated upstream latency, an under-reserving and an over-reserving tenant at the same rate | Σconsumed vs the bucket bound over the window, peak excess vs the stated ceiling, reservation error per request, requests in flight |
 | Breaker detection ([report](measurements/breaker-detection.md)) | `make breakertest`: the mock primary fails on command for a known window under steady traffic with a healthy fallback | Detection time (failure start → breaker open), recovery time (failure end → closed), probes, extra attempts, fallback-served requests, client errors (must be zero) |
 | Regional failover ([report](measurements/regional-failover.md)) | `make chaos-run`: the two-region runtime module, sustained k6 against the global LB, region A's readiness failed at a known instant through the admin endpoint; every request tagged with the run id and answered with its region; per-region readiness probes as an independent timeline | Time until new requests are answered by the other region, longest interval without a success, first-attempt failures / recovered by one retry / failed after retry, streams complete / interrupted / refused, latency before / during / after per region, the split tenant's admissions per region (**counted, not estimated**, cross-checked against the gateways' events) |
 | Content rules ([report](measurements/content-rules.md)) | `go test -v -run TestContentRulesCorpus ./internal/policy`: the policy filter's sensitive-data, injection and temporal rules against a labeled EN/ES corpus with hard negatives | Precision and recall per family against published floors the suite enforces; every miss and false alarm listed |
 | Cache threshold calibration | `make calibrate`: the τ sweep over a labeled pair dataset with the gateway's own embedder | The precision/recall curve and τ*, or an explicit failure when no τ reaches the precision floor |
+
+The [measurement index](measurements/README.md) also covers lease ownership,
+unattempted-reservation settlement and independent evidence verification.
+Reports retain their run dates and environments; an older result is not a
+measurement of the current checkout.
 
 Experiment rules: hypothesis written before running; every run's id names its
 output files, and the failover run also tags each request with
