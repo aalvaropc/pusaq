@@ -83,6 +83,10 @@ request would pay a second script call plus a reconciliation call.
 
 ## Results
 
+These runs predate the shared Redis-clock implementation. The
+[shared-store-clock report](shared-store-clock.md) records the 2026-10-20
+strict and leased runs; the values below retain their original conditions.
+
 Runs of 2026-09-13 at the default parameters (RPM 600 → r = 10/s, B = 100,
 ×10 → 100 requests/s offered) for 120 s and 300 s. Every run: k6 thresholds
 passed, `verify.sh` OK.

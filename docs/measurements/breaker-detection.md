@@ -32,6 +32,11 @@ plus at most one inter-arrival gap:
 
 ## Protocol
 
+The 2026-09-13 runs below use one half-open probe. The current gateway
+default is three (`PUSAQ_BREAKER_PROBES`), so running the recipe with current
+defaults is a new experiment. See [shared-store-clock.md](shared-store-clock.md#breaker-and-fallback)
+for the 2026-10-20 local breaker run.
+
 ```
 make breakertest                        # 5 s failure window
 make breakertest BREAKER_FAIL_FOR=15s   # a probe fails once
@@ -69,7 +74,7 @@ reaching clients.
 | Host | Linux 7.1 (Fedora), Intel Core i5-13600K (20 threads), 31 GiB; all containers on this one host |
 | Docker / Compose | Docker 29.8.0, Compose v5.5.1 |
 | Images | `redis:7-alpine`, `nginx:1.27-alpine`, `grafana/k6:1.4.0`, gateway and mocks built from the commit under test |
-| Breaker | window 20, min samples 10, threshold 0.5, cooldown 10 s, probes 1 (defaults) |
+| Breaker | window 20, min samples 10, threshold 0.5, cooldown 10 s, probes 1 (historical settings) |
 | Traffic | 3 tenants × 8 rps = 24 rps, 12 rps per replica; `pusaq/fast`; 45 s |
 | Mocks | primary and fallback at 0 ms latency, error rate 0 |
 

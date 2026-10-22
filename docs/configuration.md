@@ -1,14 +1,19 @@
 # Configuration
 
-The gateway reads environment variables only (no files). Every value is validated at startup; an
-invalid one stops the process with an error naming the variable. Mechanisms are explained in
-[gateway.md](gateway.md); deployment in [operations.md](operations.md).
+The gateway reads environment variables; it does not load configuration
+files or `.env` itself. Recognized settings are parsed at startup, and an
+invalid setting stops the process. Mechanisms are explained in
+[gateway.md](gateway.md); setup and publication in [operations.md](operations.md).
+
+The tables below describe **standalone binary defaults**. Docker Compose
+sets explicit overrides, listed at the end of this document. Duration
+settings use Go syntax such as `500ms`, `10s` and `1m`.
 
 ## Server
 
 | Variable | Default | What it does |
 |---|---|---|
-| `PUSAQ_ADDR` | `:8080` | Listen address. |
+| `PUSAQ_ADDR` | `:8080` | Listen address; the standalone default binds all interfaces. Use `127.0.0.1:8080` for a host-only local process. |
 | `PUSAQ_DRAIN_DELAY` | `1s` | On SIGTERM, keep serving this long after turning not-ready so balancer probes see the 503. |
 | `PUSAQ_SHUTDOWN_GRACE` | `10s` | How long in-flight requests get to finish after the drain delay. |
 | `PUSAQ_TELEMETRY_BUFFER` | `1024` | Cost-event buffer; overflow drops events and counts them. |
@@ -16,6 +21,10 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_WRITE_IDLE_TIMEOUT` | `30s` | Positive deadline per response write/flush; no total SSE lifetime limit. |
 | `PUSAQ_REGION` | unset | Region label on every event and on `X-Pusaq-Region` (letters, digits, `.`, `_`, `-`). |
 | `PUSAQ_ADMIN_TOKEN` | unset | Enables `POST /admin/readiness` (failure injection); at least 16 characters, no whitespace. Unset means no admin endpoints. |
+
+The request-body cap is fixed at 1 MiB. Header reads have a fixed 10 s
+timeout; idle HTTP connections have a fixed 120 s timeout. SSE has a fixed
+1 MiB event-framing cap. These are not environment settings.
 
 ## Upstreams and routing
 
@@ -49,7 +58,12 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_LEASE_TTL` | `1s` | How long a replica may hold unused lease tokens. |
 | `PUSAQ_TPM_LIMIT` | `100000` | LLM tokens per minute per tenant; `0` disables token limiting (with a warning). |
 | `PUSAQ_TPM_BURST` | = limit | Token bucket capacity; an empty value also means the default. |
-| `PUSAQ_TPM_RESERVE_DEFAULT` | `512` | Output reservation when a request sets no `max_tokens`, also used to price a request answered without usage; at most `PUSAQ_TPM_BURST` while token limiting is on. A request whose prompt estimate plus `max_tokens` exceeds the burst is rejected with 400. |
+| `PUSAQ_TPM_RESERVE_DEFAULT` | `512` | Positive output reservation when `max_tokens` is absent, also used to price a request answered without usage; at most `PUSAQ_TPM_BURST` while token limiting is on. A prompt estimate plus output reservation above the burst is rejected with 400. |
+
+Buckets expire after 10 minutes of inactivity. RPM and TPM require
+`PUSAQ_REDIS_ADDR`; no Redis address disables both. A store call has a 250 ms
+context budget. Store errors fail open unless the tenant's policy sets
+`fail_closed=true`. See [quota semantics](gateway.md#rate-limiting).
 
 ## Circuit breakers (per upstream backend)
 
@@ -81,3 +95,26 @@ without user information, query strings, or fragments. API keys require HTTPS;
 explicit development mode allows keyed HTTP only for localhost or literal
 loopback IPs. Keyless HTTP mocks remain supported. Neither client follows
 redirects, including 307 and 308. Versioned base paths are preserved.
+
+These checks apply to provider and embedding credentials, independently of
+the tenant keys accepted on incoming requests.
+
+## Local stack overrides
+
+The default [Compose service](../docker-compose.yml) sets:
+
+| Setting | Compose value |
+|---|---|
+| `PUSAQ_DEV_MODE` | `true`; no tenant API keys |
+| `PUSAQ_REDIS_ADDR` | `redis:6379` |
+| `PUSAQ_UPSTREAMS` | Primary `mockprovider` and fallback `mockbackup`, both keyless HTTP mocks |
+| `PUSAQ_RPM_LIMIT` / `PUSAQ_RPM_BURST` | `60` / `50` |
+| `PUSAQ_TPM_LIMIT` / `PUSAQ_TPM_RESERVE_DEFAULT` | `300` / `50` |
+| `PUSAQ_CACHE_MODE` | `shadow` with the local embedder |
+| `PUSAQ_PRICES` / `PUSAQ_PRICE_TABLE_VERSION` | Synthetic mock prices and a local version label |
+| `PUSAQ_DRAIN_DELAY` | `0s` |
+
+Published ports bind to `127.0.0.1`. The `loadtest` profile has its own keys,
+quotas and disabled shadow sampling. `make run` explicitly sets development
+mode; it does not inherit the other Compose service settings. Inspect the
+effective stack with `docker compose config`.
