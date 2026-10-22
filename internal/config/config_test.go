@@ -296,7 +296,7 @@ func TestLoadExplicitDevelopmentMode(t *testing.T) {
 
 func TestUpstreamKeysAttached(t *testing.T) {
 	got, err := Load(developmentLookupFrom(map[string]string{
-		"PUSAQ_UPSTREAMS":           "gemini=http://g:1,mock=http://m:2",
+		"PUSAQ_UPSTREAMS":           "gemini=https://g:1,mock=http://m:2",
 		"PUSAQ_UPSTREAM_KEY_GEMINI": "sk-gem",
 	}))
 	if err != nil {

@@ -126,7 +126,7 @@ The similarity threshold τ SHALL be chosen by a calibration procedure over a la
 
 ### Requirement: The embedder is configured on its own
 
-The shadow cache SHALL embed with the local embedder by default, or with an OpenAI-compatible endpoint given by its own base URL, model, and optional bearer key, which it calls at the base URL followed by `/embeddings`. The embedder SHALL NOT depend on the chat upstreams. Its key SHALL never appear in logs or cost events, configuration errors SHALL never echo its URL, and a key without an endpoint embedder SHALL fail startup.
+The shadow cache SHALL embed with the local embedder by default, or with an OpenAI-compatible endpoint given by its own base URL, model, and optional bearer key, which it calls at the base URL followed by `/embeddings`. The embedder SHALL NOT depend on the chat upstreams. Its endpoint SHALL follow the same URL and credential-transport restrictions as provider endpoints, and its client SHALL reject redirects without resending its payload or credentials. Its key SHALL never appear in logs or cost events, configuration errors SHALL never echo its URL, and a key without an endpoint embedder SHALL fail startup.
 
 #### Scenario: Endpoint embedder
 
