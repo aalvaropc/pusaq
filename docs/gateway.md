@@ -149,7 +149,9 @@ and `PUSAQ_CACHE_TAU` only labels the shadow records.
 
 Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the
-tenant. Missing/unknown keys get a normalized `unauthorized` (401). With
+tenant. Missing/unknown keys get a normalized `unauthorized` (401) before the body is read;
+those events have no payload-derived run ID. Authenticated payload failures
+produce one accounted `invalid_request` error. With
 `PUSAQ_DEV_MODE=true` and `PUSAQ_API_KEYS` unset the gateway runs in **dev mode** — no auth,
 everything attributed to the `dev` tenant, and a warning logged at startup;
 absent both settings or set but empty, it refuses to start. Development mode

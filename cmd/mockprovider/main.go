@@ -44,7 +44,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	httpServer := &http.Server{Addr: *addr, Handler: srv}
+	httpServer := &http.Server{Addr: *addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()

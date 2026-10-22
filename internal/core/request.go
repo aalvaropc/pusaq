@@ -34,7 +34,8 @@ type Request struct {
 	Tenant string
 
 	// Payload carries the operation-specific request body.
-	Payload []byte
+	Payload     []byte
+	ReadPayload func() ([]byte, error)
 
 	// RequestedModel is the model alias the client asked for (e.g.
 	// "pusaq/fast"); set by operations that resolve models.

@@ -19,19 +19,21 @@ import (
 
 // Defaults applied when the corresponding variable is unset.
 const (
-	DefaultAddr            = ":8080"
-	DefaultDrainDelay      = 1 * time.Second
-	DefaultShutdownGrace   = 10 * time.Second
-	DefaultTelemetryBuffer = 1024
-	DefaultUpstreamTimeout = 30 * time.Second
-	DefaultRPMLimit        = 60.0
-	DefaultTPMLimit        = 100000.0
-	DefaultTPMReserve      = 512
-	DefaultBucketTTL       = 10 * time.Minute
-	DefaultCacheTau        = 0.95
-	DefaultCacheMaxEntries = 10000
-	DefaultLeaseSize       = 10
-	DefaultLeaseTTL        = 1 * time.Second
+	DefaultAddr             = ":8080"
+	DefaultDrainDelay       = 1 * time.Second
+	DefaultShutdownGrace    = 10 * time.Second
+	DefaultTelemetryBuffer  = 1024
+	DefaultUpstreamTimeout  = 30 * time.Second
+	DefaultBodyReadTimeout  = 10 * time.Second
+	DefaultWriteIdleTimeout = 30 * time.Second
+	DefaultRPMLimit         = 60.0
+	DefaultTPMLimit         = 100000.0
+	DefaultTPMReserve       = 512
+	DefaultBucketTTL        = 10 * time.Minute
+	DefaultCacheTau         = 0.95
+	DefaultCacheMaxEntries  = 10000
+	DefaultLeaseSize        = 10
+	DefaultLeaseTTL         = 1 * time.Second
 )
 
 // MinAdminTokenLen is the shortest PUSAQ_ADMIN_TOKEN accepted: the token
@@ -146,6 +148,8 @@ func defaultRoutingRules() map[string]string {
 
 // Config holds the gateway's runtime settings.
 type Config struct {
+	BodyReadTimeout  time.Duration
+	WriteIdleTimeout time.Duration
 	// Addr is the listen address (PUSAQ_ADDR).
 	Addr string
 	// DrainDelay is how long the gateway keeps serving after turning
@@ -249,13 +253,15 @@ type Config struct {
 // a map lookup in tests), applying defaults and validating values.
 func Load(lookup func(string) (string, bool)) (Config, error) {
 	cfg := Config{
-		Addr:            DefaultAddr,
-		DrainDelay:      DefaultDrainDelay,
-		ShutdownGrace:   DefaultShutdownGrace,
-		TelemetryBuffer: DefaultTelemetryBuffer,
-		Upstreams:       defaultUpstreams(),
-		UpstreamTimeout: DefaultUpstreamTimeout,
-		Routes:          defaultRoutes(),
+		Addr:             DefaultAddr,
+		BodyReadTimeout:  DefaultBodyReadTimeout,
+		WriteIdleTimeout: DefaultWriteIdleTimeout,
+		DrainDelay:       DefaultDrainDelay,
+		ShutdownGrace:    DefaultShutdownGrace,
+		TelemetryBuffer:  DefaultTelemetryBuffer,
+		Upstreams:        defaultUpstreams(),
+		UpstreamTimeout:  DefaultUpstreamTimeout,
+		Routes:           defaultRoutes(),
 	}
 
 	if v, ok := lookup("PUSAQ_ADDR"); ok {
@@ -263,6 +269,22 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_ADDR: must not be empty")
 		}
 		cfg.Addr = v
+	}
+
+	for _, setting := range []struct {
+		name  string
+		value *time.Duration
+	}{
+		{"PUSAQ_BODY_READ_TIMEOUT", &cfg.BodyReadTimeout},
+		{"PUSAQ_WRITE_IDLE_TIMEOUT", &cfg.WriteIdleTimeout},
+	} {
+		if v, ok := lookup(setting.name); ok {
+			d, err := time.ParseDuration(v)
+			if err != nil || d <= 0 {
+				return Config{}, fmt.Errorf("%s: must be a positive duration", setting.name)
+			}
+			*setting.value = d
+		}
 	}
 
 	if v, ok := lookup("PUSAQ_DRAIN_DELAY"); ok {

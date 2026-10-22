@@ -12,6 +12,8 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 | `PUSAQ_DRAIN_DELAY` | `1s` | On SIGTERM, keep serving this long after turning not-ready so balancer probes see the 503. |
 | `PUSAQ_SHUTDOWN_GRACE` | `10s` | How long in-flight requests get to finish after the drain delay. |
 | `PUSAQ_TELEMETRY_BUFFER` | `1024` | Cost-event buffer; overflow drops events and counts them. |
+| `PUSAQ_BODY_READ_TIMEOUT` | `10s` | Positive deadline for reading an authenticated request body. |
+| `PUSAQ_WRITE_IDLE_TIMEOUT` | `30s` | Positive deadline per response write/flush; no total SSE lifetime limit. |
 | `PUSAQ_REGION` | unset | Region label on every event and on `X-Pusaq-Region` (letters, digits, `.`, `_`, `-`). |
 | `PUSAQ_ADMIN_TOKEN` | unset | Enables `POST /admin/readiness` (failure injection); at least 16 characters, no whitespace. Unset means no admin endpoints. |
 
