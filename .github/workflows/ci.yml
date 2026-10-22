@@ -58,6 +58,7 @@ jobs:
       - run: terraform fmt -check -recursive -diff infra/terraform
       - run: terraform -chdir=infra/terraform/foundation init -backend=false -input=false
       - run: terraform -chdir=infra/terraform/foundation validate
+      - run: terraform -chdir=infra/terraform/foundation test
       - run: terraform -chdir=infra/terraform/runtime init -backend=false -input=false
       - run: terraform -chdir=infra/terraform/runtime validate
 
@@ -75,7 +76,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
-      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - run: >-
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          -ignore '^reusable workflow call "\$/\.github/workflows/release-image\.yml" at "uses" is not following the format'
       - run: pipx run zizmor==1.31.1 --offline --no-progress .github/workflows
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
         if: github.event_name == 'pull_request'
@@ -146,3 +149,11 @@ jobs:
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
+
+  publish:
+    needs: ci-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
+    permissions:
+      contents: read
+      id-token: write
+    uses: $/.github/workflows/release-image.yml

@@ -22,13 +22,13 @@ resource "google_iam_workload_identity_pool_provider" "pusaq_github" {
   display_name                       = "GitHub OIDC (pusaq)"
 
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"          = "assertion.sub"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
   }
 
   # Tokens from any other repository are rejected before IAM is consulted.
-  attribute_condition = "assertion.repository == '${var.github_repo}'"
+  attribute_condition = "assertion.repository_id == '${var.github_repository_id}' && assertion.repository_owner_id == '${var.github_owner_id}' && assertion.ref == 'refs/heads/main' && assertion.event_name == 'push' && assertion.workflow_ref == '${var.github_repo}/.github/workflows/ci.yml@refs/heads/main' && assertion.job_workflow_ref == '${var.github_repo}/.github/workflows/release-image.yml@refs/heads/main'"
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
@@ -41,7 +41,7 @@ resource "google_iam_workload_identity_pool_provider" "pusaq_github" {
 resource "google_service_account_iam_member" "gha_wif" {
   service_account_id = google_service_account.gha.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${local.pool_name}/attribute.repository/${var.github_repo}"
+  member             = "principalSet://iam.googleapis.com/${local.pool_name}/attribute.repository_id/${var.github_repository_id}"
 }
 
 # Least privilege: write access to this one repository, no project roles.

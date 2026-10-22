@@ -1,6 +1,6 @@
 name: release-image
 
-# Publishes the gateway and mock-provider images to Artifact Registry on every
+# Publishes the gateway and mock-provider images to Artifact Registry on verified
 # push to main. Authentication is workload identity federation: the workflow's
 # OIDC token is exchanged for short-lived credentials of a service account
 # that can only write to the Pusaq registry. No stored keys. The job is
@@ -8,13 +8,10 @@ name: release-image
 # (infra/terraform/foundation outputs) are unset.
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: release-image
@@ -28,11 +25,15 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
 
       - id: auth
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
@@ -57,9 +58,6 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_PATH }}/pusaq:${{ github.sha }}
-            ${{ env.IMAGE_PATH }}/pusaq:main
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Build and push mockprovider
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -69,6 +67,3 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_PATH }}/mockprovider:${{ github.sha }}
-            ${{ env.IMAGE_PATH }}/mockprovider:main
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

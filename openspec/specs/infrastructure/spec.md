@@ -27,27 +27,32 @@ The cloud foundation SHALL be declared in version-controlled infrastructure code
 
 ### Requirement: Container images are published per commit without long-lived credentials
 
-Every push to the main branch SHALL publish the gateway and mock-provider images to the registry, tagged with the commit identifier and with the branch name. The publishing workflow SHALL authenticate through workload identity federation, exchanging its short-lived identity token for credentials of a service account whose only permission is writing to that registry; no long-lived cloud credential SHALL be stored in the repository. Tokens from any other repository SHALL be rejected. Concurrent publishing runs SHALL be serialized.
+With cloud publishing configured, a push to main SHALL publish both images only after all mandatory checks succeed for the exact commit. Images SHALL carry immutable commit tags. PRs, other branches, failed or cancelled verification, and absent cloud configuration SHALL NOT authenticate or publish. Only the publishing job SHALL request an identity token. Federation SHALL reject identities outside the configured numeric repository and owner IDs, main ref, push event, and approved calling and reusable workflow paths. The publisher SHALL have write access only to the image registry, with no stored long-lived credential. Publishing runs SHALL be serialized.
 
 #### Scenario: Push to main publishes both images
 
-- **WHEN** a commit lands on the main branch
-- **THEN** the registry holds the gateway and mock-provider images tagged with that commit's identifier and with `main`
+- **WHEN** a push to main passes every mandatory check and cloud variables are configured
+- **THEN** both images are published under the verified commit SHA
 
-#### Scenario: Publishing authenticates through workload identity federation
+#### Scenario: Unverified execution does not authenticate
 
-- **WHEN** the publishing workflow runs
-- **THEN** it obtains registry write access from its own identity token, and the repository holds no cloud key or password
+- **WHEN** verification fails or is cancelled, the event is a PR, the ref is not main, or cloud variables are absent
+- **THEN** no cloud authentication or image publication occurs
 
 #### Scenario: Another repository cannot publish
 
-- **WHEN** a workflow from a different repository presents its identity token to the same provider
-- **THEN** the exchange is rejected
+- **WHEN** any required repository, owner, ref, event, or workflow claim differs
+- **THEN** federation rejects the identity
+
+#### Scenario: Publishing authenticates through workload identity federation
+
+- **WHEN** verification runs
+- **THEN** only the publishing job can request an identity token and the publisher can write only to its registry
 
 #### Scenario: Concurrent pushes are serialized
 
-- **WHEN** two publishing runs are triggered close together
-- **THEN** the second waits for the first instead of pushing in parallel
+- **WHEN** two verified pushes request publication
+- **THEN** publications do not run in parallel
 
 ### Requirement: A runtime module deploys the gateway for measurement runs only
 
