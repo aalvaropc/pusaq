@@ -29,7 +29,8 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `PUSAQ_API_KEYS` | unset (dev mode) | `key:tenant,...`, spaces around fields ignored. Unset means no authentication and everything is the `dev` tenant; set but empty fails startup. |
+| `PUSAQ_DEV_MODE` | `false` | Explicit unauthenticated development; requires API keys to be unset. Requests belong to `dev`. |
+| `PUSAQ_API_KEYS` | required outside development mode | `key:tenant,...`, spaces around fields ignored. Missing outside development mode or set but empty fails startup. |
 | `PUSAQ_TENANT_POLICIES` | unset | `tenant:key=value,...;tenant2:...` with `models`, `max_prompt_chars`, `budget_usd`, `fail_closed`, `sensitive`, `injection`, `cache`. A budget needs `PUSAQ_PRICES` and `PUSAQ_REDIS_ADDR`. |
 | `PUSAQ_PRICES` | unset (no cost fields) | `model=usd_per_1M_input/usd_per_1M_output,...` keyed by physical model; every route model must be priced. |
 | `PUSAQ_PRICE_TABLE_VERSION` | required with prices | Label carried on every priced event as `price_table_version`. |

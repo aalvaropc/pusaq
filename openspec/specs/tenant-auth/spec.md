@@ -26,11 +26,11 @@ When API keys are configured, the gateway SHALL require `Authorization: Bearer <
 
 ### Requirement: Dev mode without configured keys is explicit
 
-When `PUSAQ_API_KEYS` is unset, the gateway SHALL serve requests without authentication, attribute every request to the `dev` tenant, and log a warning at startup that authentication is disabled. This mode SHALL never be silent. A `PUSAQ_API_KEYS` that is set but holds no `key:tenant` pair SHALL fail startup. Configuration errors SHALL name positions or tenants, never an API key.
+The gateway SHALL fail startup without API keys unless `PUSAQ_DEV_MODE=true` explicitly enables unauthenticated development. Development mode SHALL default to false, SHALL reject configured API keys, SHALL attribute requests to the `dev` tenant, and SHALL log a startup warning. A `PUSAQ_API_KEYS` that is set but holds no `key:tenant` pair SHALL fail startup. Configuration errors SHALL name positions or tenants, never an API key.
 
 #### Scenario: Dev mode attribution
 
-- **WHEN** no keys are configured and a request arrives without credentials
+- **WHEN** development mode is explicitly enabled without API keys and a request arrives without credentials
 - **THEN** the request is served and its cost event carries the `dev` tenant
 
 #### Scenario: Empty key list fails startup
@@ -42,6 +42,16 @@ When `PUSAQ_API_KEYS` is unset, the gateway SHALL serve requests without authent
 
 - **WHEN** `PUSAQ_API_KEYS` repeats a key or has a malformed pair
 - **THEN** the startup error names the tenants or the pair's position, and does not contain the key
+
+#### Scenario: Missing authentication configuration fails startup
+
+- **WHEN** API keys are absent and development mode is not explicitly enabled
+- **THEN** startup fails without serving requests
+
+#### Scenario: Conflicting authentication configuration fails startup
+
+- **WHEN** development mode and API keys are both configured
+- **THEN** startup fails without echoing credentials
 
 ### Requirement: Operational endpoints stay unauthenticated
 
