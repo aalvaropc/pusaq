@@ -67,6 +67,8 @@ invalid one stops the process with an error naming the variable. Mechanisms are 
 |---|---|---|
 | `PUSAQ_CACHE_MODE` | `off` | `off` or `shadow`. Shadow measures and never serves. |
 | `PUSAQ_CACHE_TAU` | `0.95` | Similarity threshold that labels shadow records hit/miss. |
+| `PUSAQ_CACHE_MAX_BYTES` | `67108864` | Retained index vectors and string data; raw prompts are excluded. Metadata overhead is outside this accounting. |
+| `PUSAQ_CACHE_QUEUE_MAX_BYTES` | `16777216` | Retained sample data across queued and in-progress evaluations. Positive byte count. Saturation drops samples. |
 | `PUSAQ_CACHE_MAX_ENTRIES` | `10000` | Cap on the in-process index (LRU). |
 | `PUSAQ_EMBEDDER` | `local` | `local` or `openai:<url>`, an OpenAI-compatible API base with its version segment; embeddings go to `<url>/embeddings`. Independent of `PUSAQ_UPSTREAMS`. |
 | `PUSAQ_EMBED_MODEL` | unset | Embedding model; required with an `openai:` embedder. |

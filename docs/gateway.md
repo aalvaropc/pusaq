@@ -225,3 +225,8 @@ The gateway validates each complete SSE event before forwarding it and limits
 event framing to 1 MiB. Provider error events are replaced by one generic
 `upstream_error`; no fallback occurs after streaming begins. Content fingerprints
 use incremental hashing, so the scanner does not retain the full response.
+
+The shadow index retains vectors and fingerprints, without raw prompts. Its
+entry count and retained data bytes are bounded independently. Pending samples
+share a byte budget across the queue and workers; saturation drops and counts
+samples. These data budgets exclude allocator and collection metadata overhead.

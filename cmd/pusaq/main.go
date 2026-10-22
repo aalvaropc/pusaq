@@ -103,13 +103,15 @@ func run(logger *slog.Logger) error {
 	var leased *ratelimit.Leased
 	if cfg.CacheMode == config.CacheShadow {
 		embedder := newEmbedder(cfg)
-		shadow = semcache.NewShadow(embedder, semcache.NewIndex(cfg.CacheMaxEntries),
-			logger, cfg.CacheTau, 8, 256)
+		shadow = semcache.NewShadow(embedder, semcache.NewIndex(cfg.CacheMaxEntries, cfg.CacheMaxBytes),
+			logger, cfg.CacheTau, 8, 256, cfg.CacheQueueMaxBytes)
 		completionsOpts.Shadow = shadow
 		logger.Info("semantic cache in shadow mode: measuring, never serving",
 			slog.String("embedder", embedder.Name()),
 			slog.Float64("tau", cfg.CacheTau),
 			slog.Int("max_entries", cfg.CacheMaxEntries),
+			slog.Int64("max_bytes", cfg.CacheMaxBytes),
+			slog.Int64("pending_max_bytes", cfg.CacheQueueMaxBytes),
 		)
 	}
 	if cfg.RedisAddr != "" {
