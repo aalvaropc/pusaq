@@ -19,21 +19,23 @@ import (
 
 // Defaults applied when the corresponding variable is unset.
 const (
-	DefaultAddr             = ":8080"
-	DefaultDrainDelay       = 1 * time.Second
-	DefaultShutdownGrace    = 10 * time.Second
-	DefaultTelemetryBuffer  = 1024
-	DefaultUpstreamTimeout  = 30 * time.Second
-	DefaultBodyReadTimeout  = 10 * time.Second
-	DefaultWriteIdleTimeout = 30 * time.Second
-	DefaultRPMLimit         = 60.0
-	DefaultTPMLimit         = 100000.0
-	DefaultTPMReserve       = 512
-	DefaultBucketTTL        = 10 * time.Minute
-	DefaultCacheTau         = 0.95
-	DefaultCacheMaxEntries  = 10000
-	DefaultLeaseSize        = 10
-	DefaultLeaseTTL         = 1 * time.Second
+	DefaultAddr               = ":8080"
+	DefaultDrainDelay         = 1 * time.Second
+	DefaultShutdownGrace      = 10 * time.Second
+	DefaultTelemetryBuffer    = 1024
+	DefaultUpstreamTimeout    = 30 * time.Second
+	DefaultBodyReadTimeout    = 10 * time.Second
+	DefaultWriteIdleTimeout   = 30 * time.Second
+	DefaultRPMLimit           = 60.0
+	DefaultTPMLimit           = 100000.0
+	DefaultTPMReserve         = 512
+	DefaultBucketTTL          = 10 * time.Minute
+	DefaultCacheTau           = 0.95
+	DefaultCacheMaxEntries    = 10000
+	DefaultCacheMaxBytes      = 64 << 20
+	DefaultCacheQueueMaxBytes = 16 << 20
+	DefaultLeaseSize          = 10
+	DefaultLeaseTTL           = 1 * time.Second
 )
 
 // MinAdminTokenLen is the shortest PUSAQ_ADMIN_TOKEN accepted: the token
@@ -238,7 +240,9 @@ type Config struct {
 	// of other thresholds happen offline from the records.
 	CacheTau float64
 	// CacheMaxEntries caps the shadow index (PUSAQ_CACHE_MAX_ENTRIES).
-	CacheMaxEntries int
+	CacheMaxEntries    int
+	CacheMaxBytes      int64
+	CacheQueueMaxBytes int64
 	// EmbedderKind is "local" or "openai" (PUSAQ_EMBEDDER, "local" or
 	// "openai:<url>"); an openai embedder calls EmbedURL with EmbedModel
 	// (PUSAQ_EMBED_MODEL) and the bearer key EmbedKey (PUSAQ_EMBED_KEY),
@@ -545,6 +549,22 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_CACHE_TAU: must be in (0,1], got %q", v)
 		}
 		cfg.CacheTau = n
+	}
+	cfg.CacheMaxBytes, cfg.CacheQueueMaxBytes = DefaultCacheMaxBytes, DefaultCacheQueueMaxBytes
+	for _, setting := range []struct {
+		name  string
+		value *int64
+	}{
+		{"PUSAQ_CACHE_MAX_BYTES", &cfg.CacheMaxBytes},
+		{"PUSAQ_CACHE_QUEUE_MAX_BYTES", &cfg.CacheQueueMaxBytes},
+	} {
+		if v, ok := lookup(setting.name); ok {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n <= 0 {
+				return Config{}, fmt.Errorf("%s: must be a positive byte count", setting.name)
+			}
+			*setting.value = n
+		}
 	}
 	cfg.CacheMaxEntries = DefaultCacheMaxEntries
 	if v, ok := lookup("PUSAQ_CACHE_MAX_ENTRIES"); ok {
