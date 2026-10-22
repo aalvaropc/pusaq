@@ -72,7 +72,7 @@ func (p *HTTP) Name() string { return p.name }
 
 // Complete implements Provider. A rejection of the request (400, 413, 422)
 // maps to core.CodeInvalidRequest and every other failure to
-// core.CodeUpstream; the upstream's raw body is logged, never returned.
+// core.CodeUpstream.
 func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -90,7 +90,7 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 	httpResp, err := p.client.Do(httpReq)
 	if err != nil {
 		p.logger.Warn("upstream call failed",
-			slog.String("provider", p.name), slog.Any("error", err))
+			slog.String("provider", p.name), slog.String("error_code", string(core.CodeUpstream)))
 		return ChatResponse{}, &core.Error{
 			Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: err,
 		}
@@ -108,7 +108,6 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 		p.logger.Warn("upstream error response",
 			slog.String("provider", p.name),
 			slog.Int("status", httpResp.StatusCode),
-			slog.String("body", string(body[:min(len(body), 512)])),
 		)
 		return ChatResponse{}, statusError(httpResp.StatusCode)
 	}
@@ -166,20 +165,18 @@ func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadClos
 	if err != nil {
 		cancel(nil)
 		p.logger.Warn("upstream stream call failed",
-			slog.String("provider", p.name), slog.Any("error", err))
+			slog.String("provider", p.name), slog.String("error_code", string(core.CodeUpstream)))
 		return nil, &core.Error{
 			Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: err,
 		}
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 512))
 		_ = httpResp.Body.Close()
 		cancel(nil)
 		p.logger.Warn("upstream stream error response",
 			slog.String("provider", p.name),
 			slog.Int("status", httpResp.StatusCode),
-			slog.String("body", string(body)),
 		)
 		return nil, statusError(httpResp.StatusCode)
 	}

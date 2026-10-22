@@ -218,7 +218,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		s.logger.Error("failed to encode response", slog.Any("error", err))
+		s.logger.Error("failed to encode response", slog.String("error_code", string(core.AsError(err).Code)))
 	}
 }
 
@@ -333,6 +333,6 @@ func (s *Server) writeError(w http.ResponseWriter, requestID string, e *core.Err
 	}
 	w.WriteHeader(e.Status())
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		s.logger.Error("failed to encode error response", slog.Any("error", err))
+		s.logger.Error("failed to encode error response", slog.String("error_code", string(core.AsError(err).Code)))
 	}
 }

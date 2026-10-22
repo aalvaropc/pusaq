@@ -105,7 +105,7 @@ func (s *Shadow) evaluate(sample Sample) {
 		s.skipped.Add(1)
 		s.logger.Warn("shadow evaluation skipped: embedder failed",
 			slog.String("request_id", sample.RequestID),
-			slog.Any("error", err),
+			slog.String("failure_kind", "embedding_failed"),
 		)
 		return
 	}

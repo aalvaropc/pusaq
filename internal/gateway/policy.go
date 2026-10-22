@@ -105,11 +105,11 @@ func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, a
 	if err != nil {
 		if p.FailClosed {
 			opts.Logger.Warn("spend store unavailable, failing closed",
-				slog.String("request_id", req.ID), slog.String("tenant", req.Tenant), slog.Any("error", err))
+				slog.String("request_id", req.ID), slog.String("tenant", req.Tenant), slog.String("error_code", string(core.AsError(err).Code)))
 			return flags, &core.Error{Code: core.CodeStoreUnavailable, Message: "spend store unavailable", Err: err}
 		}
 		opts.Logger.Warn("spend store unavailable, failing open",
-			slog.String("request_id", req.ID), slog.String("tenant", req.Tenant), slog.Any("error", err))
+			slog.String("request_id", req.ID), slog.String("tenant", req.Tenant), slog.String("error_code", string(core.AsError(err).Code)))
 	} else if spent >= p.BudgetUSD {
 		req.SpendUSDMonth = spent
 		return flags, &core.Error{
@@ -131,7 +131,7 @@ func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, a
 		total, err := opts.Spend.Add(addCtx, tenant, at, req.Cost.USD)
 		if err != nil {
 			opts.Logger.Warn("spend counter update failed; spend under-counted",
-				slog.String("request_id", req.ID), slog.String("tenant", tenant), slog.Any("error", err))
+				slog.String("request_id", req.ID), slog.String("tenant", tenant), slog.String("error_code", string(core.AsError(err).Code)))
 			return
 		}
 		req.SpendUSDMonth = total

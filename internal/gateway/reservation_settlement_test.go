@@ -114,7 +114,7 @@ func TestUnattemptedRefundFailurePreservesOutcome(t *testing.T) {
 	if len(l.adjusts) != 1 || l.adjusts[0] != 35 || len(*events) != 1 || (*events)[0].ErrorCode != core.CodeUpstream {
 		t.Fatalf("adjusts = %v events = %+v", l.adjusts, *events)
 	}
-	if !strings.Contains(logs.String(), "token reconciliation failed") || !strings.Contains(logs.String(), "refund unavailable") {
+	if !strings.Contains(logs.String(), "token reconciliation failed") || strings.Contains(logs.String(), "refund unavailable") || !strings.Contains(logs.String(), `"error_code":"internal"`) {
 		t.Fatalf("missing reconciliation warning: %s", logs.String())
 	}
 }
