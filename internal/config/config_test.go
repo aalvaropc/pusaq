@@ -7,9 +7,16 @@ import (
 	"time"
 )
 
-func lookupFrom(env map[string]string) func(string) (string, bool) {
+func developmentLookupFrom(env map[string]string) func(string) (string, bool) {
+	values := make(map[string]string, len(env)+1)
+	for k, v := range env {
+		values[k] = v
+	}
+	if _, ok := values["PUSAQ_API_KEYS"]; !ok {
+		values["PUSAQ_DEV_MODE"] = "true"
+	}
 	return func(key string) (string, bool) {
-		v, ok := env[key]
+		v, ok := values[key]
 		return v, ok
 	}
 }
@@ -22,7 +29,7 @@ func TestLoad(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "defaults when nothing is set",
+			name: "defaults in explicit development mode",
 			env:  map[string]string{},
 			want: Config{Addr: ":8080", DrainDelay: time.Second, ShutdownGrace: 10 * time.Second, TelemetryBuffer: 1024, UpstreamTimeout: 30 * time.Second, RPMLimit: 60, RPMBurst: 60, RateLimitMode: "strict", LeaseSize: 10, LeaseTTL: time.Second, TPMLimit: 100000, TPMBurst: 100000, TPMReserveDefault: 512, CacheMode: "off", CacheTau: 0.95, CacheMaxEntries: 10000, EmbedderKind: "local", RoutingRules: defaultRoutingRules(), RoutingDefault: "pusaq/fast", BreakerWindow: 20, BreakerMinSamples: 10, BreakerThreshold: 0.5, BreakerCooldown: 10 * time.Second, BreakerProbes: 3},
 		},
@@ -228,7 +235,7 @@ func TestLoad(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Load(lookupFrom(tt.env))
+			got, err := Load(developmentLookupFrom(tt.env))
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("Load() = %+v, want error", got)
@@ -241,6 +248,7 @@ func TestLoad(t *testing.T) {
 			gotRoutes := got.Routes
 			gotUpstreams := got.Upstreams
 			got.Routes, got.Upstreams = nil, nil
+			tt.want.DevMode = len(tt.want.APIKeys) == 0
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Load() = %+v, want %+v", got, tt.want)
 			}
@@ -260,7 +268,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadAPIKeys(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{
+	got, err := Load(developmentLookupFrom(map[string]string{
 		"PUSAQ_API_KEYS": " sk-a:team-a , sk-b:team-b ",
 	}))
 	if err != nil {
@@ -272,8 +280,8 @@ func TestLoadAPIKeys(t *testing.T) {
 	}
 }
 
-func TestLoadNoAPIKeysMeansDevMode(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{}))
+func TestLoadExplicitDevelopmentMode(t *testing.T) {
+	got, err := Load(developmentLookupFrom(map[string]string{}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -283,7 +291,7 @@ func TestLoadNoAPIKeysMeansDevMode(t *testing.T) {
 }
 
 func TestUpstreamKeysAttached(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{
+	got, err := Load(developmentLookupFrom(map[string]string{
 		"PUSAQ_UPSTREAMS":           "gemini=http://g:1,mock=http://m:2",
 		"PUSAQ_UPSTREAM_KEY_GEMINI": "sk-gem",
 	}))
@@ -299,7 +307,7 @@ func TestUpstreamKeysAttached(t *testing.T) {
 }
 
 func TestRouteModelOverrides(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{
+	got, err := Load(developmentLookupFrom(map[string]string{
 		"PUSAQ_ROUTES": "pusaq/fast=gemini-2.5-flash, pusaq/best=gemini-2.5-pro",
 	}))
 	if err != nil {
@@ -317,13 +325,13 @@ func TestRouteModelOverrides(t *testing.T) {
 }
 
 func TestRouteOverrideAutoRejected(t *testing.T) {
-	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/auto=x"})); err == nil {
+	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/auto=x"})); err == nil {
 		t.Fatal("pusaq/auto accepted as a route")
 	}
 }
 
 func TestRoutingRulesReplaceDefaults(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTING_RULES": "toll=pusaq/best, default=pusaq/fast"}))
+	got, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_ROUTING_RULES": "toll=pusaq/best, default=pusaq/fast"}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -342,23 +350,23 @@ func TestRoutingRulesRejections(t *testing.T) {
 		"malformed pair":    "classify,default=pusaq/fast",
 		"tag charset":       "deep reason=pusaq/best,default=pusaq/fast",
 	} {
-		if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTING_RULES": v})); err == nil {
+		if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_ROUTING_RULES": v})); err == nil {
 			t.Fatalf("%s accepted: %q", name, v)
 		}
 	}
 }
 
 func TestRouteOverrideUnknownAliasRejected(t *testing.T) {
-	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/turbo=x"})); err == nil {
+	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/turbo=x"})); err == nil {
 		t.Fatal("unknown alias accepted")
 	}
-	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/fast"})); err == nil {
+	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_ROUTES": "pusaq/fast"})); err == nil {
 		t.Fatal("malformed pair accepted")
 	}
 }
 
 func TestOpenAIEmbedderAccepted(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{
+	got, err := Load(developmentLookupFrom(map[string]string{
 		"PUSAQ_EMBEDDER":    "openai:https://g.example/v1beta/openai/",
 		"PUSAQ_EMBED_MODEL": "gemini-embedding-001",
 		"PUSAQ_EMBED_KEY":   "sk-e",
@@ -376,7 +384,7 @@ func TestOpenAIEmbedderAccepted(t *testing.T) {
 }
 
 func TestBreakerConfigOverrides(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{
+	got, err := Load(developmentLookupFrom(map[string]string{
 		"PUSAQ_BREAKER_WINDOW":      "8",
 		"PUSAQ_BREAKER_MIN_SAMPLES": "4",
 		"PUSAQ_BREAKER_THRESHOLD":   "0.25",
@@ -400,14 +408,14 @@ func TestBreakerConfigRejections(t *testing.T) {
 		"non-positive cooldown": {"PUSAQ_BREAKER_COOLDOWN": "0s"},
 		"zero probes":           {"PUSAQ_BREAKER_PROBES": "0"},
 	} {
-		if _, err := Load(lookupFrom(env)); err == nil {
+		if _, err := Load(developmentLookupFrom(env)); err == nil {
 			t.Fatalf("%s accepted", name)
 		}
 	}
 }
 
 func TestSmallRequestBurstLoadsInStrictMode(t *testing.T) {
-	cfg, err := Load(lookupFrom(map[string]string{"PUSAQ_RPM_LIMIT": "5"}))
+	cfg, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_RPM_LIMIT": "5"}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -417,13 +425,13 @@ func TestSmallRequestBurstLoadsInStrictMode(t *testing.T) {
 }
 
 func TestTokenReserveMustFitTheBurst(t *testing.T) {
-	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_TPM_BURST": "500"})); err == nil {
+	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_TPM_BURST": "500"})); err == nil {
 		t.Fatal("a default reservation of 512 against a burst of 500 accepted")
 	}
-	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_TPM_BURST": "512"})); err != nil {
+	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_TPM_BURST": "512"})); err != nil {
 		t.Fatalf("reservation equal to the burst rejected: %v", err)
 	}
-	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_TPM_LIMIT": "0"})); err != nil {
+	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_TPM_LIMIT": "0"})); err != nil {
 		t.Fatalf("disabled token limiting rejected: %v", err)
 	}
 }
@@ -441,7 +449,7 @@ func TestNonFiniteNumbersRejected(t *testing.T) {
 		"budget":             policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=NaN"}),
 		"budget infinity":    policyEnv(map[string]string{"PUSAQ_TENANT_POLICIES": "tenant-a:budget_usd=Inf"}),
 	} {
-		if _, err := Load(lookupFrom(env)); err == nil {
+		if _, err := Load(developmentLookupFrom(env)); err == nil {
 			t.Fatalf("%s accepted", name)
 		}
 	}
@@ -461,7 +469,7 @@ func policyEnv(extra map[string]string) map[string]string {
 }
 
 func TestTenantPoliciesParsed(t *testing.T) {
-	got, err := Load(lookupFrom(policyEnv(map[string]string{
+	got, err := Load(developmentLookupFrom(policyEnv(map[string]string{
 		"PUSAQ_TENANT_POLICIES": "tenant-a:models=pusaq/fast|pusaq/best, max_prompt_chars=8000, budget_usd=50, fail_closed=true, sensitive=block, injection=log, cache=off; tenant-b:budget_usd=10, cache=on",
 	})))
 	if err != nil {
@@ -480,7 +488,7 @@ func TestTenantPoliciesParsed(t *testing.T) {
 }
 
 func TestTenantPoliciesDevTenantWithoutKeys(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{"PUSAQ_TENANT_POLICIES": "dev:models=pusaq/fast,max_prompt_chars=10"}))
+	got, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_TENANT_POLICIES": "dev:models=pusaq/fast,max_prompt_chars=10"}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -523,14 +531,14 @@ func TestTenantPoliciesRejections(t *testing.T) {
 		},
 	}
 	for name, env := range cases {
-		if _, err := Load(lookupFrom(env)); err == nil {
+		if _, err := Load(developmentLookupFrom(env)); err == nil {
 			t.Fatalf("%s accepted", name)
 		}
 	}
 }
 
 func TestRegionAndAdminTokenLoaded(t *testing.T) {
-	got, err := Load(lookupFrom(map[string]string{
+	got, err := Load(developmentLookupFrom(map[string]string{
 		"PUSAQ_REGION":      " us-east1 ",
 		"PUSAQ_ADMIN_TOKEN": "0123456789abcdef",
 	}))
@@ -540,7 +548,7 @@ func TestRegionAndAdminTokenLoaded(t *testing.T) {
 	if got.Region != "us-east1" || got.AdminToken != "0123456789abcdef" {
 		t.Fatalf("Region/AdminToken = %q/%q", got.Region, got.AdminToken)
 	}
-	plain, err := Load(lookupFrom(map[string]string{}))
+	plain, err := Load(developmentLookupFrom(map[string]string{}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -558,7 +566,7 @@ func TestRegionAndAdminTokenRejections(t *testing.T) {
 		{"PUSAQ_ADMIN_TOKEN": "short"},
 		{"PUSAQ_ADMIN_TOKEN": "has whitespace in it"},
 	} {
-		if _, err := Load(lookupFrom(env)); err == nil {
+		if _, err := Load(developmentLookupFrom(env)); err == nil {
 			t.Fatalf("env %v accepted, want an error", env)
 		}
 	}
@@ -574,7 +582,7 @@ func TestConfigErrorsNeverEchoSecrets(t *testing.T) {
 		"embedder url":       {"PUSAQ_EMBEDDER": "openai:https://user:" + secret + "@/nohost"},
 		"embedder no model":  {"PUSAQ_EMBEDDER": "openai:https://user:" + secret + "@host/v1"},
 	} {
-		_, err := Load(lookupFrom(env))
+		_, err := Load(developmentLookupFrom(env))
 		if err == nil {
 			t.Fatalf("%s accepted", name)
 		}
@@ -585,13 +593,13 @@ func TestConfigErrorsNeverEchoSecrets(t *testing.T) {
 }
 
 func TestEmptyAPIKeysFailsStartup(t *testing.T) {
-	if _, err := Load(lookupFrom(map[string]string{"PUSAQ_API_KEYS": ""})); err == nil {
+	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_API_KEYS": ""})); err == nil {
 		t.Fatal("empty PUSAQ_API_KEYS accepted as dev mode")
 	}
 }
 
 func TestUpstreamKeyVariableCollisionRejected(t *testing.T) {
-	_, err := Load(lookupFrom(map[string]string{"PUSAQ_UPSTREAMS": "my-api=http://a:1,my_api=http://b:1"}))
+	_, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_UPSTREAMS": "my-api=http://a:1,my_api=http://b:1"}))
 	if err == nil {
 		t.Fatal("upstreams sharing PUSAQ_UPSTREAM_KEY_MY_API accepted")
 	}
@@ -601,7 +609,7 @@ func TestUpstreamKeyVariableCollisionRejected(t *testing.T) {
 }
 
 func TestAPIKeyFieldsAreTrimmed(t *testing.T) {
-	cfg, err := Load(lookupFrom(map[string]string{"PUSAQ_API_KEYS": "sk-a : acme"}))
+	cfg, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_API_KEYS": "sk-a : acme"}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
@@ -611,14 +619,14 @@ func TestAPIKeyFieldsAreTrimmed(t *testing.T) {
 }
 
 func TestUpstreamURLsAreVersionedBases(t *testing.T) {
-	def, err := Load(lookupFrom(map[string]string{}))
+	def, err := Load(developmentLookupFrom(map[string]string{}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
 	if def.Upstreams[0].URL != "http://localhost:9090/v1" {
 		t.Fatalf("default upstream = %q, want the mock's /v1 base", def.Upstreams[0].URL)
 	}
-	got, err := Load(lookupFrom(map[string]string{"PUSAQ_UPSTREAMS": "gemini=https://g.example/v1beta/openai/"}))
+	got, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_UPSTREAMS": "gemini=https://g.example/v1beta/openai/"}))
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}

@@ -150,9 +150,10 @@ and `PUSAQ_CACHE_TAU` only labels the shadow records.
 Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`;
 clients send `Authorization: Bearer <key>`, and every cost event carries the
 tenant. Missing/unknown keys get a normalized `unauthorized` (401). With
-`PUSAQ_API_KEYS` unset the gateway runs in **dev mode** — no auth,
+`PUSAQ_DEV_MODE=true` and `PUSAQ_API_KEYS` unset the gateway runs in **dev mode** — no auth,
 everything attributed to the `dev` tenant, and a warning logged at startup;
-set but empty, it refuses to start. Configuration errors name positions and
+absent both settings or set but empty, it refuses to start. Development mode
+and configured API keys cannot be combined. Configuration errors name positions and
 tenants, never a key.
 `/healthz` and `/readyz` never require credentials.
 

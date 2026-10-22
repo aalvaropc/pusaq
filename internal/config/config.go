@@ -188,10 +188,8 @@ type Config struct {
 	// TenantPolicies holds per-tenant policies keyed by tenant
 	// (PUSAQ_TENANT_POLICIES); tenants absent here are unrestricted.
 	TenantPolicies map[string]TenantPolicy
-	// APIKeys maps API keys to tenant names (PUSAQ_API_KEYS,
-	// "key:tenant" comma-separated). Empty when the variable is unset: dev
-	// mode, no authentication, every request attributed to the "dev" tenant.
-	APIKeys map[string]string
+	APIKeys        map[string]string
+	DevMode        bool
 	// RedisAddr enables distributed rate limiting when set
 	// (PUSAQ_REDIS_ADDR); unset means limiting is disabled, announced by
 	// a startup warning.
@@ -556,12 +554,27 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("PUSAQ_EMBED_KEY: set without an openai embedder")
 	}
 
+	if v, ok := lookup("PUSAQ_DEV_MODE"); ok {
+		mode, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("PUSAQ_DEV_MODE: must be true or false")
+		}
+		cfg.DevMode = mode
+	}
+
 	if v, ok := lookup("PUSAQ_API_KEYS"); ok {
 		keys, err := parseAPIKeys(v)
 		if err != nil {
 			return Config{}, fmt.Errorf("PUSAQ_API_KEYS: %w", err)
 		}
 		cfg.APIKeys = keys
+	}
+
+	if cfg.DevMode && len(cfg.APIKeys) > 0 {
+		return Config{}, fmt.Errorf("PUSAQ_DEV_MODE: cannot be combined with PUSAQ_API_KEYS")
+	}
+	if !cfg.DevMode && len(cfg.APIKeys) == 0 {
+		return Config{}, fmt.Errorf("PUSAQ_API_KEYS: required unless PUSAQ_DEV_MODE=true")
 	}
 
 	if v, ok := lookup("PUSAQ_TENANT_POLICIES"); ok && v != "" {
