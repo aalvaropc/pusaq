@@ -1,6 +1,3 @@
-# The gateway, one service per region behind the global balancer. Readiness
-# is what the balancer's service health reads (docs/design.md §7): failing
-# `/readyz` on purpose is the chaos experiment, so the probe is tight.
 resource "google_service_account" "gateway" {
   account_id   = "pusaq-gateway"
   display_name = "Pusaq gateway (runtime)"

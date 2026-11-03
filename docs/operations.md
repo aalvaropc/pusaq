@@ -264,6 +264,12 @@ requests to a region whose instances fail their readiness probe. Plain HTTP
 on a global address, throwaway API keys, a generated admin token; nothing
 here is a standing deployment.
 
+The readiness probe is tight on purpose: every 2 s, a 1 s timeout, and one
+failure marks the instance not ready. `/readyz` reads an in-process flag
+without I/O, so a failed probe means a drain or an injected window, never a
+slow dependency, and the short period keeps detection small next to the
+failover gap the run measures.
+
 The API keys and the admin token are Secret Manager secrets that reach the
 gateway as secret references, never as plain environment values. The gateway
 runs as its own service account, which can read only those two secrets.

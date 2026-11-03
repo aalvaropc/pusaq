@@ -69,13 +69,13 @@ variable "api_keys_version" {
 }
 
 variable "readiness_period_seconds" {
-  description = "Seconds between readiness probes of a gateway instance."
+  description = "Seconds between readiness probes of a gateway instance. Short on purpose: the balancer follows readiness, so the period bounds how long an injected failure goes unseen."
   type        = number
   default     = 2
 }
 
 variable "readiness_failure_threshold" {
-  description = "Consecutive readiness probe failures before Cloud Run stops routing to the instance."
+  description = "Consecutive readiness probe failures before Cloud Run stops routing to the instance. 1 is safe: /readyz reads an in-process flag without I/O, so a failure means a drain or an injected window, never a slow dependency."
   type        = number
   default     = 1
 }
