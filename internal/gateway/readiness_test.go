@@ -78,8 +78,17 @@ func TestAdminReadinessRejectsWrongToken(t *testing.T) {
 func TestAdminReadinessRejectsBadParameters(t *testing.T) {
 	s, _ := newOperableServer(t, WithAdminToken(testAdminToken))
 	for _, q := range []string{"", "state=sideways", "state=down", "state=down&for=0s", "state=down&for=-1s", "state=down&for=nope", "state=down&for=2h"} {
-		if rec := adminReadiness(s, testAdminToken, q); rec.Code != http.StatusBadRequest {
+		rec := adminReadiness(s, testAdminToken, q)
+		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("query %q = %d, want 400", q, rec.Code)
+		}
+		wantParam := "for"
+		if !strings.HasPrefix(q, "state=down") {
+			wantParam = "state"
+		}
+		var body errorBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error.Param == nil || *body.Error.Param != wantParam {
+			t.Fatalf("query %q body = %s, want param %q", q, rec.Body.String(), wantParam)
 		}
 	}
 	if rec := getReadyz(s); rec.Code != http.StatusOK {

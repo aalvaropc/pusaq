@@ -133,9 +133,10 @@ func drain(r io.Reader) (string, error) {
 func assertErrorEvent(t *testing.T, body string) {
 	t.Helper()
 	events := strings.Split(strings.TrimSpace(body), "\n\n")
+	last := strings.TrimPrefix(events[len(events)-1], "data: ")
 	var e errorBody
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(events[len(events)-1], "data: ")), &e); err != nil || e.Error.Code != core.CodeUpstream {
-		t.Fatalf("last event = %q, want an %s error event", events[len(events)-1], core.CodeUpstream)
+	if err := json.Unmarshal([]byte(last), &e); err != nil || e.Error.Code != core.CodeUpstream || e.Error.Type != "server_error" || !strings.Contains(last, `"param":null`) {
+		t.Fatalf("last event = %q, want an %s error event with type and param", events[len(events)-1], core.CodeUpstream)
 	}
 }
 

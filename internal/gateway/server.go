@@ -51,10 +51,10 @@ func runIDFromPayload(body []byte) (string, error) {
 	}
 	var id string
 	if err := json.Unmarshal(raw, &id); err != nil {
-		return "", core.NewError(core.CodeInvalidRequest, "metadata.run_id must be a string")
+		return "", core.InvalidField("metadata.run_id", "metadata.run_id must be a string")
 	}
 	if len(id) > maxLabelLen {
-		return "", core.Errorf(core.CodeInvalidRequest, "metadata.run_id must be at most %d characters", maxLabelLen)
+		return "", core.InvalidField("metadata.run_id", "metadata.run_id must be at most %d characters", maxLabelLen)
 	}
 	return id, nil
 }
@@ -102,14 +102,42 @@ func NewServer(logger *slog.Logger, pipeline core.Stage, completions core.Handle
 		opt(s)
 	}
 
-	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
-	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
-	s.mux.Handle("POST /v1/chat/completions", s.pipelineHandler("chat.completions", completions))
-	if s.adminToken != "" {
-		s.mux.HandleFunc("POST /admin/readiness", s.handleAdminReadiness)
+	routes := []route{
+		{http.MethodGet, "/healthz", http.HandlerFunc(s.handleHealthz)},
+		{http.MethodGet, "/readyz", http.HandlerFunc(s.handleReadyz)},
+		{http.MethodPost, "/v1/chat/completions", s.pipelineHandler("chat.completions", completions)},
 	}
+	if s.adminToken != "" {
+		routes = append(routes, route{http.MethodPost, "/admin/readiness", http.HandlerFunc(s.handleAdminReadiness)})
+	}
+	allowed := make(map[string][]string)
+	for _, rt := range routes {
+		s.mux.Handle(rt.method+" "+rt.path, rt.handler)
+		allowed[rt.path] = append(allowed[rt.path], rt.method)
+		if rt.method == http.MethodGet {
+			allowed[rt.path] = append(allowed[rt.path], http.MethodHead)
+		}
+	}
+	for path, methods := range allowed {
+		s.mux.Handle(path, s.methodNotAllowed(strings.Join(methods, ", ")))
+	}
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		s.writeError(w, "", core.NewError(core.CodeNotFound, "path not found"))
+	})
 
 	return s
+}
+
+type route struct {
+	method, path string
+	handler      http.Handler
+}
+
+func (s *Server) methodNotAllowed(allow string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", allow)
+		s.writeError(w, "", core.NewError(core.CodeMethodNotAllowed, "method not allowed for this path"))
+	})
 }
 
 // ServeHTTP implements http.Handler.
@@ -179,7 +207,7 @@ func (s *Server) handleAdminReadiness(w http.ResponseWriter, r *http.Request) {
 	case "down":
 		d, err := time.ParseDuration(q.Get("for"))
 		if err != nil || d <= 0 || d > maxInjectedWindow {
-			s.writeError(w, "", core.Errorf(core.CodeInvalidRequest, "for must be a positive duration of at most %s", maxInjectedWindow))
+			s.writeError(w, "", core.InvalidField("for", "for must be a positive duration of at most %s", maxInjectedWindow))
 			return
 		}
 		until := now.Add(d)
@@ -206,7 +234,7 @@ func (s *Server) handleAdminReadiness(w http.ResponseWriter, r *http.Request) {
 		)
 		s.writeJSON(w, map[string]any{"ready": true, "region": s.region})
 	default:
-		s.writeError(w, "", core.NewError(core.CodeInvalidRequest, `state must be "down" or "up"`))
+		s.writeError(w, "", core.InvalidField("state", `state must be "down" or "up"`))
 	}
 }
 
@@ -318,25 +346,43 @@ type errorBody struct {
 	Error struct {
 		Code         core.Code `json:"code"`
 		Message      string    `json:"message"`
+		Type         string    `json:"type"`
+		Param        *string   `json:"param"`
 		RetryAfterMS int64     `json:"retry_after_ms,omitempty"`
 	} `json:"error"`
 }
 
-func (s *Server) writeError(w http.ResponseWriter, requestID string, e *core.Error) {
+func newErrorBody(e *core.Error) errorBody {
 	var body errorBody
 	body.Error.Code = e.Code
 	body.Error.Message = e.Message
-
-	w.Header().Set("Content-Type", "application/json")
-	if requestID != "" {
-		w.Header().Set(RequestIDHeader, requestID)
+	body.Error.Type = e.Type()
+	if e.Param != "" {
+		param := e.Param
+		body.Error.Param = &param
 	}
 	if e.RetryAfter > 0 {
 		body.Error.RetryAfterMS = e.RetryAfter.Milliseconds()
+	}
+	return body
+}
+
+func errorJSON(e *core.Error) []byte {
+	b, _ := json.Marshal(newErrorBody(e))
+	return b
+}
+
+func (s *Server) writeError(w http.ResponseWriter, requestID string, e *core.Error) {
+	if requestID == "" {
+		requestID = newRequestID()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(RequestIDHeader, requestID)
+	if e.RetryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(e.RetryAfter.Seconds()))))
 	}
 	w.WriteHeader(e.Status())
-	if err := json.NewEncoder(w).Encode(body); err != nil {
+	if err := json.NewEncoder(w).Encode(newErrorBody(e)); err != nil {
 		s.logger.Error("failed to encode error response", slog.String("error_code", string(core.AsError(err).Code)))
 	}
 }

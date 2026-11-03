@@ -21,6 +21,8 @@ const (
 	CodeRateLimited Code = "rate_limited"
 	// CodeNotFound marks a missing route or resource.
 	CodeNotFound Code = "not_found"
+	// CodeMethodNotAllowed marks a served path requested with another method.
+	CodeMethodNotAllowed Code = "method_not_allowed"
 	// CodeInternal marks an unexpected gateway failure. It is the fallback
 	// for unknown errors and never leaks internal details to the client.
 	CodeInternal Code = "internal"
@@ -51,19 +53,31 @@ const (
 
 // statusByCode maps each code to the HTTP status the transport layer renders.
 var statusByCode = map[Code]int{
-	CodeInvalidRequest: http.StatusBadRequest,
-	CodeUnauthorized:   http.StatusUnauthorized,
-	CodeRateLimited:    http.StatusTooManyRequests,
-	CodeNotFound:       http.StatusNotFound,
-	CodeInternal:       http.StatusInternalServerError,
-	CodeUpstream:       http.StatusBadGateway,
-	CodeClientCanceled: 499,
-	CodePolicyDenied:   http.StatusForbidden,
+	CodeInvalidRequest:   http.StatusBadRequest,
+	CodeUnauthorized:     http.StatusUnauthorized,
+	CodeRateLimited:      http.StatusTooManyRequests,
+	CodeNotFound:         http.StatusNotFound,
+	CodeMethodNotAllowed: http.StatusMethodNotAllowed,
+	CodeInternal:         http.StatusInternalServerError,
+	CodeUpstream:         http.StatusBadGateway,
+	CodeClientCanceled:   499,
+	CodePolicyDenied:     http.StatusForbidden,
 	// 402 rather than 429: SDKs retry 429 with backoff, which is wrong for
 	// a budget that only resets next month.
 	CodeBudgetExceeded:   http.StatusPaymentRequired,
 	CodeStoreUnavailable: http.StatusServiceUnavailable,
 	CodeNotReady:         http.StatusServiceUnavailable,
+}
+
+var typeByCode = map[Code]string{
+	CodeInvalidRequest:   "invalid_request_error",
+	CodeUnauthorized:     "authentication_error",
+	CodeBudgetExceeded:   "insufficient_quota",
+	CodePolicyDenied:     "permission_error",
+	CodeNotFound:         "not_found_error",
+	CodeMethodNotAllowed: "invalid_request_error",
+	CodeRateLimited:      "rate_limit_error",
+	CodeClientCanceled:   "invalid_request_error",
 }
 
 // Error is Pusaq's normalized error: every failure the gateway reports has a
@@ -72,6 +86,7 @@ var statusByCode = map[Code]int{
 type Error struct {
 	Code    Code
 	Message string
+	Param   string
 	// RetryAfter, when positive, tells the client when to retry; rendered
 	// as retry_after_ms in the body and a Retry-After header.
 	RetryAfter time.Duration
@@ -87,6 +102,11 @@ func NewError(code Code, message string) *Error {
 // Errorf builds a normalized Error with a formatted message.
 func Errorf(code Code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
+// InvalidField builds an invalid_request error naming the offending request field.
+func InvalidField(param, format string, args ...any) *Error {
+	return &Error{Code: CodeInvalidRequest, Message: fmt.Sprintf(format, args...), Param: param}
 }
 
 // Error implements the error interface.
@@ -106,6 +126,14 @@ func (e *Error) Status() int {
 		return s
 	}
 	return http.StatusInternalServerError
+}
+
+// Type returns the OpenAI-style error type for the error's code.
+func (e *Error) Type() string {
+	if t, ok := typeByCode[e.Code]; ok {
+		return t
+	}
+	return "server_error"
 }
 
 // AsError normalizes any error into an *Error. A non-normalized error maps to

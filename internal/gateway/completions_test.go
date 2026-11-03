@@ -103,22 +103,27 @@ func TestCompletionsValidation(t *testing.T) {
 		name    string
 		payload string
 		message string
+		param   string
 	}{
-		{"invalid JSON", `{not json`, "request body is not valid JSON"},
-		{"missing model", `{` + msgs + `}`, "model is required"},
-		{"empty messages", `{"model":"pusaq/fast","messages":[]}`, "messages must not be empty"},
-		{"negative max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":-5}`, "max_tokens must be a positive integer"},
-		{"zero max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":0}`, "max_tokens must be a positive integer"},
-		{"string max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":"32"}`, "max_tokens must be a positive integer"},
-		{"oversized max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":9223372036854775808}`, "max_tokens must be a positive integer"},
-		{"content parts", `{"model":"pusaq/fast","messages":[{"role":"user","content":[{"type":"text","text":"x"}]}]}`, "content parts are not supported"},
-		{"tools", `{"model":"pusaq/fast",` + msgs + `,"tools":[{"type":"function"}]}`, "tools is not supported"},
-		{"tool_choice", `{"model":"pusaq/fast",` + msgs + `,"tool_choice":"auto"}`, "tool_choice is not supported"},
-		{"response_format", `{"model":"pusaq/fast",` + msgs + `,"response_format":{"type":"json_object"}}`, "response_format is not supported"},
-		{"n above one", `{"model":"pusaq/fast",` + msgs + `,"n":2}`, "n is not supported"},
-		{"logprobs", `{"model":"pusaq/fast",` + msgs + `,"logprobs":true}`, "logprobs is not supported"},
-		{"message tool_calls", `{"model":"pusaq/fast","messages":[{"role":"assistant","content":"","tool_calls":[{"id":"c"}]}]}`, "messages[].tool_calls is not supported"},
-		{"message tool_call_id", `{"model":"pusaq/fast","messages":[{"role":"tool","content":"x","tool_call_id":"c"}]}`, "messages[].tool_call_id is not supported"},
+		{"invalid JSON", `{not json`, "request body is not valid JSON", ""},
+		{"missing model", `{` + msgs + `}`, "model is required", "model"},
+		{"empty messages", `{"model":"pusaq/fast","messages":[]}`, "messages must not be empty", "messages"},
+		{"negative max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":-5}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"zero max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":0}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"string max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":"32"}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"oversized max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":9223372036854775808}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"content parts", `{"model":"pusaq/fast","messages":[{"role":"user","content":[{"type":"text","text":"x"}]}]}`, "content parts are not supported", "messages[].content"},
+		{"mistyped field", `{"model":"pusaq/fast",` + msgs + `,"temperature":"hot"}`, "temperature has the wrong type", "temperature"},
+		{"tools", `{"model":"pusaq/fast",` + msgs + `,"tools":[{"type":"function"}]}`, "tools is not supported", "tools"},
+		{"tool_choice", `{"model":"pusaq/fast",` + msgs + `,"tool_choice":"auto"}`, "tool_choice is not supported", "tool_choice"},
+		{"response_format", `{"model":"pusaq/fast",` + msgs + `,"response_format":{"type":"json_object"}}`, "response_format is not supported", "response_format"},
+		{"n above one", `{"model":"pusaq/fast",` + msgs + `,"n":2}`, "n is not supported", "n"},
+		{"logprobs", `{"model":"pusaq/fast",` + msgs + `,"logprobs":true}`, "logprobs is not supported", "logprobs"},
+		{"message tool_calls", `{"model":"pusaq/fast","messages":[{"role":"assistant","content":"","tool_calls":[{"id":"c"}]}]}`, "messages[].tool_calls is not supported", "messages[].tool_calls"},
+		{"message tool_call_id", `{"model":"pusaq/fast","messages":[{"role":"tool","content":"x","tool_call_id":"c"}]}`, "messages[].tool_call_id is not supported", "messages[].tool_call_id"},
+		{"unknown model", `{"model":"pusaq/none",` + msgs + `}`, `unknown model "pusaq/none"`, "model"},
+		{"non-string feature tag", `{"model":"pusaq/fast",` + msgs + `,"metadata":{"feature_tag":7}}`, "metadata.feature_tag must be a string", "metadata.feature_tag"},
+		{"malformed feature tag", `{"model":"pusaq/fast",` + msgs + `,"metadata":{"feature_tag":"a b"}}`, "metadata.feature_tag must be at most", "metadata.feature_tag"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,6 +136,9 @@ func TestCompletionsValidation(t *testing.T) {
 			}
 			if !strings.Contains(norm.Message, tt.message) {
 				t.Fatalf("message = %q, want it to contain %q", norm.Message, tt.message)
+			}
+			if norm.Param != tt.param {
+				t.Fatalf("param = %q, want %q", norm.Param, tt.param)
 			}
 			if p.got.Model != "" {
 				t.Fatal("provider was called for an invalid request")
