@@ -7,7 +7,7 @@ How the gateway survives upstream failure: a circuit breaker per backend convert
 
 ### Requirement: Circuit breaker per upstream backend
 
-The gateway SHALL track each upstream backend's recent outcomes and open that backend's breaker when the failure rate over a sliding window crosses a configured threshold with at least a minimum number of samples. While open, requests SHALL fail fast for that backend without attempting the call. After a cooldown, the breaker SHALL allow a bounded number of probe requests (half-open): a probe success closes the breaker, a probe failure reopens it. The window size, minimum samples, failure threshold, cooldown, and probe count SHALL come from configuration, be validated at startup, and be stated in the startup log. Every state transition SHALL be observable as a log record naming the backend, the previous state, and the new state. Detection time (failure start to breaker open) and recovery time (failure end to breaker closed) SHALL be measurable against a provider that fails at a known instant, by one reproducible command whose results are published with their protocol.
+The gateway SHALL track each upstream backend's recent outcomes and open that backend's breaker when the failure rate over a sliding window crosses a configured threshold with at least a minimum number of samples. While open, requests SHALL fail fast for that backend without attempting the call. After a cooldown, the breaker SHALL allow a bounded number of probe requests (half-open): a probe success closes the breaker, a probe failure reopens it. An attempt's outcome SHALL count only while the breaker is still in the state that admitted the attempt: in half-open, only probes admitted since the cooldown elapsed close or reopen the breaker, and the outcome of an attempt admitted before the breaker opened, or in an earlier half-open period, SHALL change nothing; after recovery, the fresh window SHALL hold only attempts admitted since the breaker closed. Releasing an attempt that produced no outcome SHALL free a probe slot only when that attempt is a probe of the current half-open period. The window size, minimum samples, failure threshold, cooldown, and probe count SHALL come from configuration, be validated at startup, and be stated in the startup log. Every state transition SHALL be observable as a log record naming the backend, the previous state, and the new state. Detection time (failure start to breaker open) and recovery time (failure end to breaker closed) SHALL be measurable against a provider that fails at a known instant, by one reproducible command whose results are published with their protocol.
 
 #### Scenario: Breaker opens on sustained failures
 
@@ -23,6 +23,16 @@ The gateway SHALL track each upstream backend's recent outcomes and open that ba
 
 - **WHEN** the cooldown elapses and requests arrive
 - **THEN** at most the configured number of probes reach the backend; a probe success closes the breaker and a probe failure reopens it
+
+#### Scenario: A straggler does not decide half-open
+
+- **WHEN** an attempt admitted while the breaker was closed ends, successfully or not, after the breaker opened and went half-open with a probe in flight
+- **THEN** the breaker stays half-open, admits no extra probe, and the probe's outcome alone closes or reopens it
+
+#### Scenario: A stale release frees no probe slot
+
+- **WHEN** an attempt admitted before the current half-open period is released without an outcome while every probe slot is taken
+- **THEN** no further probe is admitted until a current probe ends
 
 #### Scenario: State transitions are observable
 
