@@ -120,6 +120,8 @@ go build ./...
 
 `make test` includes the race detector and coverage. `make lint` runs
 golangci-lint, go vet and the repository documentation guard.
+`go test -run '^$' -bench . -benchmem ./internal/policy` measures the CPU
+time and allocations of the content rules on English and Spanish prompts.
 
 ### Container boundaries
 
