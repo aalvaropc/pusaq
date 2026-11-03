@@ -5,6 +5,7 @@ locals {
     "run.googleapis.com",
     "compute.googleapis.com",
     "redis.googleapis.com",
+    "secretmanager.googleapis.com",
   ]
 }
 

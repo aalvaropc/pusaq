@@ -1,9 +1,11 @@
 # The gateway, one service per region behind the global balancer. Readiness
 # is what the balancer's service health reads (docs/design.md §7): failing
 # `/readyz` on purpose is the chaos experiment, so the probe is tight.
-resource "random_password" "admin_token" {
-  length  = 32
-  special = false
+resource "google_service_account" "gateway" {
+  account_id   = "pusaq-gateway"
+  display_name = "Pusaq gateway (runtime)"
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_cloud_run_v2_service" "gateway" {
@@ -18,6 +20,8 @@ resource "google_cloud_run_v2_service" "gateway" {
   deletion_protection = false
 
   template {
+    service_account = google_service_account.gateway.email
+
     scaling {
       min_instance_count = var.min_instances
       max_instance_count = var.max_instances
@@ -72,8 +76,13 @@ resource "google_cloud_run_v2_service" "gateway" {
         value = "mock=${google_cloud_run_v2_service.mock[each.key].uri}/v1"
       }
       env {
-        name  = "PUSAQ_API_KEYS"
-        value = var.api_keys
+        name = "PUSAQ_API_KEYS"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.gateway["api-keys"].secret_id
+            version = google_secret_manager_secret_version.api_keys.version
+          }
+        }
       }
       env {
         name  = "PUSAQ_RPM_LIMIT"
@@ -88,8 +97,13 @@ resource "google_cloud_run_v2_service" "gateway" {
         value = "0"
       }
       env {
-        name  = "PUSAQ_ADMIN_TOKEN"
-        value = random_password.admin_token.result
+        name = "PUSAQ_ADMIN_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.gateway["admin-token"].secret_id
+            version = google_secret_manager_secret_version.admin_token.version
+          }
+        }
       }
       env {
         name  = "PUSAQ_DRAIN_DELAY"
@@ -113,7 +127,7 @@ resource "google_cloud_run_v2_service" "gateway" {
     }
   }
 
-  depends_on = [google_project_service.enabled]
+  depends_on = [google_project_service.enabled, google_secret_manager_secret_iam_member.gateway]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "gateway_invoker" {

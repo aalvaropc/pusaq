@@ -55,10 +55,17 @@ variable "rpm_burst_per_region" {
 }
 
 variable "api_keys" {
-  description = "PUSAQ_API_KEYS for the run (key:tenant, comma-separated). Throwaway keys: the balancer speaks plain HTTP."
+  description = "PUSAQ_API_KEYS for the run (key:tenant, comma-separated), written to Secret Manager and never to state. Throwaway keys: the balancer speaks plain HTTP."
   type        = string
   sensitive   = true
+  ephemeral   = true
   default     = "chaos-main:tenant-main,chaos-stream:tenant-stream,chaos-split:tenant-split"
+}
+
+variable "api_keys_version" {
+  description = "Increment to write a changed api_keys value to Secret Manager; Terraform cannot detect the change itself."
+  type        = number
+  default     = 1
 }
 
 variable "readiness_period_seconds" {

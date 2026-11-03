@@ -2,4 +2,5 @@
 # Pin the commit SHA that release-image published for the run.
 image_tag = "<commit-sha>"
 # api_keys          = "chaos-main:tenant-main,chaos-stream:tenant-stream,chaos-split:tenant-split"
+# api_keys_version  = 1
 # outlier_detection = false

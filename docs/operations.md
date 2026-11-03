@@ -264,6 +264,14 @@ requests to a region whose instances fail their readiness probe. Plain HTTP
 on a global address, throwaway API keys, a generated admin token; nothing
 here is a standing deployment.
 
+The API keys and the admin token are Secret Manager secrets that reach the
+gateway as secret references, never as plain environment values. The gateway
+runs as its own service account, which can read only those two secrets.
+Terraform writes the API keys write-only, so they never reach the state; to
+change them on a live deployment, also increment `api_keys_version`. The
+admin token remains in the runtime state: `make chaos-run` reads it from the
+module outputs.
+
 ```sh
 cp infra/terraform/runtime/terraform.tfvars.example infra/terraform/runtime/terraform.tfvars
 make runtime-init && make runtime-plan && make runtime-apply
