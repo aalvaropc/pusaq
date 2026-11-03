@@ -92,8 +92,8 @@ variable "mock_latency_p50" {
   default     = "200ms"
 }
 
-variable "mock_latency_p99" {
-  description = "Mock provider tail latency (Go duration)."
+variable "mock_latency_max" {
+  description = "Mock provider maximum latency (Go duration)."
   type        = string
   default     = "800ms"
 }

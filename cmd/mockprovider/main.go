@@ -74,7 +74,6 @@ func parseFlags(args []string) (string, mockprovider.Options, error) {
 	addr := fs.String("addr", ":9090", "listen address")
 	fs.DurationVar(&opts.LatencyP50, "latency-p50", 0, "typical response latency (e.g. 200ms)")
 	fs.DurationVar(&opts.LatencyMax, "latency-max", 0, "largest response latency (e.g. 2s)")
-	fs.DurationVar(&opts.LatencyMax, "latency-p99", 0, "same as -latency-max")
 	fs.Float64Var(&opts.ErrorRate, "error-rate", 0, "probability [0,1] of responding 500")
 	fs.DurationVar(&opts.StreamChunkDelay, "stream-chunk-delay", 10*time.Millisecond, "delay between streamed chunks (e.g. 200ms)")
 	if err := fs.Parse(args); err != nil {

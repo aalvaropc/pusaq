@@ -21,7 +21,7 @@ resource "google_cloud_run_v2_service" "mock" {
       args = [
         "--addr", ":9090",
         "--latency-p50", var.mock_latency_p50,
-        "--latency-p99", var.mock_latency_p99,
+        "--latency-max", var.mock_latency_max,
         "--stream-chunk-delay", var.mock_stream_chunk_delay,
       ]
 

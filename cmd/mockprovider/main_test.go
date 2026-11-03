@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-func TestLatencyMaxFlagAndItsP99Spelling(t *testing.T) {
+func TestLatencyMaxFlag(t *testing.T) {
 	for _, args := range [][]string{
 		{"--latency-p50", "200ms", "--latency-max", "800ms"},
-		{"--latency-p50", "200ms", "--latency-p99", "800ms"},
+		{"-latency-p50", "200ms", "-latency-max", "800ms"},
 	} {
 		addr, opts, err := parseFlags(args)
 		if err != nil {

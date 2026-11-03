@@ -140,7 +140,6 @@ The mock's response latency comes from `--latency-p50` and `--latency-max`:
 maximum, 10 % uniform in [p50, maximum]. The maximum is the largest latency
 it produces, not a percentile: with 200 ms / 800 ms the median is ≈ 211 ms
 and the p99 ≈ 740 ms; with both equal to 2 s every response takes 1–2 s.
-`--latency-p99` is accepted as the same setting as `--latency-max`.
 
 ## Local event report
 
