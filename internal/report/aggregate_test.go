@@ -216,6 +216,7 @@ func TestCostKeepsEstimatedApart(t *testing.T) {
 func TestLimitKindFromRequestedModel(t *testing.T) {
 	in := parse(t, strings.Join([]string{
 		eventLine("rpm", "t", "error", "rate_limited", 0, ""),
+		eventLine("rpm2", "t", "error", "rate_limited", 0, ""),
 		eventLine("tpm", "t", "error", "rate_limited", 0, `,"requested_model":"pusaq/fast","served_model":"m"`),
 		eventLine("ok", "t", "success", "", 0, `,"requested_model":"pusaq/fast","served_model":"m"`),
 		`{"msg":"token limiter store unavailable, failing open","request_id":"ok"}`,
@@ -223,7 +224,7 @@ func TestLimitKindFromRequestedModel(t *testing.T) {
 		`{"msg":"rate limiter store unavailable, failing open","request_id":"elsewhere"}`,
 	}, "\n"))
 	r := build(t, in, "")
-	want := TenantLimits{Tenant: "t", Requests: 3, RequestLimited: 1, TokenLimited: 1, FailOpenToken: 1, FailOpenSpend: 1}
+	want := TenantLimits{Tenant: "t", Requests: 4, RequestLimited: 2, TokenLimited: 1, FailOpenToken: 1, FailOpenSpend: 1}
 	if !slices.Equal(r.Limits.Tenants, []TenantLimits{want}) || r.Skipped.Orphans != 1 {
 		t.Fatalf("limits = %+v orphans %d", r.Limits.Tenants, r.Skipped.Orphans)
 	}
