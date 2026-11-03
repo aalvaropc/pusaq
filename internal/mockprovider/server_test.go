@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,8 +25,8 @@ func TestOptionsValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"zero options valid", Options{}, false},
-		{"sane latencies valid", Options{LatencyP50: 50 * time.Millisecond, LatencyP99: 200 * time.Millisecond}, false},
-		{"p99 below p50 rejected", Options{LatencyP50: 200 * time.Millisecond, LatencyP99: 50 * time.Millisecond}, true},
+		{"sane latencies valid", Options{LatencyP50: 50 * time.Millisecond, LatencyMax: 200 * time.Millisecond}, false},
+		{"max below p50 rejected", Options{LatencyP50: 200 * time.Millisecond, LatencyMax: 50 * time.Millisecond}, true},
 		{"negative latency rejected", Options{LatencyP50: -time.Millisecond}, true},
 		{"error rate above 1 rejected", Options{ErrorRate: 1.5}, true},
 		{"negative error rate rejected", Options{ErrorRate: -0.1}, true},
@@ -85,7 +87,7 @@ func TestErrorRateInjectsFailures(t *testing.T) {
 func TestSampleLatencyBounds(t *testing.T) {
 	s, err := NewServer(discardLogger(), Options{
 		LatencyP50: 50 * time.Millisecond,
-		LatencyP99: 200 * time.Millisecond,
+		LatencyMax: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -101,8 +103,46 @@ func TestSampleLatencyBounds(t *testing.T) {
 	for range 50 {
 		d := s.sampleLatency()
 		if d < 0 || d > 200*time.Millisecond {
-			t.Fatalf("sampled latency %s outside [0, p99]", d)
+			t.Fatalf("sampled latency %s outside [0, max]", d)
 		}
+	}
+}
+
+func TestLatencyMaxIsTheDistributionMaximum(t *testing.T) {
+	ms := time.Millisecond
+	for _, c := range []struct {
+		name            string
+		p50, max        time.Duration
+		lowest          time.Duration
+		p99Low, p99High time.Duration
+	}{
+		{"regional failover flags", 200 * ms, 800 * ms, 100 * ms, 735 * ms, 745 * ms},
+		{"development flags", 200 * ms, 2 * time.Second, 100 * ms, 1815 * ms, 1825 * ms},
+		{"token-overrun flags", 2 * time.Second, 2 * time.Second, time.Second, 2 * time.Second, 2 * time.Second},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, err := NewServer(discardLogger(), Options{LatencyP50: c.p50, LatencyMax: c.max})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.random = rand.New(rand.NewPCG(1, 2)).Float64
+			const n = 200000
+			xs := make([]time.Duration, n)
+			for i := range xs {
+				xs[i] = s.sampleLatency()
+			}
+			slices.Sort(xs)
+			if xs[0] < c.lowest || xs[n-1] > c.max {
+				t.Fatalf("samples span [%s, %s], want within [%s, %s]", xs[0], xs[n-1], c.lowest, c.max)
+			}
+			if c.max-xs[n-1] > c.max/100 {
+				t.Fatalf("largest sample %s never approaches the configured maximum %s", xs[n-1], c.max)
+			}
+			p99 := xs[(n-1)*99/100]
+			if p99 < c.p99Low || p99 > c.p99High {
+				t.Fatalf("realized p99 %s, want within [%s, %s]", p99, c.p99Low, c.p99High)
+			}
+		})
 	}
 }
 

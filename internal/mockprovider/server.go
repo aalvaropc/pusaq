@@ -19,10 +19,9 @@ import (
 
 // Options configure the mock's behavior.
 type Options struct {
-	// LatencyP50 and LatencyP99 shape the response-latency distribution:
-	// 90% of responses sample uniformly around P50, 10% stretch toward P99.
+	// LatencyP50 and LatencyMax shape sampled latency; LatencyMax is its maximum, not a percentile.
 	LatencyP50 time.Duration
-	LatencyP99 time.Duration
+	LatencyMax time.Duration
 	// ErrorRate is the probability [0,1] of responding 500 instead of 200.
 	ErrorRate float64
 	// StreamChunkDelay spaces the chunks of a streamed completion, so a
@@ -37,11 +36,11 @@ const defaultStreamChunkDelay = 10 * time.Millisecond
 
 // Validate rejects meaningless configurations.
 func (o Options) Validate() error {
-	if o.LatencyP50 < 0 || o.LatencyP99 < 0 {
+	if o.LatencyP50 < 0 || o.LatencyMax < 0 {
 		return fmt.Errorf("latencies must be non-negative")
 	}
-	if o.LatencyP99 < o.LatencyP50 {
-		return fmt.Errorf("latency-p99 (%s) must be >= latency-p50 (%s)", o.LatencyP99, o.LatencyP50)
+	if o.LatencyMax < o.LatencyP50 {
+		return fmt.Errorf("latency-max (%s) must be >= latency-p50 (%s)", o.LatencyMax, o.LatencyP50)
 	}
 	if o.ErrorRate < 0 || o.ErrorRate > 1 {
 		return fmt.Errorf("error-rate must be in [0,1], got %g", o.ErrorRate)
@@ -200,19 +199,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// sampleLatency draws from the two-point latency model: most responses live
-// around P50, a 10% tail stretches from P50 toward P99.
+// sampleLatency: 90% uniform in [0.5×P50, 1.5×P50] capped at max, 10% uniform in [P50, max].
 func (s *Server) sampleLatency() time.Duration {
-	if s.opts.LatencyP99 == 0 {
+	if s.opts.LatencyMax == 0 {
 		return 0
 	}
 	if s.random() < 0.9 {
-		// Uniform in [0.5×P50, 1.5×P50], capped at P99.
 		d := time.Duration(float64(s.opts.LatencyP50) * (0.5 + s.random()))
-		return min(d, s.opts.LatencyP99)
+		return min(d, s.opts.LatencyMax)
 	}
-	// Tail: uniform in [P50, P99].
-	spread := s.opts.LatencyP99 - s.opts.LatencyP50
+	spread := s.opts.LatencyMax - s.opts.LatencyP50
 	return s.opts.LatencyP50 + time.Duration(s.random()*float64(spread))
 }
 

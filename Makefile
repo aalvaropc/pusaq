@@ -72,7 +72,7 @@ run: ## Run the gateway locally
 	PUSAQ_DEV_MODE=true go run ./cmd/pusaq
 
 mock: ## Run the mock provider locally
-	go run ./cmd/mockprovider --latency-p50 200ms --latency-p99 2s
+	go run ./cmd/mockprovider --latency-p50 200ms --latency-max 2s
 
 test: ## Run all tests with the race detector
 	go test -race -cover ./...

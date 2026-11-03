@@ -27,24 +27,16 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	addr := flag.String("addr", ":9090", "listen address")
-	latencyP50 := flag.Duration("latency-p50", 0, "median response latency (e.g. 200ms)")
-	latencyP99 := flag.Duration("latency-p99", 0, "tail response latency (e.g. 2s)")
-	errorRate := flag.Float64("error-rate", 0, "probability [0,1] of responding 500")
-	chunkDelay := flag.Duration("stream-chunk-delay", 10*time.Millisecond, "delay between streamed chunks (e.g. 200ms)")
-	flag.Parse()
-
-	srv, err := mockprovider.NewServer(logger, mockprovider.Options{
-		LatencyP50:       *latencyP50,
-		LatencyP99:       *latencyP99,
-		ErrorRate:        *errorRate,
-		StreamChunkDelay: *chunkDelay,
-	})
+	addr, opts, err := parseFlags(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	srv, err := mockprovider.NewServer(logger, opts)
 	if err != nil {
 		return err
 	}
 
-	httpServer := &http.Server{Addr: *addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
+	httpServer := &http.Server{Addr: addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -52,11 +44,11 @@ func run(logger *slog.Logger) error {
 	serveErr := make(chan error, 1)
 	go func() {
 		logger.Info("mock provider listening",
-			slog.String("addr", *addr),
-			slog.Duration("latency_p50", *latencyP50),
-			slog.Duration("latency_p99", *latencyP99),
-			slog.Float64("error_rate", *errorRate),
-			slog.Duration("stream_chunk_delay", *chunkDelay),
+			slog.String("addr", addr),
+			slog.Duration("latency_p50", opts.LatencyP50),
+			slog.Duration("latency_max", opts.LatencyMax),
+			slog.Float64("error_rate", opts.ErrorRate),
+			slog.Duration("stream_chunk_delay", opts.StreamChunkDelay),
 		)
 		serveErr <- httpServer.ListenAndServe()
 	}()
@@ -74,4 +66,19 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("mock provider stopped")
 	return nil
+}
+
+func parseFlags(args []string) (string, mockprovider.Options, error) {
+	fs := flag.NewFlagSet("mockprovider", flag.ContinueOnError)
+	var opts mockprovider.Options
+	addr := fs.String("addr", ":9090", "listen address")
+	fs.DurationVar(&opts.LatencyP50, "latency-p50", 0, "typical response latency (e.g. 200ms)")
+	fs.DurationVar(&opts.LatencyMax, "latency-max", 0, "largest response latency (e.g. 2s)")
+	fs.DurationVar(&opts.LatencyMax, "latency-p99", 0, "same as -latency-max")
+	fs.Float64Var(&opts.ErrorRate, "error-rate", 0, "probability [0,1] of responding 500")
+	fs.DurationVar(&opts.StreamChunkDelay, "stream-chunk-delay", 10*time.Millisecond, "delay between streamed chunks (e.g. 200ms)")
+	if err := fs.Parse(args); err != nil {
+		return "", mockprovider.Options{}, err
+	}
+	return *addr, opts, nil
 }
