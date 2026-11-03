@@ -1,6 +1,10 @@
 package gateway
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/aalvaropc/pusaq/internal/core"
+	"github.com/aalvaropc/pusaq/internal/embed"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/semcache"
 )
@@ -57,7 +62,7 @@ func TestShadowOfferedForBufferedSuccess(t *testing.T) {
 	if sm.Prompt != "hello there" {
 		t.Fatalf("prompt = %q", sm.Prompt)
 	}
-	if sm.Namespace != semcache.Namespace(DevTenant, "mock-model", "be brief\n", "none") {
+	if sm.Namespace != routeKey("be brief\n", "none", "none").Namespace() {
 		t.Fatalf("namespace = %q, want tenant+model+system derivation", sm.Namespace)
 	}
 	if sm.Fingerprint == "" || sm.RequestID == "" {
@@ -165,5 +170,137 @@ func TestCacheableShapes(t *testing.T) {
 				t.Fatalf("cacheable = %v, want %v", ok, tt.ok)
 			}
 		})
+	}
+}
+
+func routeKey(systemPrompt, temperature, maxTokens string) semcache.Key {
+	return semcache.Key{Tenant: DevTenant, RouteModel: "mock-model", ReportedModel: "mock-model",
+		SystemPrompt: systemPrompt, Temperature: temperature, MaxTokens: maxTokens}
+}
+
+func reportingSSE(model string) string {
+	if model == "" {
+		return fakeSSE
+	}
+	return strings.ReplaceAll(fakeSSE, `{"object":"chat.completion.chunk",`, `{"object":"chat.completion.chunk","model":"`+model+`",`)
+}
+
+type exchange struct {
+	stream    bool
+	maxTokens string
+	reported  string
+}
+
+func (e exchange) post(t *testing.T, s *Server, p *fakeProvider) *httptest.ResponseRecorder {
+	t.Helper()
+	p.resp.Model, p.sse = e.reported, reportingSSE(e.reported)
+	body := fmt.Sprintf(`{"model":"pusaq/fast","stream":%t,"messages":[{"role":"user","content":"how do I cancel my subscription"}]`, e.stream)
+	if e.maxTokens != "" {
+		body += `,"max_tokens":` + e.maxTokens
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body+"}")))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	return rec
+}
+
+func TestShadowNamespaceKeysOnReportedModelAndMaxTokens(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		ex       exchange
+		reported string
+		max      string
+	}{
+		{"buffered reported", exchange{reported: "mock-model-2026-10"}, "mock-model-2026-10", "none"},
+		{"buffered unreported", exchange{}, "mock-model", "none"},
+		{"streamed reported", exchange{stream: true, reported: "mock-model-2026-10"}, "mock-model-2026-10", "none"},
+		{"streamed unreported", exchange{stream: true}, "mock-model", "none"},
+		{"buffered max_tokens", exchange{maxTokens: "32"}, "mock-model", "32"},
+		{"streamed max_tokens", exchange{stream: true, maxTokens: "64"}, "mock-model", "64"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			shadow := &recordingShadow{}
+			p := okProvider()
+			tt.ex.post(t, shadowServer(t, p, shadow), p)
+			samples := shadow.all()
+			if len(samples) != 1 {
+				t.Fatalf("offered %d samples, want 1", len(samples))
+			}
+			want := routeKey("", "none", tt.max)
+			want.ReportedModel = tt.reported
+			if samples[0].Namespace != want.Namespace() {
+				t.Fatalf("namespace = %q, want %q", samples[0].Namespace, want.Namespace())
+			}
+		})
+	}
+}
+
+type shadowRecords struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (r *shadowRecords) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.buf.Write(p)
+}
+
+func (r *shadowRecords) neighbors() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.Count(r.buf.String(), `"msg":"cache_shadow"`)
+}
+
+func TestShadowNeighborsStayWithinNamespace(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		first, second exchange
+		neighbors     int
+	}{
+		{"identical requests", exchange{maxTokens: "32"}, exchange{maxTokens: "32"}, 1},
+		{"max_tokens absent and set", exchange{}, exchange{maxTokens: "32"}, 0},
+		{"different max_tokens", exchange{maxTokens: "32"}, exchange{maxTokens: "64"}, 0},
+		{"different reported models", exchange{reported: "mock-model-2026-05"}, exchange{reported: "mock-model-2026-10"}, 0},
+		{"different streamed reported models", exchange{stream: true, reported: "mock-model-2026-05"}, exchange{stream: true, reported: "mock-model-2026-10"}, 0},
+		{"unreported meets the route model", exchange{reported: "mock-model"}, exchange{stream: true}, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			records := &shadowRecords{}
+			shadow := semcache.NewShadow(embed.Local{}, semcache.NewIndex(16), slog.New(slog.NewJSONHandler(records, nil)), 0.9, 1, 4)
+			p := okProvider()
+			s := shadowServer(t, p, shadow)
+			tt.first.post(t, s, p)
+			tt.second.post(t, s, p)
+			shadow.Close()
+			if got := records.neighbors(); got != tt.neighbors {
+				t.Fatalf("neighbors = %d, want %d", got, tt.neighbors)
+			}
+		})
+	}
+}
+
+func TestHeaderCarriesRouteModelAndBodyTheReportedOne(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		p := okProvider()
+		rec := exchange{stream: stream, reported: "mock-model-2026-10"}.post(t, shadowServer(t, p, nil), p)
+		if got := rec.Header().Get(ServedModelHeader); got != "mock-model" {
+			t.Fatalf("stream=%v: %s = %q, want the route's physical model", stream, ServedModelHeader, got)
+		}
+		if stream {
+			if !strings.Contains(rec.Body.String(), `"model":"mock-model-2026-10"`) {
+				t.Fatalf("streamed chunks lost the provider's model: %s", rec.Body.String())
+			}
+			continue
+		}
+		var body completionResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Model != "mock-model-2026-10" {
+			t.Fatalf("body model = %q, want the provider-reported name", body.Model)
+		}
 	}
 }

@@ -13,7 +13,7 @@ Request and response contracts for the implemented gateway. See
 |---|---|
 | `model` | Required alias: `pusaq/fast`, `pusaq/best` or `pusaq/auto`. Physical models are configuration. |
 | `messages` | Required nonempty array; message content is a string. |
-| `max_tokens` | Optional positive integer; also determines the output reservation. |
+| `max_tokens` | Optional positive integer; also determines the output reservation. Each value, and omission, has its own cache namespace. |
 | `temperature` | Optional number forwarded as sent, including explicit zero; omission has its own cache namespace. |
 | `stream` | Optional boolean; `true` selects Server-Sent Events. |
 | `metadata.feature_tag` | Optional routing label, at most 64 letters, digits, `.`, `_` or `-`. |
@@ -39,6 +39,10 @@ values. Other unrecognized fields are ignored rather than forwarded.
 | `X-Pusaq-Route-Reason` | `direct`, `rule:<tag>`, `default:untagged` or `default:unknown_tag`, once resolved. |
 | `X-Pusaq-Request-Id` | Correlation ID for requests that enter the accounting pipeline. |
 | `X-Pusaq-Region` | Replica label when `PUSAQ_REGION` is configured. |
+
+The response body's `model`, and the `model` of each forwarded stream chunk,
+is the name the provider reported. It can differ from `X-Pusaq-Model`, for
+example a dated version behind an upstream alias.
 
 ### Errors
 
@@ -173,8 +177,8 @@ cost event records `served_provider` and `attempts`. Backends come from
 `PUSAQ_CACHE_MODE=shadow` turns on the
 measurement instrument: eligible completions are evaluated
 asynchronously — embed, nearest-neighbor within a namespace
-(tenant | served model | system prompt | temperature | rules version),
-record, insert — without ever
+(tenant | route's physical model | provider-reported model | system prompt |
+temperature | `max_tokens` | rules version), record, insert — without ever
 serving a cached answer. Bounded workers process samples independently of
 the provider response; saturated intake drops and counts samples.
 `cache_shadow` records are emitted when a neighbor exists and carry
@@ -194,8 +198,11 @@ event as `cache_skip`: `tenant_off` (policy `cache=off`), `multi_turn`,
 eligible under its own key.
 
 The standalone default is `off`; Compose explicitly enables `shadow`.
-Namespaces also contain fixed `tools=none` and `format=none` markers.
-Language and an independent model version are not explicit namespace fields.
+Namespaces also contain fixed `tools=none` and `format=none` markers. The
+reported model is read from the completed answer, buffered body or stream
+chunks; when the provider reports none, the route's physical model takes its
+place. Language is not a namespace field, and a model version change shows
+only when the provider's reported name carries it.
 The cache remains a measurement instrument and provides no serving guarantee.
 
 The index retains vectors, IDs, namespaces and fingerprints without raw

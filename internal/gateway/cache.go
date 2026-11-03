@@ -16,12 +16,13 @@ import (
 const maxCacheTemperature = 0.7
 
 // cacheShape is what the semantic cache needs from an eligible request:
-// namespace material (system prompt, temperature) and the embedded text.
+// namespace material and the embedded text.
 type cacheShape struct {
 	SystemPrompt string
 	UserContent  string
 	// Temperature is the formatted explicit value, or "none".
 	Temperature string
+	MaxTokens   string
 }
 
 // cacheable reports whether a request is structurally eligible for the
@@ -103,5 +104,9 @@ func cacheEligibility(cr completionRequest, p Policy, flags policy.Flags) (cache
 		}
 		temperature = strconv.FormatFloat(*cr.Temperature, 'g', -1, 64)
 	}
-	return cacheShape{SystemPrompt: systemPrompt, UserContent: userContent, Temperature: temperature}, ""
+	maxTokens := "none"
+	if cr.MaxTokens != nil {
+		maxTokens = strconv.Itoa(*cr.MaxTokens)
+	}
+	return cacheShape{SystemPrompt: systemPrompt, UserContent: userContent, Temperature: temperature, MaxTokens: maxTokens}, ""
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/policy"
 	"github.com/aalvaropc/pusaq/internal/provider"
-	"github.com/aalvaropc/pusaq/internal/semcache"
 )
 
 const emailBody = `{"model":"pusaq/best","messages":[{"role":"user","content":"write to maria.lopez@example.com about the invoice"}]}`
@@ -165,7 +164,7 @@ func TestShadowSkipsIneligibleContentAndKeysByTemperature(t *testing.T) {
 			t.Fatalf("%s: offered %d samples, want %d", tt.name, got, tt.want)
 		}
 		if tt.name == "cool temperature" {
-			if ns := shadow.all()[0].Namespace; ns != semcache.Namespace(DevTenant, "mock-model", "", "0.2") {
+			if ns := shadow.all()[0].Namespace; ns != routeKey("", "0.2", "none").Namespace() {
 				t.Fatalf("namespace = %q, want the temperature in the key", ns)
 			}
 		}

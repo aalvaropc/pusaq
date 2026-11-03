@@ -319,13 +319,26 @@ Similarity alone does not establish equivalence. Therefore:
   hit-rate without its FP rate is marketing, not engineering.
 
 **The implemented shadow namespace:** tenant | the route's physical model |
-system prompt | the request's temperature (or `none` when absent) | the
-eligibility-rules version, plus fixed `tools=none` and `format=none` markers —
-the accepted request subset carries neither tools nor a response format.
-There is no explicit language or independent model-version field in this
-namespace; model identifiers come from configuration. The implementation is
-limited to shadow measurement. Entries have no TTL or purge endpoint;
-eviction enforces both caps and a restart empties the index.
+the model the provider reported (the route's physical model when it reports
+none) | system prompt | the request's temperature and `max_tokens` (each
+`none` when absent) | the version of the eligibility rules and namespace
+derivation, plus fixed `tools=none` and `format=none` markers — the accepted
+request subset carries neither tools nor a response format. Components are
+length-prefixed before hashing, so none can shift bytes into its neighbor.
+
+The reported model can key the namespace because neighbor search and
+insertion both run after the provider's answer is complete; a lookup that
+ran before the provider call could only use the route's model. The route's
+model stays in the key, so a provider reporting a constant or generic name
+cannot merge distinct configured models. A version change behind an upstream
+alias shows only when the provider's reported name carries it. Language is
+not a namespace field: no language signal exists in the request path (the
+content rules match cue phrases, they do not classify a prompt's language),
+so a prompt and its translation share a namespace when everything else
+matches, and a would-be hit between them carries differing response
+fingerprints in the shadow records. The
+implementation is limited to shadow measurement. Entries have no TTL or purge
+endpoint; eviction enforces both caps and a restart empties the index.
 
 The index stores vectors, request IDs, namespaces and response fingerprints,
 without raw prompts or response bodies. Shadow samples temporarily retain
