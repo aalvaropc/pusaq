@@ -124,15 +124,24 @@ func (s *Shadow) Close() {
 func (s *Shadow) worker() {
 	defer s.wg.Done()
 	for sample := range s.queue {
-		s.evaluate(sample)
+		s.Evaluate(sample)
 		s.pendingBytes.Add(-sampleBytes(sample))
 	}
 }
 
-// evaluate is the whole shadow cycle for one sample. It records a
-// cache_shadow event whenever a neighbor exists — hit or miss — so any τ
-// can be swept offline from the record stream alone.
-func (s *Shadow) evaluate(sample Sample) {
+// Evaluation is the outcome of one shadow evaluation.
+type Evaluation struct {
+	Neighbor      *Neighbor
+	EmbedLatency  time.Duration
+	SearchLatency time.Duration
+	Inserted      bool
+	Err           error
+}
+
+// Evaluate is the whole shadow cycle for one sample, run synchronously. It
+// records a cache_shadow event whenever a neighbor exists — hit or miss — so
+// any τ can be swept offline from the record stream alone.
+func (s *Shadow) Evaluate(sample Sample) Evaluation {
 	ctx, cancel := context.WithTimeout(context.Background(), evalBudget)
 	start := time.Now()
 	vec, err := s.embedder.Embed(ctx, sample.Prompt)
@@ -144,14 +153,17 @@ func (s *Shadow) evaluate(sample Sample) {
 			slog.String("request_id", sample.RequestID),
 			slog.String("failure_kind", "embedding_failed"),
 		)
-		return
+		return Evaluation{EmbedLatency: embedLatency, Err: err}
 	}
 
-	if n := s.index.Nearest(sample.Namespace, vec); n != nil {
+	start = time.Now()
+	n := s.index.Nearest(sample.Namespace, vec)
+	searchLatency := time.Since(start)
+	if n != nil {
 		s.logger.LogAttrs(context.Background(), slog.LevelInfo, "cache_shadow",
 			slog.String("request_id", sample.RequestID),
 			slog.String("namespace", sample.Namespace),
-			slog.Bool("shadow_hit", n.Similarity >= s.tau),
+			slog.Bool("shadow_hit", n.Hit(s.tau)),
 			slog.Float64("best_similarity", n.Similarity),
 			slog.String("neighbor_id", n.Entry.ID),
 			slog.String("neighbor_fingerprint", n.Entry.Fingerprint),
@@ -161,14 +173,16 @@ func (s *Shadow) evaluate(sample Sample) {
 		)
 	}
 
-	if !s.index.Insert(&Entry{
+	inserted := s.index.Insert(&Entry{
 		ID:          sample.RequestID,
 		Namespace:   sample.Namespace,
 		Vector:      vec,
 		Fingerprint: sample.Fingerprint,
-	}) {
+	})
+	if !inserted {
 		s.skipped.Add(1)
 	}
+	return Evaluation{Neighbor: n, EmbedLatency: embedLatency, SearchLatency: searchLatency, Inserted: inserted}
 }
 
 // PolicyVersion versions the eligibility rules and the namespace derivation.
