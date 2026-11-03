@@ -50,8 +50,7 @@ func unattemptedTokenServer(t *testing.T, tokens TokenLimiter, logger *slog.Logg
 	t.Helper()
 	brs, breakers := tightBreakers(t)
 	for _, br := range breakers {
-		br.Record(false)
-		br.Record(false)
+		openBreaker(br)
 	}
 	providers := []*scriptedProvider{{name: "primary"}, {name: "backup"}}
 	var events []core.CostEvent

@@ -1,7 +1,7 @@
 // Package breaker implements the circuit breaker that guards each upstream
 // backend (docs/design.md §5.6): closed / open / half-open. It is pure state
-// with no I/O — callers ask Allow before an attempt and Record the outcome
-// after — so the whole machine is deterministic under an injected clock.
+// with no I/O — callers ask Allow before an attempt and record the outcome on
+// its Ticket — so the whole machine is deterministic under an injected clock.
 package breaker
 
 import (
@@ -82,6 +82,7 @@ type Breaker struct {
 
 	openedAt time.Time
 	probes   int
+	gen      uint64
 
 	// now is injected so tests control cooldown deterministically.
 	now func() time.Time
@@ -116,10 +117,16 @@ func (b *Breaker) State() State {
 	return to
 }
 
+// Ticket is an allowed attempt; it counts only in the state that admitted it.
+type Ticket struct {
+	b   *Breaker
+	gen uint64
+}
+
 // Allow reports whether an attempt may proceed now. In half-open it grants
 // at most cfg.Probes concurrent probes; callers MUST call Record or Release
-// for every allowed attempt, or probe slots leak.
-func (b *Breaker) Allow() bool {
+// on the Ticket of every allowed attempt, or probe slots leak.
+func (b *Breaker) Allow() (Ticket, bool) {
 	b.mu.Lock()
 	from := b.state
 	b.maybeHalfOpen()
@@ -134,27 +141,41 @@ func (b *Breaker) Allow() bool {
 		}
 	default: // StateOpen
 	}
+	var t Ticket
+	if allowed {
+		t = Ticket{b: b, gen: b.gen}
+	}
 	to := b.state
 	b.mu.Unlock()
 	b.notify(from, to)
-	return allowed
+	return t, allowed
 }
 
-// Record feeds an attempt's outcome back into the machine.
-func (b *Breaker) Record(success bool) {
+// Record feeds the attempt's outcome back into the machine.
+func (t Ticket) Record(success bool) {
+	if t.b == nil {
+		return
+	}
+	b := t.b
 	b.mu.Lock()
 	from := b.state
-	b.record(success)
+	if t.gen == b.gen {
+		b.record(success)
+	}
 	to := b.state
 	b.mu.Unlock()
 	b.notify(from, to)
 }
 
-// Release returns an allowed attempt that produced no outcome, such as one the client canceled.
-func (b *Breaker) Release() {
+// Release returns an attempt that produced no outcome, such as one the client canceled.
+func (t Ticket) Release() {
+	if t.b == nil {
+		return
+	}
+	b := t.b
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.state == StateHalfOpen && b.probes > 0 {
+	if t.gen == b.gen && b.state == StateHalfOpen && b.probes > 0 {
 		b.probes--
 	}
 }
@@ -169,20 +190,12 @@ func (b *Breaker) notify(from, to State) {
 
 // record applies an outcome. Callers hold b.mu.
 func (b *Breaker) record(success bool) {
-	switch b.state {
-	case StateHalfOpen:
-		if b.probes > 0 {
-			b.probes--
-		}
+	if b.state == StateHalfOpen {
 		if success {
-			// Recovered: close and start a fresh window.
 			b.toClosed()
 			return
 		}
 		b.toOpen()
-		return
-	case StateOpen:
-		// A straggler from before the breaker opened; ignore.
 		return
 	}
 
@@ -220,6 +233,7 @@ func (b *Breaker) toOpen() {
 	b.state = StateOpen
 	b.openedAt = b.now()
 	b.probes = 0
+	b.gen++
 }
 
 // toClosed resets to a fresh closed state. Callers hold b.mu.
@@ -229,6 +243,7 @@ func (b *Breaker) toClosed() {
 	b.failures = 0
 	b.next = 0
 	b.probes = 0
+	b.gen++
 	for i := range b.outcomes {
 		b.outcomes[i] = false
 	}

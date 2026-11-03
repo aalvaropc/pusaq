@@ -66,6 +66,14 @@ func tightBreakers(t *testing.T) (BreakerFor, map[string]*breaker.Breaker) {
 	return func(b string) *breaker.Breaker { return m[b] }, m
 }
 
+func openBreaker(br *breaker.Breaker) {
+	for range 2 {
+		if tk, ok := br.Allow(); ok {
+			tk.Record(false)
+		}
+	}
+}
+
 func fallbackServer(t *testing.T, primary, backup provider.Provider, breakers BreakerFor) (*Server, *[]core.CostEvent) {
 	t.Helper()
 	var events []core.CostEvent
@@ -103,11 +111,7 @@ func TestOpenBreakerSkipsPrimaryWithoutCalling(t *testing.T) {
 	backup := &scriptedProvider{name: "backup"}
 	brs, m := tightBreakers(t)
 	// Open the primary's breaker directly.
-	for range 2 {
-		if m["primary"].Allow() {
-			m["primary"].Record(false)
-		}
-	}
+	openBreaker(m["primary"])
 	if m["primary"].State() != breaker.StateOpen {
 		t.Fatal("primary breaker not open")
 	}
@@ -261,6 +265,55 @@ func TestStartedStreamOutcomeFeedsBreaker(t *testing.T) {
 
 			if got := m["primary"].State(); got != tc.want {
 				t.Fatalf("primary breaker = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStreamAdmittedBeforeOpenDoesNotDecideHalfOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stream io.ReadCloser
+		read   bool
+	}{
+		{"completed", io.NopCloser(strings.NewReader(fakeSSE)), true},
+		{"broken", brokenStream(), true},
+		{"abandoned", io.NopCloser(strings.NewReader(fakeSSE)), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			primary := &streamQueue{streams: []io.ReadCloser{tc.stream}}
+			brs, m := tightBreakers(t)
+			now := time.Now()
+			m["primary"].SetClock(func() time.Time { return now })
+			h := core.Chain(Accounting(func(core.CostEvent) {}, discardLogger()), RequestID())(CompletionsHandler(fallbackRoutes(),
+				map[string]provider.Provider{"primary": primary, "backup": &scriptedProvider{name: "backup"}},
+				CompletionsOptions{Breakers: brs, Logger: discardLogger()}))
+
+			resp, err := h(context.Background(), &core.Request{Op: "chat.completions", Payload: streamingPayload()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			openBreaker(m["primary"])
+			now = now.Add(time.Hour)
+			probe, ok := m["primary"].Allow()
+			if !ok {
+				t.Fatal("half-open breaker denied the probe")
+			}
+
+			if tc.read {
+				_, _ = io.ReadAll(resp.Stream)
+			}
+			_ = resp.Stream.Close()
+
+			if got := m["primary"].State(); got != breaker.StateHalfOpen {
+				t.Fatalf("primary breaker = %s after the earlier stream ended, want half_open", got)
+			}
+			if _, ok := m["primary"].Allow(); ok {
+				t.Fatal("the earlier stream freed the probe's slot")
+			}
+			probe.Record(true)
+			if got := m["primary"].State(); got != breaker.StateClosed {
+				t.Fatalf("primary breaker = %s after the probe succeeded, want closed", got)
 			}
 		})
 	}

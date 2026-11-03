@@ -161,7 +161,11 @@ probes — configurable with `PUSAQ_BREAKER_WINDOW`, `PUSAQ_BREAKER_MIN_SAMPLES`
 `PUSAQ_BREAKER_THRESHOLD`, `PUSAQ_BREAKER_COOLDOWN`, `PUSAQ_BREAKER_PROBES`,
 validated and logged at startup. Every transition is one `breaker_state`
 log record (`backend`, `from`, `to`), which is what detection and recovery
-times are measured from. On an
+times are measured from. An attempt's outcome counts only while the breaker
+is still in the state that admitted it: half-open is decided by its own
+probes alone, a request admitted before the breaker opened changes nothing
+when it ends, and the window after recovery holds only attempts admitted
+since the breaker closed. On an
 upstream error or an open breaker, the route's fallback backends are tried
 in order — at most once each, same model contract; streams fall back only
 before the first byte. A started stream feeds its backend's breaker when it

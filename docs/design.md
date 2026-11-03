@@ -406,7 +406,8 @@ own regions dies. Handled by different pieces:
 - **Circuit breaker per backend** — one per backend in each process: closed /
   open / half-open, with a minimum-request threshold on the failure window
   (2 failures out of 2 requests is not a signal), cooldown, and K probe
-  requests in half-open. Detection and recovery times are measured, not
+  requests in half-open. Only those probes decide half-open: an attempt
+  admitted before the breaker opened is ignored when it ends. Detection and recovery times are measured, not
   asserted: every transition is a `breaker_state` log record, the parameters
   are configuration (`PUSAQ_BREAKER_*`), and `make breakertest` fails the mock
   provider at a known instant and reads both times from the logs
