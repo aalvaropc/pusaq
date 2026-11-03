@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// sweepBudget bounds one sweep of refunds, by the janitor or by Close.
+// sweepBudget bounds each refund of a sweep.
 const sweepBudget = 250 * time.Millisecond
 
 // Leased satisfies the same Allow surface as Limiter; it is meant for the
@@ -143,9 +143,7 @@ func (l *Leased) Close() {
 	l.stopOnce.Do(func() {
 		close(l.stop)
 		<-l.done
-		ctx, cancel := context.WithTimeout(context.Background(), sweepBudget)
-		defer cancel()
-		l.sweep(ctx, true)
+		l.sweep(true)
 	})
 }
 
@@ -201,9 +199,7 @@ func (l *Leased) janitor() {
 		case <-l.stop:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), sweepBudget)
-			l.sweep(ctx, false)
-			cancel()
+			l.sweep(false)
 		}
 	}
 }
@@ -212,7 +208,7 @@ func (l *Leased) janitor() {
 // pending and refunds pending tokens to the store, one round-trip per
 // tenant with something to return. Refund failures are counted and their
 // tokens recorded as lost: a bounded, visible under-admission.
-func (l *Leased) sweep(ctx context.Context, all bool) {
+func (l *Leased) sweep(all bool) {
 	type due struct {
 		tenant string
 		ls     *lease
@@ -237,17 +233,23 @@ func (l *Leased) sweep(ctx context.Context, all bool) {
 		d.ls.mu.Unlock()
 
 		if p > 0 {
-			if err := l.inner.Adjust(ctx, d.tenant, p); err != nil {
-				l.refundFailures.Add(1)
-				l.lostMu.Lock()
-				l.tokensLost += p
-				l.lostMu.Unlock()
-			} else {
-				l.refunds.Add(1)
-			}
+			l.refund(d.tenant, p)
 		}
 		if idle {
 			l.retireLease(d.tenant, d.ls)
 		}
 	}
+}
+
+func (l *Leased) refund(tenant string, tokens float64) {
+	ctx, cancel := context.WithTimeout(context.Background(), sweepBudget)
+	defer cancel()
+	if err := l.inner.Adjust(ctx, tenant, tokens); err != nil {
+		l.refundFailures.Add(1)
+		l.lostMu.Lock()
+		l.tokensLost += tokens
+		l.lostMu.Unlock()
+		return
+	}
+	l.refunds.Add(1)
 }

@@ -157,7 +157,7 @@ func TestLeaseCleanupConservesTokensUnderConcurrency(t *testing.T) {
 	workers.Go(func() {
 		<-start
 		for range 1000 {
-			l.sweep(context.Background(), false)
+			l.sweep(false)
 		}
 	})
 	close(start)
@@ -199,6 +199,61 @@ func TestLeaseDenialCacheUsesSmallerRetryAndTTL(t *testing.T) {
 			}
 			if stats := l.Stats(); stats.Acquisitions != 3 {
 				t.Fatalf("acquisitions after expiry = %d", stats.Acquisitions)
+			}
+		})
+	}
+}
+
+type slowStore struct {
+	redis.Scripter
+	delay time.Duration
+}
+
+func (s slowStore) EvalSha(ctx context.Context, sha string, keys []string, args ...any) *redis.Cmd {
+	select {
+	case <-time.After(s.delay):
+	case <-ctx.Done():
+		cmd := redis.NewCmd(ctx)
+		cmd.SetErr(ctx.Err())
+		return cmd
+	}
+	return s.Scripter.EvalSha(ctx, sha, keys, args...)
+}
+
+func TestSlowRefundDoesNotStarveOtherTenants(t *testing.T) {
+	tenants := []string{"team-a", "team-b", "team-c"}
+	tests := []struct {
+		name  string
+		sweep func(f *leaseFixture, l *Leased)
+		probe bool
+	}{
+		{"drain", func(_ *leaseFixture, l *Leased) { l.Close() }, true},
+		{"expiry sweep", func(f *leaseFixture, l *Leased) {
+			f.advance(2 * time.Hour)
+			l.sweep(false)
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newLeaseFixture(t)
+			l := f.leased(frozenLimits(10), 10, time.Hour)
+			for _, tenant := range tenants {
+				allowN(t, l, tenant, 1)
+			}
+			l.inner.client = slowStore{Scripter: l.inner.client, delay: sweepBudget * 3 / 5}
+
+			tt.sweep(f, l)
+
+			if st := l.Stats(); st.Refunds != 3 || st.RefundFailures != 0 || st.TokensLost != 0 {
+				t.Fatalf("stats = %+v, want three refunds and nothing lost", st)
+			}
+			if !tt.probe {
+				return
+			}
+			for _, tenant := range tenants {
+				if rem := strictProbe(t, f.strict(frozenLimits(10)), tenant); rem != 9 {
+					t.Fatalf("%s store remaining = %d, want 9", tenant, rem)
+				}
 			}
 		})
 	}
