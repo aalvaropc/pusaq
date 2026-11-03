@@ -36,6 +36,11 @@ timeout; idle HTTP connections have a fixed 120 s timeout. SSE has a fixed
 | `PUSAQ_ROUTES` | both aliases → `mock-model` | `alias=model,...` for `pusaq/fast` and `pusaq/best`. |
 | `PUSAQ_ROUTING_RULES` | `classify,extract`→fast; `reason,code`→best; default fast | `tag=alias,...,default=alias`; replaces the table `pusaq/auto` resolves through. Tags use letters, digits, `.`, `_` and `-`. |
 
+Provider clients (buffered and streaming) and the endpoint embedder keep up
+to 256 idle connections per upstream for reuse, closing each after 90 s idle;
+concurrency above that against one upstream opens new connections. This is
+not an environment setting.
+
 ## Tenants and policies
 
 | Variable | Default | What it does |

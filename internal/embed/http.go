@@ -30,8 +30,17 @@ func NewHTTP(name, baseURL, model, apiKey string, timeout time.Duration) *HTTP {
 		baseURL: baseURL,
 		model:   model,
 		apiKey:  apiKey,
-		client:  &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		client:  &http.Client{Transport: pooledTransport(), Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
+}
+
+const idleConnsPerHost = 256
+
+func pooledTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = idleConnsPerHost
+	t.MaxIdleConnsPerHost = idleConnsPerHost
+	return t
 }
 
 // Name implements Embedder.
