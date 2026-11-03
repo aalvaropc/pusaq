@@ -310,12 +310,16 @@ Similarity alone does not establish equivalence. Therefore:
 
 - τ is calibrated on a labeled dataset of equivalent pairs and trap pairs
   (swapped entities, negations, dates) — chosen as
-  `τ* = min{τ : precision(τ) ≥ 0.99}`, recall being whatever follows.
+  `τ* = min{τ : L(τ) ≥ 0.99}`, where L is the one-sided Clopper–Pearson
+  lower bound on precision at 95% confidence, recall being whatever follows.
+  The bound demands support (299 predicted hits with no false hit), so an
+  observed precision of 1.0 from a few hits certifies nothing.
 - The cache runs in **shadow mode only**: it logs the hit it *would* have
   served, the model is still called, and nothing is ever served from the
   cache.
-- `make calibrate` writes the precision/recall curve and prints τ* or fails
-  explicitly; a hit-rate is only published next to its false-positive rate. A
+- `make calibrate` writes the precision/recall curve, with each point's
+  support and lower bound and undefined values written as `undefined`, and
+  prints τ* or fails explicitly; a hit-rate is only published next to its false-positive rate. A
   hit-rate without its FP rate is marketing, not engineering.
 
 **The implemented shadow namespace:** tenant | the route's physical model |
@@ -534,7 +538,7 @@ disappointing numbers included.
 | Breaker detection ([report](measurements/breaker-detection.md)) | `make breakertest`: the mock primary fails on command for a known window under steady traffic with a healthy fallback | Detection time (failure start → breaker open), recovery time (failure end → closed), probes, extra attempts, fallback-served requests, client errors (must be zero) |
 | Regional failover ([report](measurements/regional-failover.md)) | `make chaos-run`: the two-region runtime module, sustained k6 against the global LB, region A's readiness failed at a known instant through the admin endpoint; every request tagged with the run id and answered with its region; per-region readiness probes as an independent timeline | Time until new requests are answered by the other region, longest interval without a success, first-attempt failures / recovered by one retry / failed after retry, streams complete / interrupted / refused, latency before / during / after per region, the split tenant's admissions per region (**counted, not estimated**, cross-checked against the gateways' events) |
 | Content rules ([report](measurements/content-rules.md)) | `go test -v -run TestContentRulesCorpus ./internal/policy`: the policy filter's sensitive-data, injection and temporal rules against a labeled EN/ES corpus with hard negatives | Precision and recall per family against published floors the suite enforces; every miss and false alarm listed |
-| Cache threshold calibration | `make calibrate`: the τ sweep over a labeled pair dataset with the gateway's own embedder | The precision/recall curve and τ*, or an explicit failure when no τ reaches the precision floor |
+| Cache threshold calibration | `make calibrate`: the τ sweep over a labeled pair dataset with the gateway's own embedder | The precision/recall curve with support and lower bounds, and τ*, or an explicit failure when no τ's precision lower bound reaches the floor |
 
 The [measurement index](measurements/README.md) also covers lease ownership,
 unattempted-reservation settlement and independent evidence verification.

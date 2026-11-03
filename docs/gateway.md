@@ -228,11 +228,20 @@ caps exclude allocator and collection metadata and do not bound process RSS.
 The threshold is never a judgment call: `make calibrate`
 sweeps a labeled pair dataset (equivalent vs trap pairs) with the same
 embedder implementations the gateway runs, writes the precision/recall
-curve to the ignored `out/calibration.csv`, and prints `τ* = min{τ : precision ≥ 0.99}` — or fails loudly when
-the embedder cannot separate the traps (which the local embedder, being
-lexical, often cannot: that failure is the harness working). The seed
-dataset (60 pairs) exercises the harness; it is not a production corpus,
-and `PUSAQ_CACHE_TAU` only labels the shadow records.
+curve to the ignored `out/calibration.csv`, and prints τ\*, the smallest τ whose one-sided Clopper–Pearson lower
+bound on precision reaches 0.99 at 95% confidence (`cachecal -floor`,
+`-confidence`). The bound needs support: with no false hit, at least 299
+predicted hits; a τ whose observed precision is 1.0 from a handful of hits
+does not qualify. Each curve row carries its predicted hits, false hits,
+precision, lower bound, recall and F1; a ratio without a denominator, such
+as precision at a τ with no hit, is written `undefined`, never 0. The
+command fails loudly when the embedder cannot separate the traps (which the
+local embedder, being lexical, often cannot: that failure is the harness
+working) or when the best τ lacks support, and says which. The bound holds
+per τ and for the dataset's pairs, not family-wise over the sweep nor for
+production traffic. The seed dataset (60 pairs, 30 equivalent) exercises the
+harness and cannot certify a τ; it is not a production corpus, and
+`PUSAQ_CACHE_TAU` only labels the shadow records.
 
 ## Tenant policies
 
