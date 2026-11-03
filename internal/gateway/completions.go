@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aalvaropc/pusaq/internal/breaker"
 	"github.com/aalvaropc/pusaq/internal/core"
@@ -132,11 +133,13 @@ func featureTag(cr completionRequest) (string, error) {
 
 // completionResponse is the OpenAI response subset Pusaq returns.
 type completionResponse struct {
-	ID      string            `json:"id"`
-	Object  string            `json:"object"`
-	Model   string            `json:"model"`
-	Choices []provider.Choice `json:"choices"`
-	Usage   usagePayload      `json:"usage"`
+	ID                string            `json:"id"`
+	Object            string            `json:"object"`
+	Created           int64             `json:"created"`
+	Model             string            `json:"model"`
+	SystemFingerprint string            `json:"system_fingerprint,omitempty"`
+	Choices           []provider.Choice `json:"choices"`
+	Usage             usagePayload      `json:"usage"`
 }
 
 // usagePayload renders usage with the total the OpenAI shape includes.
@@ -402,11 +405,17 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		}
 		offerShadow(req, shape, opts, always, func() string { return upstream.Model }, func() string { return semcache.Fingerprint(content.String()) })
 
+		created := upstream.Created
+		if created <= 0 {
+			created = time.Now().Unix()
+		}
 		body, err := json.Marshal(completionResponse{
-			ID:      upstream.ID,
-			Object:  "chat.completion",
-			Model:   upstream.Model,
-			Choices: upstream.Choices,
+			ID:                upstream.ID,
+			Object:            "chat.completion",
+			Created:           created,
+			Model:             upstream.Model,
+			SystemFingerprint: upstream.SystemFingerprint,
+			Choices:           upstream.Choices,
 			Usage: usagePayload{
 				PromptTokens:     upstream.Usage.PromptTokens,
 				CompletionTokens: upstream.Usage.CompletionTokens,

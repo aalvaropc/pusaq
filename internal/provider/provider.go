@@ -37,10 +37,12 @@ type Choice struct {
 
 // ChatResponse is the provider-agnostic completion result.
 type ChatResponse struct {
-	ID      string     `json:"id"`
-	Model   string     `json:"model"`
-	Choices []Choice   `json:"choices"`
-	Usage   core.Usage `json:"usage"`
+	ID                string     `json:"id"`
+	Created           int64      `json:"created"`
+	Model             string     `json:"model"`
+	SystemFingerprint string     `json:"system_fingerprint"`
+	Choices           []Choice   `json:"choices"`
+	Usage             core.Usage `json:"usage"`
 }
 
 // Provider completes chat requests against one upstream. Implementations

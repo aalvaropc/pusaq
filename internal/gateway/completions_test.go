@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/provider"
@@ -157,6 +159,57 @@ func TestHarmlessFieldsAreAccepted(t *testing.T) {
 	}
 	if p.got.Model != "mock-model" {
 		t.Fatal("provider was not called for a request with harmless fields")
+	}
+}
+
+func TestCompletionCarriesCreatedAndFingerprint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"cmpl-9","object":"chat.completion","created":1700000000,"model":"mock-model",`+
+			`"system_fingerprint":"fp_test","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],`+
+			`"usage":{"prompt_tokens":3,"completion_tokens":1}}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	tests := []struct {
+		name            string
+		provider        provider.Provider
+		wantCreated     int64
+		wantFingerprint string
+	}{
+		{"provider values pass through", provider.NewHTTP("mock", upstream.URL+"/v1", time.Second, discardLogger()), 1700000000, "fp_test"},
+		{"gateway time without provider values", okProvider(), 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": tt.provider}, CompletionsOptions{Logger: discardLogger()})
+			before := time.Now().Unix()
+			resp, err := h(context.Background(), &core.Request{Payload: validPayload()})
+			after := time.Now().Unix()
+			if err != nil {
+				t.Fatalf("handler error: %v", err)
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(resp.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			var created int64
+			if err := json.Unmarshal(body["created"], &created); err != nil {
+				t.Fatalf("created = %s: %v", body["created"], err)
+			}
+			if tt.wantCreated != 0 && created != tt.wantCreated {
+				t.Fatalf("created = %d, want %d", created, tt.wantCreated)
+			}
+			if tt.wantCreated == 0 && (created < before || created > after) {
+				t.Fatalf("created = %d, want the gateway's time in [%d, %d]", created, before, after)
+			}
+			fingerprint, present := body["system_fingerprint"]
+			if tt.wantFingerprint == "" && present {
+				t.Fatalf("system_fingerprint = %s, want it absent", fingerprint)
+			}
+			if tt.wantFingerprint != "" && string(fingerprint) != `"`+tt.wantFingerprint+`"` {
+				t.Fatalf("system_fingerprint = %s, want %q", fingerprint, tt.wantFingerprint)
+			}
+		})
 	}
 }
 
