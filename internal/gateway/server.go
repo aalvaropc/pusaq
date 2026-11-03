@@ -260,17 +260,12 @@ func (s *Server) writeJSON(w http.ResponseWriter, v any) {
 func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler {
 	h := s.pipeline(loadPayload(terminal))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// An injected not-ready window refuses requests before admission:
-		// no cost event, a retry hint for the window's remainder. Requests
-		// already inside the pipeline (including streams) are unaffected.
-		if open, remaining := s.injected(); open {
-			s.writeError(w, "", &core.Error{Code: core.CodeNotReady, Message: "replica not ready (injected)", RetryAfter: remaining})
-			return
-		}
-
 		payloadIncomplete := true
 		req := &core.Request{ArrivedAt: time.Now().UTC(), Op: op}
 		req.ReadPayload = func() ([]byte, error) {
+			if open, remaining := s.injected(); open {
+				return nil, &core.Error{Code: core.CodeNotReady, Message: "replica not ready (injected)", RetryAfter: remaining}
+			}
 			rc := http.NewResponseController(w)
 			if err := rc.SetReadDeadline(time.Now().Add(s.BodyReadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 				return nil, core.NewError(core.CodeInvalidRequest, "failed to read request body")
