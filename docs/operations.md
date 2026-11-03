@@ -199,7 +199,7 @@ jobs succeed:
 |---|---|
 | Go | golangci-lint, go vet, race tests, build and measurement fixtures |
 | Documentation | Repository documentation guard |
-| Infrastructure | Terraform formatting, validation and foundation mock tests |
+| Infrastructure | Terraform formatting, validation against the committed provider locks, and mock tests for both modules |
 | Security | govulncheck, actionlint, zizmor and PR dependency review |
 | Static analysis | CodeQL for Go and Actions |
 | Images | Trivy for both image targets; fixable HIGH/CRITICAL findings fail CI |
