@@ -62,7 +62,7 @@ TF_RUNTIME := terraform -chdir=infra/terraform/runtime
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-up: ## Start local environment (Redis + mock provider)
+up: ## Start local environment (gateway on 8080, Redis, mock provider and fallback mock)
 	docker compose up -d --build
 
 down: ## Stop local environment
@@ -72,7 +72,7 @@ run: ## Run the gateway locally
 	PUSAQ_DEV_MODE=true go run ./cmd/pusaq
 
 mock: ## Run the mock provider locally
-	go run ./cmd/mockprovider --latency-p50 200ms --latency-p99 2s
+	go run ./cmd/mockprovider --latency-p50 200ms --latency-max 2s
 
 test: ## Run all tests with the race detector
 	go test -race -cover ./...

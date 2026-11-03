@@ -79,7 +79,7 @@ services:
     build:
       context: .
       target: mockprovider
-    command: ["--addr", ":9090", "--latency-p50", "200ms", "--latency-p99", "2s", "--error-rate", "0"]
+    command: ["--addr", ":9090", "--latency-p50", "200ms", "--latency-max", "2s", "--error-rate", "0"]
     ports:
       - "127.0.0.1:9090:9090"
 
@@ -88,7 +88,7 @@ services:
     build:
       context: .
       target: mockprovider
-    command: ["--addr", ":9090", "--latency-p50", "100ms", "--latency-p99", "1s", "--error-rate", "0"]
+    command: ["--addr", ":9090", "--latency-p50", "100ms", "--latency-max", "1s", "--error-rate", "0"]
 
   # --- Load-test profile services (see anchors at the top) ---
   pusaq-a:
@@ -124,7 +124,7 @@ services:
       context: .
       target: mockprovider
     profiles: [loadtest]
-    command: ["--addr", ":9090", "--latency-p50", "${LOADTEST_MOCK_LATENCY:-0}", "--latency-p99", "${LOADTEST_MOCK_LATENCY:-0}", "--error-rate", "0", "--stream-chunk-delay", "${LOADTEST_MOCK_CHUNK_DELAY:-10ms}"]
+    command: ["--addr", ":9090", "--latency-p50", "${LOADTEST_MOCK_LATENCY:-0}", "--latency-max", "${LOADTEST_MOCK_LATENCY:-0}", "--error-rate", "0", "--stream-chunk-delay", "${LOADTEST_MOCK_CHUNK_DELAY:-10ms}"]
 
   # Fallback backend for the breaker run: the primary is made to fail on
   # command (POST /admin/fail) and traffic must keep flowing through here.
@@ -133,7 +133,7 @@ services:
       context: .
       target: mockprovider
     profiles: [loadtest]
-    command: ["--addr", ":9090", "--latency-p50", "0", "--latency-p99", "0", "--error-rate", "0"]
+    command: ["--addr", ":9090", "--latency-p50", "0", "--latency-max", "0", "--error-rate", "0"]
 
   # Round-robin balancer: :8080 → limited replicas, :8081 → unlimited ones.
   # No published ports; k6 runs in-network.

@@ -94,12 +94,12 @@ Three tenants each send 8 requests/s for 45 s. The primary mock fails for
 requests return 200, with zero 502s, unexpected outcomes or dropped
 iterations. Gateway events total 540 on a and 541 on b.
 
-| Replica | Detection | Open duration | Recovery after failure ends | Probes | Extra attempts | Backup completions |
+| Replica | Detection | Open duration | Recovery after failure ends | Half-open episodes | Extra attempts | Backup completions |
 |---|---|---|---|---|---|---|
 | a | 0.875 s | 10.085 s | 5.960 s | 1 | 11 | 131 |
 | b | 0.834 s | 10.083 s | 5.917 s | 1 | 11 | 131 |
 
-Both breakers close after one probe without reopening. No upstream error
+Both breakers close after one half-open episode without reopening. No upstream error
 reaches a client. These timings describe the local mock experiment.
 
 ### Local chaos

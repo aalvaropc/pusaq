@@ -4,17 +4,14 @@
 # promises, each from a stated source:
 #   time to B          first request sent after the flip that another region answered (k6)
 #   longest gap        longest interval between successive sends that succeeded after the flip (k6)
-# All k6 times are send times (completion minus duration).
 #   failed / recovered first-attempt failures, and how the one retry ended (k6)
-#   streams            complete / interrupted / refused (k6), cross-checked
-#                      with stream_interrupted events per region
+#   streams            complete / interrupted / never started / refused (k6)
 #   latency            p50/p95/p99 per region before / during / after (k6)
 #   split tenant       admitted per region vs the regional caps (events, k6)
 #   probe timeline     when region A's own /readyz turned 503 and back, and
 #                      when the balancer first answered from B (k6 probes)
-# Integrity checks fail the run: missing readiness_window records, warm-up
-# share below 90 % (cloud), fail-open warnings, k6 vs events disagreement,
-# unexpected statuses, k6 thresholds.
+# Times are the send instants chaos.js records; percentiles interpolate
+# linearly between closest ranks, as k6 does.
 #
 # Usage: CHAOS_MODE=cloud|local loadtest/verify-chaos.sh <run_id>
 set -euo pipefail
@@ -31,7 +28,7 @@ for f in "$summary" "$points" "$events"; do [[ -f "$f" ]] || { echo "missing $f"
 
 jq -e --arg run "$run_id" '.summary.run_id == $run and (.summary.thresholds_passed | type == "boolean")' "$summary" >/dev/null || { echo "invalid summary for $run_id" >&2; exit 1; }
 
-jq -e '[.summary.client.main_first_ok, .summary.client.main_retry_ok, .summary.client.split_admitted, .summary.client.split_rate_limited, .summary.client.stream_complete, .summary.client.unexpected] | all(type == "number" and . >= 0)' "$summary" >/dev/null || { echo "invalid chaos counters" >&2; exit 1; }
+jq -e '.summary.client | [.main_first_ok, .main_retry_ok, .split_admitted, .split_rate_limited, .stream_complete, .stream_interrupted, .stream_never_started, .stream_refused, .unexpected] | all(type == "number" and . >= 0)' "$summary" >/dev/null || { echo "invalid chaos counters" >&2; exit 1; }
 
 jqs() { jq -r "$1" "$summary"; }
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
@@ -40,7 +37,12 @@ experiment="$(jqs '.summary.experiment')"
 region_a="$(jqs '.summary.region_a')"
 flip_at="$(jqs '.summary.flip_at // empty')"
 fail_for="$(jqs '.summary.params.fail_for')"
-fail_for_s="$(awk -v d="$fail_for" 'BEGIN { n = d + 0; if (d ~ /m$/) n = n * 60; printf "%d", n }')"
+fail_for_s="$(jq -rn --arg d "$fail_for" '
+  def term: "([0-9]+[.]?[0-9]*|[.][0-9]+)(ns|us|µs|μs|ms|s|m|h)";
+  {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "μs": 1e-6, "ms": 0.001, "s": 1, "m": 60, "h": 3600} as $unit
+  | if $d == "0" then 0
+    elif ($d | test("^(" + term + ")+$")) then [$d | scan(term) | (.[0] | tonumber) * $unit[.[1]]] | add
+    else error("not a Go duration") end' 2>/dev/null)" || { echo "invalid fail_for: $fail_for" >&2; exit 1; }
 
 echo "== run $run_id ($experiment) region A = $region_a"
 echo "params:  $(jqs '.summary.params | to_entries | map("\(.key)=\(.value|tostring)") | join(" ")')"
@@ -48,20 +50,20 @@ echo "client:  $(jqs '.summary.client | to_entries | map("\(.key)=\(.value)") | 
 
 # 1. Compact the k6 points: one line per attempt, epoch seconds.
 jq -c '
-  def ts: (.[0:19] + "Z" | fromdateiso8601) + (if length > 20 then ((.[20:] | sub("Z$"; "") | sub("[+-][0-9:]+$"; "") | . + "000")[0:3] | tonumber) / 1000 else 0 end);
   select(.type == "Point" and (.metric == "chaos_request" or .metric == "chaos_probe"))
-  # k6 stamps a point when the request ends; t is when it was sent
-  # (end minus duration), so a request that hung for the whole client
-  # timeout is placed where it entered the failover, not where it gave up.
-  | {m: .metric, t: ((.data.time | ts) - (.data.value / 1000)), v: .data.value} + (.data.tags | {arm, attempt, status, region, outcome, target})
+  | {m: .metric, t: (.data.tags.sent_ms // null | if . then tonumber / 1000 else null end), v: .data.value} + (.data.tags | {arm, attempt, status, region, outcome, target})
 ' "$points" >"$tmp/points.jsonl"
+unsent="$(jq -s 'map(select(.t == null)) | length' "$tmp/points.jsonl")"
+(( unsent == 0 )) || { echo "FAIL: $unsent k6 points without a recorded send time (sent_ms)"; exit 1; }
 
 # Milliseconds matter: every "+X s" below is measured from this instant.
 flip_epoch="$(if [[ -n "$flip_at" ]]; then jq -rn --arg t "$flip_at" '$t | (.[0:19] + "Z" | fromdateiso8601) + ((.[20:23] | tonumber? // 0) / 1000)'; else echo ""; fi)"
 
 # 2. Everything k6 saw, computed in one pass.
 jq -s -c --arg A "$region_a" --arg flip "$flip_epoch" --argjson fail "$fail_for_s" --argjson settle "$settle" '
-  def pct(p): if length == 0 then null else (sort | .[((length - 1) * p) | floor] | . * 100 | round / 100) end;
+  def pct(p): if length == 0 then null else
+      sort as $s | ((length - 1) * p) as $h | ($h | floor) as $i
+      | $s[$i] + ($h - $i) * ($s[[$i + 1, length - 1] | min] - $s[$i]) | . * 100 | round / 100 end;
   def stats: {n: length, p50: pct(0.5), p95: pct(0.95), p99: pct(0.99)};
   def by(f): group_by(f) | map({key: (.[0] | f), value: length}) | from_entries;
   ($flip | if . == "" then null else tonumber end) as $flip
@@ -90,6 +92,8 @@ jq -s -c --arg A "$region_a" --arg flip "$flip_epoch" --argjson fail "$fail_for_
       non_comparable: ($req | map(select(.region == "none" or .outcome == "not_ready")) | by(.outcome)),
       streams: ($req | map(select(.arm == "stream")) | by("\(.outcome)@attempt\(.attempt)")),
       streams_interrupted_by_region: ($req | map(select(.arm == "stream" and .outcome == "interrupted")) | by(.region)),
+      stream_interrupted_points: ($req | map(select(.arm == "stream" and .outcome == "interrupted")) | length),
+      stream_never_started_retries: ($req | map(select(.arm == "stream" and .outcome == "never_started" and .attempt == "2")) | length),
       split_admitted_by_region: ($req | map(select(.arm == "split" and .outcome == "ok")) | by(.region)),
       split_limited_by_region: ($req | map(select(.arm == "split" and .outcome == "rate_limited")) | by(.region)),
       split_during_by_region: (if $flip then ($req | map(select(.arm == "split" and .outcome == "ok" and .t >= $flip and .t < $flip + $fail)) | by(.region)) else {} end),
@@ -123,7 +127,9 @@ jq -s -c --arg A "$region_a" --arg run "$run_id" '
       stream_complete_by_region: ($ev | map(select(.tenant == "tenant-stream" and .outcome == "success")) | by(.region)),
       split_limited_by_region: ($ev | map(select(.tenant == "tenant-split" and .error_code == "rate_limited")) | by(.region)),
       split_admitted_by_region: ($ev | map(select(.tenant == "tenant-split" and .outcome == "success")) | by(.region)),
-      window_down: (map(select(.msg == "readiness_window" and .action == "down" and .region == $A)) | last | if . then {from, until} else null end),
+      window_downs: (map(select(.msg == "readiness_window" and .action == "down" and .region == $A)) | length),
+      window_downs_any_region: (map(select(.msg == "readiness_window" and .action == "down")) | length),
+      window_down: (map(select(.msg == "readiness_window" and .action == "down" and .region == $A)) | first | if . then {from, until} else null end),
       window_up: (map(select(.msg == "readiness_window" and .action == "up" and .region == $A)) | length),
       failing_open: (map(select((.msg // "") | test("failing open"))) | length)
     }
@@ -142,9 +148,9 @@ if [[ -n "$flip_epoch" ]]; then
   echo "  probes: A /readyz first 503 at +$(k6 '.probe.a_first_503') s, back to 200 at +$(k6 '.probe.a_back_200') s; balancer first answered from another region at +$(k6 '.probe.lb_first_from_b') s; balancer /readyz non-200 probes = $(k6 '.probe.lb_non_200')"
 fi
 echo "main:    first-attempt failures $(kv '.first_failures' "$tmp/k6.json") → retry outcomes $(kv '.retries' "$tmp/k6.json")"
-echo "streams: $(kv '.streams' "$tmp/k6.json"); interrupted by region (k6) $(kv '.streams_interrupted_by_region' "$tmp/k6.json"); stream_interrupted events by region $(kv '.stream_interrupted_by_region' "$tmp/gw.json")"
+echo "streams: final complete=$(jqs .summary.client.stream_complete) interrupted=$(jqs .summary.client.stream_interrupted) never_started=$(jqs .summary.client.stream_never_started) refused=$(jqs .summary.client.stream_refused); attempts $(kv '.streams' "$tmp/k6.json"); interrupted by region (k6) $(kv '.streams_interrupted_by_region' "$tmp/k6.json"); stream_interrupted events by region $(kv '.stream_interrupted_by_region' "$tmp/gw.json")"
 echo "split:   admitted by region (k6) $(kv '.split_admitted_by_region' "$tmp/k6.json"); (events) $(kv '.split_admitted_by_region' "$tmp/gw.json"); rate-limited by region $(kv '.split_limited_by_region' "$tmp/k6.json"); admitted during the window $(kv '.split_during_by_region' "$tmp/k6.json")"
-echo "latency p50/p95/p99 ms per region:"
+echo "latency p50/p95/p99 ms per region (linear interpolation between closest ranks):"
 jq -r '.latency | to_entries[] | "  \(.key): before \(.value.before | "\(.p50)/\(.p95)/\(.p99) (n=\(.n))") during \(.value.during | if . then "\(.p50)/\(.p95)/\(.p99) (n=\(.n))" else "-" end) after \(.value.after | if . then "\(.p50)/\(.p95)/\(.p99) (n=\(.n))" else "-" end)"' "$tmp/k6.json"
 echo "events:  $(gw '.events') cost events; success by tenant@region $(kv '.success_by_tenant_region' "$tmp/gw.json"); errors $(kv '.errors_by_code_region' "$tmp/gw.json"); readiness_window down=$(gw '.window_down | if . then "\(.from)→\(.until)" else "none" end') up=$(gw '.window_up'); failing-open warnings=$(gw '.failing_open')"
 
@@ -157,13 +163,16 @@ check_total "main successes" "$(k6 .main_successes)" "$(( $(jqs .summary.client.
 check_total "split admissions" "$(k6 '[.split_admitted_by_region[]] | add // 0')" "$(jqs .summary.client.split_admitted)"
 check_total "split rejections" "$(k6 '[.split_limited_by_region[]] | add // 0')" "$(jqs .summary.client.split_rate_limited)"
 check_total "completed streams" "$(k6 '[.stream_complete_by_region[]] | add // 0')" "$(jqs .summary.client.stream_complete)"
+check_total "interrupted streams" "$(k6 .stream_interrupted_points)" "$(jqs .summary.client.stream_interrupted)"
+check_total "never-started streams after the retry" "$(k6 .stream_never_started_retries)" "$(jqs .summary.client.stream_never_started)"
 if [[ "$(jqs '.summary.thresholds_passed')" != "true" ]]; then echo "FAIL: k6 thresholds failed"; status=1; fi
 if (( $(jqs '.summary.client.unexpected') > 0 )); then echo "FAIL: unexpected statuses (400/401/500) seen"; status=1; fi
 if (( $(gw '.failing_open') > 0 )); then echo "FAIL: a gateway failed open during the run"; status=1; fi
 if [[ "$experiment" != "none" ]]; then
   if [[ -z "$flip_epoch" ]]; then echo "FAIL: no flip recorded"; status=1; fi
-  if [[ "$(gw '.window_down')" == "null" ]]; then echo "FAIL: no readiness_window down record for $region_a in the gateway events"; status=1; fi
+  if (( $(gw '.window_downs') != 1 )); then echo "FAIL: $(gw '.window_downs') readiness_window down records for $region_a in this run's events, want 1"; status=1; fi
   if [[ "$mode" == "cloud" ]] && awk -v s="$(k6 '.preflip_share')" 'BEGIN { exit !(s < 0.9) }'; then echo "FAIL: pre-flip share of $region_a below 90 %"; status=1; fi
+elif (( $(gw '.window_downs_any_region') > 0 )); then echo "FAIL: readiness_window down record in a control run"; status=1
 fi
 compare_counts() {
   local label=$1 expected=$2 observed=$3 tolerance=$4 difference

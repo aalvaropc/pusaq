@@ -23,8 +23,10 @@ limiter adds a single Redis round-trip per request and nothing else.
 ## Protocol
 
 ```
-make loadtest                          # defaults: RPM=600 B=100 T=120s ×10
-make loadtest LOADTEST_DURATION=300s   # the 5-minute run
+make loadtest                                              # strict, defaults: RPM=600 B=100 T=120s ×10
+make loadtest LOADTEST_DURATION=300s                       # strict, the 5-minute run
+make loadtest LOADTEST_MODE=lease                          # lease, K = LOADTEST_LEASE_SIZE (default 10)
+make loadtest LOADTEST_MODE=lease LOADTEST_DURATION=300s   # lease, the 5-minute run
 make loadtest-down
 ```
 
@@ -108,12 +110,14 @@ the cost events on the two replicas add up to the same 1 299 (split
 of a nominal 3 100. In strict mode, one Lua call per request that reached a
 limited replica, admitted or rejected.
 
-Lease mode (`PUSAQ_RATELIMIT_MODE=lease`, `PUSAQ_LEASE_SIZE=10`,
-`PUSAQ_LEASE_TTL=1s`) admitted the same 1 299 and 3 099: under sustained
-overload every lease is spent as soon as it is taken, so nothing sits unspent
-at the end of the window and the floor of the bound (lowered by
-`replicas × K = 20`) is never approached. The ceiling is unchanged — tokens
-are taken before they are spent — and the runs stay under it. Lua calls
+Lease mode (`make loadtest LOADTEST_MODE=lease`, which sets
+`PUSAQ_RATELIMIT_MODE=lease` and `PUSAQ_LEASE_SIZE=10` from
+`LOADTEST_LEASE_SIZE`; the profile fixes `PUSAQ_LEASE_TTL=1s`) admitted the
+same 1 299 and 3 099: under sustained overload every lease is spent as soon
+as it is taken, so nothing sits unspent at the end of the window and the
+floor of the bound (lowered by `replicas × K = 20`) is never approached. The
+ceiling is unchanged — tokens are taken before they are spent — and the runs
+stay under it. Lua calls
 drop to 0.32 per request, 3.1× fewer than strict. The reduction under
 overload is bounded by the retry interval, not by K: with r = 10/s a denied
 replica is told to retry in ~100 ms, so each replica still makes ~10 store
