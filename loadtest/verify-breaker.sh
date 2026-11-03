@@ -36,7 +36,7 @@ for svc in pusaq-a pusaq-b; do
   n=$(jq 'length' <<<"$transitions")
   t_open=$(jq -r '[.[] | select(.to == "open")] | first | .time // empty' <<<"$transitions")
   t_closed=$(jq -r '[.[] | select(.to == "closed")] | last | .time // empty' <<<"$transitions")
-  probes=$(jq '[.[] | select(.from == "half_open")] | length' <<<"$transitions")
+  half_open_episodes=$(jq '[.[] | select(.from == "half_open")] | length' <<<"$transitions")
   reopened=$(jq '[.[] | select(.from == "half_open" and .to == "open")] | length' <<<"$transitions")
   events=$(logs "$svc" | jq -R -s -c '[split("\n")[] | select(length > 0) | fromjson? | select(.msg == "cost_event")]
       | { total: length,
@@ -52,7 +52,7 @@ for svc in pusaq-a pusaq-b; do
   else
     open_for="n/a"; recovery="n/a"
   fi
-  echo "  detection=${detection}s open_for=${open_for}s recovery=${recovery}s probes=$probes reopened=$reopened"
+  echo "  detection=${detection}s open_for=${open_for}s recovery=${recovery}s half_open_episodes=$half_open_episodes reopened=$reopened"
   echo "  cost events: $(jq -r 'to_entries | map("\(.key)=\(.value)") | join(" ")' <<<"$events")"
   if awk -v d="$detection" 'BEGIN { exit !(d > 1.5) }'; then echo "  FAIL: detection $detection s > 1.5 s"; status=1; fi
   if [[ -z "$t_closed" ]]; then echo "  FAIL: breaker never closed"; status=1; fi

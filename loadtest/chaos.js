@@ -10,8 +10,8 @@
 //           not-ready failure (what an SDK would do) — first-attempt
 //           failures, recoveries by retry, and failures after retry are
 //           counted separately;
-//   stream  streamed completions long enough to be in flight at the flip;
-//           complete / interrupted / refused are counted separately;
+//   stream  streamed completions in flight at the flip: complete /
+//           interrupted / never started / refused;
 //   split   a tenant offered more than one region's share of its quota, to
 //           see what a 50/50 split costs during failover;
 //   probe   GET /readyz on each region's own URL and on the balancer, once
@@ -26,6 +26,7 @@ import http from 'k6/http';
 import exec from 'k6/execution';
 import { sleep } from 'k6';
 import { Counter, Gauge, Trend } from 'k6/metrics';
+import { durationSeconds, retriable, retryStream, streamOutcome } from './chaos-lib.js';
 
 const env = (name, fallback) => (__ENV[name] !== undefined && __ENV[name] !== '' ? __ENV[name] : fallback);
 
@@ -48,7 +49,7 @@ const RETRY_CAP_MS = 2000;
 const RETRY_DEFAULT_MS = 500;
 // Client timeout for non-streaming requests. During a failover requests can
 // sit in a platform queue; the timeout decides how long the client waits.
-const TIMEOUT_S = Number(String(env('CHAOS_TIMEOUT', '10s')).replace(/s$/, ''));
+const TIMEOUT_S = durationSeconds(env('CHAOS_TIMEOUT', '10s'));
 const STREAM_TIMEOUT_S = 60;
 // Constant-arrival-rate needs a free VU per in-flight iteration: when
 // requests hang, too few pre-allocated VUs means iterations are silently not
@@ -71,6 +72,7 @@ const mainRetryOK = new Counter('main_retry_ok');
 const mainRetryFailed = new Counter('main_retry_failed');
 const streamComplete = new Counter('stream_complete');
 const streamInterrupted = new Counter('stream_interrupted');
+const streamNeverStarted = new Counter('stream_never_started');
 const streamRefused = new Counter('stream_refused');
 const splitAdmitted = new Counter('split_admitted');
 const splitLimited = new Counter('split_rate_limited');
@@ -162,6 +164,7 @@ function retryDelayMs(res) {
 }
 
 function completion(key, body, attempt, arm) {
+  const sentAt = Date.now();
   const res = http.post(`${BASE_URL}/v1/chat/completions`, JSON.stringify(body), {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     responseCallback: anyStatus,
@@ -175,11 +178,10 @@ function completion(key, body, attempt, arm) {
     status: String(res.status),
     region: c.region || 'none',
     outcome: c.outcome,
+    sent_ms: String(sentAt),
   });
   return { res, ...c };
 }
-
-const retriable = (o) => o === 'platform' || o === 'not_ready' || o === 'transport';
 
 export function setup() {
   startedAt.add(Date.now());
@@ -249,6 +251,7 @@ export function main() {
 }
 
 function streamOnce(attempt) {
+  const sentAt = Date.now();
   const res = http.post(`${BASE_URL}/v1/chat/completions`, JSON.stringify(payload(32, { stream: true })), {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY_STREAM}` },
     responseCallback: anyStatus,
@@ -256,28 +259,20 @@ function streamOnce(attempt) {
     timeout: `${STREAM_TIMEOUT_S}s`,
   });
   const c = classify(res);
-  let outcome = c.outcome;
-  if (res.status === 200) {
-    outcome = res.body && res.body.trim().endsWith('data: [DONE]') ? 'complete' : 'interrupted';
-  } else if (res.status === 0) {
-    outcome = 'interrupted';
-  } else if (outcome !== 'error') {
-    outcome = 'refused';
-  }
-  request.add(res.timings.duration, { arm: 'stream', attempt: String(attempt), status: String(res.status), region: c.region || 'none', outcome });
+  const outcome = streamOutcome(res, c.outcome);
+  request.add(res.timings.duration, { arm: 'stream', attempt: String(attempt), status: String(res.status), region: c.region || 'none', outcome, sent_ms: String(sentAt) });
   return { res, outcome, refusedAs: c.outcome };
 }
 
+const streamFinal = { complete: streamComplete, interrupted: streamInterrupted, never_started: streamNeverStarted };
+
 export function stream() {
-  const first = streamOnce(1);
-  if (first.outcome === 'complete') return streamComplete.add(1);
-  if (first.outcome === 'interrupted') return streamInterrupted.add(1);
-  if (first.outcome !== 'refused' || !retriable(first.refusedAs)) return streamRefused.add(1);
-  sleep(retryDelayMs(first.res) / 1000);
-  const second = streamOnce(2);
-  if (second.outcome === 'complete') streamComplete.add(1);
-  else if (second.outcome === 'interrupted') streamInterrupted.add(1);
-  else streamRefused.add(1);
+  let s = streamOnce(1);
+  if (retryStream(s.outcome, s.refusedAs)) {
+    sleep(retryDelayMs(s.res) / 1000);
+    s = streamOnce(2);
+  }
+  (streamFinal[s.outcome] || streamRefused).add(1);
 }
 
 export function split() {
@@ -289,11 +284,13 @@ export function split() {
 export function probe() {
   const targets = Object.assign({ lb: BASE_URL }, GATEWAY_URLS);
   for (const [target, url] of Object.entries(targets)) {
+    const sentAt = Date.now();
     const res = http.get(`${url}/readyz`, { responseCallback: anyStatus, timeout: '5s' });
     probeTrend.add(res.timings.duration, {
       target,
       status: String(res.status),
       region: res.headers['X-Pusaq-Region'] || 'none',
+      sent_ms: String(sentAt),
     });
   }
 }
@@ -336,6 +333,7 @@ export function handleSummary(data) {
     region_a: gauge(data, 'region_a_index') !== null ? REGIONS[gauge(data, 'region_a_index')] : null,
     started_at: started ? new Date(started).toISOString() : null,
     flip_at: flip ? new Date(flip).toISOString() : null,
+    ended_at: new Date().toISOString(),
     client: {
       main_first_ok: count(data, 'main_first_ok'),
       main_first_failed: count(data, 'main_first_failed'),
@@ -343,6 +341,7 @@ export function handleSummary(data) {
       main_retry_failed: count(data, 'main_retry_failed'),
       stream_complete: count(data, 'stream_complete'),
       stream_interrupted: count(data, 'stream_interrupted'),
+      stream_never_started: count(data, 'stream_never_started'),
       stream_refused: count(data, 'stream_refused'),
       split_admitted: count(data, 'split_admitted'),
       split_rate_limited: count(data, 'split_rate_limited'),
@@ -356,7 +355,7 @@ export function handleSummary(data) {
     '',
     `run ${RUN_ID} (${EXPERIMENT}): main ${QPS} rps, stream ${STREAM_QPS} rps, split ${SPLIT_QPS} rps for ${DURATION}; region A ${summary.region_a}, flip at ${summary.flip_at}`,
     `  main:   first ok=${c.main_first_ok} failed=${c.main_first_failed} → retry ok=${c.main_retry_ok} failed=${c.main_retry_failed}`,
-    `  stream: complete=${c.stream_complete} interrupted=${c.stream_interrupted} refused=${c.stream_refused}`,
+    `  stream: complete=${c.stream_complete} interrupted=${c.stream_interrupted} never_started=${c.stream_never_started} refused=${c.stream_refused}`,
     `  split:  admitted=${c.split_admitted} rate_limited=${c.split_rate_limited}`,
     `  unexpected=${c.unexpected} dropped=${c.dropped_iterations} thresholds passed: ${summary.thresholds_passed}`,
     '',
