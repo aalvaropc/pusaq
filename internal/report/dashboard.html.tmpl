@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<title>Pusaq event report</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --q1: #86b6ef;
+  --q2: #2a78d6;
+  --q3: #104281;
+  --notice: #f0efec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --q1: #184f95;
+    --q2: #3987e5;
+    --q3: #b7d3f6;
+    --notice: #232322;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5;
+  --s2: #d95926;
+  --q1: #184f95;
+  --q2: #3987e5;
+  --q3: #b7d3f6;
+  --notice: #232322;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 { font-size: 18px; margin: 0 0 4px; }
+h3 { font-size: 15px; margin: 20px 0 6px; }
+p { margin: 6px 0; }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.meta { color: var(--ink-2); }
+.notice { background: var(--notice); border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
+nav { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 0 0; }
+nav a { color: var(--ink-2); }
+section { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 18px 20px; margin: 18px 0; }
+.lede { color: var(--ink-2); max-width: 78ch; }
+.empty { color: var(--ink-2); font-style: italic; }
+.tiles { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.tile { border: 1px solid var(--ring); border-radius: 10px; padding: 10px 14px; min-width: 160px; }
+.tile b { display: block; font-size: 22px; font-weight: 600; }
+.tile span { color: var(--ink-2); font-size: 13px; }
+.pair { display: flex; flex-wrap: wrap; border: 1px solid var(--ring); border-radius: 10px; margin: 12px 0; }
+.pair > div { flex: 1 1 220px; padding: 12px 16px; }
+.pair > div + div { border-left: 1px solid var(--ring); }
+.pair b { display: block; font-size: 26px; font-weight: 600; }
+.pair span { color: var(--ink-2); font-size: 13px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { color: var(--ink-2); font-weight: 600; font-size: 13px; }
+tfoot td { font-weight: 600; border-bottom: none; }
+td.barcell { width: 28%; min-width: 100px; }
+svg.hist { display: block; width: 100%; max-width: 720px; height: auto; }
+.bar { position: relative; display: flex; gap: 2px; height: 12px; }
+.bar span { display: block; height: 12px; border-radius: 0 4px 4px 0; }
+.nest { position: relative; height: 12px; }
+.nest span { position: absolute; left: 0; top: 0; height: 12px; border-radius: 0 4px 4px 0; }
+.c1 { background: var(--s1); }
+.c2 { background: var(--s2); }
+.q1 { background: var(--q1); }
+.q2 { background: var(--q2); }
+.q3 { background: var(--q3); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); font-size: 13px; margin: 8px 0; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+svg text { fill: var(--muted); font-size: 11px; }
+svg .axis { stroke: var(--axis); stroke-width: 1; }
+svg .tau { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .m1 { fill: var(--s1); }
+svg .m2 { fill: var(--s2); }
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>Pusaq event report</h1>
+<p class="meta">Input <code>{{.Input}}</code> · {{if .RunID}}run_id <code>{{.RunID}}</code>{{else}}all runs{{end}} · {{.Selected}} of {{.Read}} cost events · {{when .From}} to {{when .To}}</p>
+<p class="notice">Figures describe the records in this input only. On the local Compose stack the upstreams are mock providers and prices are synthetic, so latencies and dollars describe that stack, not a provider. Cost events the emitter drops are absent from every view; {{if .TelemetryDropped}}the shutdown records in this input report {{.TelemetryDropped}} dropped over the gateways' lifetime.{{else}}drop counts are written at gateway shutdown and are not in this input.{{end}}</p>
+<nav aria-label="Views">
+<a href="#cost">1 Cost per tenant</a>
+<a href="#latency">2 Latency per route</a>
+<a href="#outcomes">3 Outcomes</a>
+<a href="#fallback">4 Fallback and breakers</a>
+<a href="#limits">5 Rate limiting</a>
+<a href="#shadow">6 Shadow cache</a>
+</nav>
+</header>
+
+<section id="cost">
+<h2>1 · Cost per tenant</h2>
+<p class="lede">Requests, provider-reported tokens and USD per tenant. Measured cost is priced from reported usage; estimated cost is priced from the request's reservation because the provider reported no usage (<code>cost_estimated</code>) and is never added to the measured column. Unpriced events had no provider answer or no price table. Price tables: {{if .Cost.PriceVersions}}{{names .Cost.PriceVersions}}{{else}}none in this input{{end}}.</p>
+<div class="tiles">
+<div class="tile"><b>{{usd .Cost.Total.MeasuredUSD}}</b><span>measured cost · {{.Cost.Total.Measured}} events</span></div>
+<div class="tile"><b>{{usd .Cost.Total.EstimatedUSD}}</b><span>estimated cost · {{.Cost.Total.Estimated}} events</span></div>
+<div class="tile"><b>{{.Cost.Total.Requests}}</b><span>requests · {{.Cost.Total.Unpriced}} unpriced</span></div>
+</div>
+<div class="scroll"><table>
+<thead><tr><th>Tenant</th><th>Requests</th><th>Succeeded</th><th>Prompt tokens</th><th>Completion tokens</th><th>Measured USD</th><th>Estimated USD</th><th>Unpriced</th><th>Total USD</th><th class="l">Cost</th></tr></thead>
+<tbody>
+{{range .Cost.Tenants}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.Succeeded}}</td><td>{{.PromptTokens}}</td><td>{{.CompletionTokens}}</td><td>{{usd .MeasuredUSD}}</td><td>{{usd .EstimatedUSD}}</td><td>{{.Unpriced}}</td><td>{{usd .TotalUSD}}</td><td class="barcell"><div class="bar" title="{{.Tenant}}: measured {{usd .MeasuredUSD}}, estimated {{usd .EstimatedUSD}}">{{if gt .MeasuredUSD 0.0}}<span class="c1" style="{{width .MeasuredUSD $.MaxUSD}}"></span>{{end}}{{if gt .EstimatedUSD 0.0}}<span class="c2" style="{{width .EstimatedUSD $.MaxUSD}}"></span>{{end}}</div></td></tr>
+{{end}}</tbody>
+<tfoot><tr><td>{{.Cost.Total.Tenant}}</td><td>{{.Cost.Total.Requests}}</td><td>{{.Cost.Total.Succeeded}}</td><td>{{.Cost.Total.PromptTokens}}</td><td>{{.Cost.Total.CompletionTokens}}</td><td>{{usd .Cost.Total.MeasuredUSD}}</td><td>{{usd .Cost.Total.EstimatedUSD}}</td><td>{{.Cost.Total.Unpriced}}</td><td>{{usd .Cost.Total.TotalUSD}}</td><td></td></tr></tfoot>
+</table></div>
+<div class="legend"><span><i class="c1"></i>Measured</span><span><i class="c2"></i>Estimated</span></div>
+</section>
+
+<section id="latency">
+<h2>2 · Latency per route</h2>
+<p class="lede">Successful requests only, per requested alias and served model; {{.Latency.Excluded}} requests with other outcomes are excluded. Percentiles are nearest-rank: the value at rank ⌈p·n/100⌉ of the ascending sample of whole-millisecond <code>latency_ms</code>. A streamed request's latency runs until its stream ends.</p>
+{{if .Latency.Routes}}
+<div class="scroll"><table>
+<thead><tr><th>Route</th><th>n</th><th>p50</th><th>p95</th><th>p99</th><th>max</th><th class="l">p50 / p95 / p99</th></tr></thead>
+<tbody>
+{{range .Latency.Routes}}<tr><td>{{.Alias}} → {{.Model}}</td><td>{{.Count}}</td><td>{{ms .P50}}</td><td>{{ms .P95}}</td><td>{{ms .P99}}</td><td>{{ms .Max}}</td><td class="barcell"><div class="nest" title="{{.Alias}}: p50 {{ms .P50}}, p95 {{ms .P95}}, p99 {{ms .P99}}"><span class="q1" style="{{width .P99 $.MaxP99}}"></span><span class="q2" style="{{width .P95 $.MaxP99}}"></span><span class="q3" style="{{width .P50 $.MaxP99}}"></span></div></td></tr>
+{{end}}</tbody>
+<tfoot><tr><td>{{.Latency.All.Alias}}</td><td>{{.Latency.All.Count}}</td><td>{{ms .Latency.All.P50}}</td><td>{{ms .Latency.All.P95}}</td><td>{{ms .Latency.All.P99}}</td><td>{{ms .Latency.All.Max}}</td><td></td></tr></tfoot>
+</table></div>
+<div class="legend"><span><i class="q3"></i>p50</span><span><i class="q2"></i>p95</span><span><i class="q1"></i>p99</span></div>
+{{else}}<p class="empty">No successful requests in the selection, so no latency percentiles.</p>{{end}}
+</section>
+
+<section id="outcomes">
+<h2>3 · Outcomes</h2>
+<p class="lede">Every selected cost event by outcome and normalized error code, with the HTTP status the client received. Refusals before accounting (injected not-ready windows) produce no cost event and do not appear.</p>
+<div class="scroll"><table>
+<thead><tr><th>Outcome</th><th class="l">Error code</th><th>HTTP status</th><th>Requests</th><th>Share</th><th class="l">Requests</th></tr></thead>
+<tbody>
+{{range .Outcomes.Rows}}<tr><td>{{.Outcome}}</td><td class="l">{{if .Code}}<code>{{.Code}}</code>{{else}}—{{end}}</td><td>{{.Status}}</td><td>{{.Count}}</td><td>{{.Share}}</td><td class="barcell"><div class="bar" title="{{.Outcome}} {{.Code}}: {{.Count}}"><span class="c1" style="{{width .Count $.MaxCount}}"></span></div></td></tr>
+{{end}}</tbody>
+<tfoot><tr><td>total</td><td></td><td></td><td>{{.Outcomes.Total}}</td><td></td><td></td></tr></tfoot>
+</table></div>
+</section>
+
+<section id="fallback">
+<h2>4 · Fallback and breakers</h2>
+<p class="lede">A served request with a breaker-skip or failed-attempt record was served after fallback; the first backend those records name is its first choice, otherwise the serving backend was. Breaker skips cost no attempt. Transitions are the <code>breaker_state</code> records{{if .RunID}} inside the selected events' time span{{end}}, per replica.</p>
+{{if .Fallback.HasData}}
+<div class="tiles">
+<div class="tile"><b>{{.Fallback.Served}}</b><span>requests served by a backend</span></div>
+<div class="tile"><b>{{.Fallback.AfterFallback}}</b><span>served after fallback</span></div>
+<div class="tile"><b>{{.Fallback.Unserved}}</b><span><code>upstream_error</code>, no backend answered</span></div>
+<div class="tile"><b>{{len .Fallback.Transitions}}</b><span>breaker transitions</span></div>
+</div>
+{{if .Fallback.Backends}}<div class="scroll"><table>
+<thead><tr><th>Backend</th><th>First choice</th><th>Served</th><th>First try</th><th>After fallback</th><th>Breaker skips</th><th>Failed attempts</th></tr></thead>
+<tbody>
+{{range .Fallback.Backends}}<tr><td>{{.Backend}}</td><td>{{.FirstChoice}}</td><td>{{.Served}}</td><td>{{.FirstTry}}</td><td>{{.AfterFallback}}</td><td>{{.Skipped}}</td><td>{{.Failed}}</td></tr>
+{{end}}</tbody>
+</table></div>{{end}}
+{{if .Fallback.Attempts}}<h3>Backend attempts per served request</h3>
+<div class="scroll"><table>
+<thead><tr><th>Attempts</th><th>Requests</th></tr></thead>
+<tbody>
+{{range .Fallback.Attempts}}<tr><td>{{.Attempts}}</td><td>{{.Count}}</td></tr>
+{{end}}</tbody>
+</table></div>{{end}}
+<h3>Breaker transitions</h3>
+{{if .Fallback.Transitions}}<div class="scroll"><table>
+<thead><tr><th>Time (UTC)</th><th class="l">Source</th><th class="l">Backend</th><th class="l">From</th><th class="l">To</th></tr></thead>
+<tbody>
+{{range .Fallback.Transitions}}<tr><td>{{when .Time}}</td><td class="l">{{if .Source}}{{.Source}}{{else}}—{{end}}</td><td class="l">{{.Backend}}</td><td class="l">{{.From}}</td><td class="l">{{.To}}</td></tr>
+{{end}}</tbody>
+</table></div>{{else}}<p class="empty">No breaker transitions in this selection.</p>{{end}}
+{{else}}<p class="empty">No selected request reached a backend and no breaker moved.</p>{{end}}
+</section>
+
+<section id="limits">
+<h2>5 · Rate limiting</h2>
+<p class="lede">The request limit runs before alias resolution, so its <code>rate_limited</code> events carry no <code>requested_model</code>; the token limit runs after it, so its events do. Fail-open admissions are the <code>failing open</code> warnings of selected requests: admitted without a store decision. Fail-closed refusals are <code>store_unavailable</code> events.</p>
+{{if not .Limits.HasData}}<p class="empty">No limit denials and no fail-open admissions in this selection.</p>{{end}}
+<div class="scroll"><table>
+<thead><tr><th>Tenant</th><th>Requests</th><th>429 request limit</th><th>429 token limit</th><th>402 budget</th><th>503 fail-closed</th><th>Fail-open request</th><th>Fail-open token</th><th>Fail-open spend</th></tr></thead>
+<tbody>
+{{range .Limits.Tenants}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.RequestLimited}}</td><td>{{.TokenLimited}}</td><td>{{.BudgetExceeded}}</td><td>{{.FailClosed}}</td><td>{{.FailOpenRequest}}</td><td>{{.FailOpenToken}}</td><td>{{.FailOpenSpend}}</td></tr>
+{{end}}</tbody>
+<tfoot>{{with .Limits.Total}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.RequestLimited}}</td><td>{{.TokenLimited}}</td><td>{{.BudgetExceeded}}</td><td>{{.FailClosed}}</td><td>{{.FailOpenRequest}}</td><td>{{.FailOpenToken}}</td><td>{{.FailOpenSpend}}</td></tr>{{end}}</tfoot>
+</table></div>
+</section>
+
+<section id="shadow">
+<h2>6 · Shadow cache</h2>
+{{if .Shadow.Enabled}}
+<p class="lede">Shadow mode never serves. Predicted hit-rate is the records labeled <code>shadow_hit</code> over eligible successful completions (no <code>cache_skip</code>); evaluations without a neighbor, dropped or skipped count as misses. The false-positive bound is the predicted hits whose neighbor fingerprint differs from the response fingerprint, over predicted hits: identical fingerprints are certainly correct answers, different ones are candidates for review, so the true false-positive rate is at most this bound. Embedder: {{if .Shadow.Embedders}}{{names .Shadow.Embedders}}{{else}}not in this input{{end}}. Configured τ: {{taus .Shadow.Taus}}.</p>
+<div class="pair" role="group" aria-label="Predicted hit-rate and false-positive bound">
+<div><b>{{.Shadow.HitRate}}</b><span>predicted hit-rate at the configured τ</span></div>
+<div><b>≤ {{.Shadow.FalsePos}}</b><span>false-positive bound (fingerprint mismatches among predicted hits)</span></div>
+</div>
+<p class="meta">{{.Shadow.Records}} evaluations found a neighbor; {{.Shadow.Eligible}} eligible successful completions.{{if .Shadow.Dropped}} Shutdown counters: {{.Shadow.Dropped}} samples dropped, {{.Shadow.Skipped}} evaluations skipped (whole process lifetime).{{end}}</p>
+<h3>τ sweep</h3>
+<div class="scroll"><table>
+<thead><tr><th>τ</th><th>Predicted hit-rate</th><th>False-positive bound</th></tr></thead>
+<tbody>
+{{range .Shadow.Sweep}}<tr><td>{{tau .Tau}}{{if .Configured}} (configured){{end}}</td><td>{{.HitRate}}</td><td>≤ {{.FalsePos}}</td></tr>
+{{end}}</tbody>
+</table></div>
+<h3>Best-neighbor similarity</h3>
+{{if .Shadow.Records}}
+<svg class="hist" viewBox="0 0 {{.Histogram.Width}} {{.Histogram.Height}}" role="img" aria-label="Histogram of best-neighbor similarity, split by fingerprint agreement">
+<line class="axis" x1="0" x2="{{.Histogram.Width}}" y1="{{.Histogram.Base}}" y2="{{.Histogram.Base}}"></line>
+{{range .Histogram.Bars}}{{if .HasMatch}}<rect class="m1" x="{{.X}}" y="{{.MatchY}}" width="{{.W}}" height="{{.MatchH}}" rx="2"><title>{{tau .Lo}}–{{tau .Hi}}: {{.Match}} matching fingerprints</title></rect>{{end}}{{if .HasMismatch}}<rect class="m2" x="{{.X}}" y="{{.MismatchY}}" width="{{.W}}" height="{{.MismatchH}}" rx="2"><title>{{tau .Lo}}–{{tau .Hi}}: {{.Mismatch}} differing fingerprints</title></rect>{{end}}{{end}}
+{{range .Histogram.TauX}}<line class="tau" x1="{{.}}" x2="{{.}}" y1="0" y2="{{$.Histogram.Base}}"></line>{{end}}
+{{range .Histogram.Ticks}}<text x="{{.X}}" y="{{$.Histogram.Height}}" text-anchor="{{.Anchor}}">{{.Label}}</text>{{end}}
+</svg>
+<div class="legend"><span><i class="c1"></i>Matching fingerprints</span><span><i class="c2"></i>Differing fingerprints</span>{{if .Histogram.TauX}}<span>Dashed line: configured τ</span>{{end}}</div>
+<div class="scroll"><table>
+<thead><tr><th>Similarity</th><th>Matching</th><th>Differing</th></tr></thead>
+<tbody>
+{{range .Shadow.Histogram}}{{if or .Match .Mismatch}}<tr><td>{{tau .Lo}}–{{tau .Hi}}</td><td>{{.Match}}</td><td>{{.Mismatch}}</td></tr>
+{{end}}{{end}}</tbody>
+</table></div>
+{{else}}<p class="empty">No evaluation found a neighbor in this selection.</p>{{end}}
+{{if .Shadow.Skips}}<h3>Kept out of the cache</h3>
+<div class="scroll"><table>
+<thead><tr><th><code>cache_skip</code></th><th>Successful completions</th></tr></thead>
+<tbody>
+{{range .Shadow.Skips}}<tr><td>{{.Reason}}</td><td>{{.Count}}</td></tr>
+{{end}}</tbody>
+</table></div>{{end}}
+{{else}}<p class="empty">No <code>cache_shadow</code> records and no shadow-mode startup record in this input: the shadow cache was off for these requests, so there is no hit-rate and no false-positive bound to report.</p>{{end}}
+</section>
+</main>
+</body>
+</html>
