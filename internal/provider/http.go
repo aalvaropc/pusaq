@@ -49,7 +49,7 @@ func NewHTTP(name, baseURL string, timeout time.Duration, logger *slog.Logger, o
 	h := &HTTP{
 		name:         name,
 		baseURL:      baseURL,
-		client:       &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		client:       &http.Client{Transport: pooledTransport(), Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		streamClient: &http.Client{Transport: streamTransport(timeout), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		idleTimeout:  timeout,
 		logger:       logger,
@@ -193,8 +193,17 @@ func statusError(status int) error {
 
 var errStreamIdle = errors.New("upstream stream idle past the timeout")
 
-func streamTransport(timeout time.Duration) *http.Transport {
+const idleConnsPerHost = 256
+
+func pooledTransport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = idleConnsPerHost
+	t.MaxIdleConnsPerHost = idleConnsPerHost
+	return t
+}
+
+func streamTransport(timeout time.Duration) *http.Transport {
+	t := pooledTransport()
 	t.DialContext = (&net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}).DialContext
 	t.TLSHandshakeTimeout = timeout
 	t.ResponseHeaderTimeout = timeout

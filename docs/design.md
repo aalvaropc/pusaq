@@ -266,7 +266,7 @@ round-trips and latency added by the limiter.
 
 **Store outage.** When Redis does not answer, the request limit, the token
 charge, and the budget read fail open by default after at most 250 ms per
-call, each logged — a gateway that
+call, each logged and named in the cost event's `fail_open` — a gateway that
 rejects everything because its semaphore died trades a cost problem for an
 availability outage. A tenant with `fail_closed=true` gets 503
 `store_unavailable` instead. A reconciliation that fails leaves its charge in
@@ -310,12 +310,16 @@ Similarity alone does not establish equivalence. Therefore:
 
 - τ is calibrated on a labeled dataset of equivalent pairs and trap pairs
   (swapped entities, negations, dates) — chosen as
-  `τ* = min{τ : precision(τ) ≥ 0.99}`, recall being whatever follows.
+  `τ* = min{τ : L(τ) ≥ 0.99}`, where L is the one-sided Clopper–Pearson
+  lower bound on precision at 95% confidence, recall being whatever follows.
+  The bound demands support (299 predicted hits with no false hit), so an
+  observed precision of 1.0 from a few hits certifies nothing.
 - The cache runs in **shadow mode only**: it logs the hit it *would* have
   served, the model is still called, and nothing is ever served from the
   cache.
-- `make calibrate` writes the precision/recall curve and prints τ* or fails
-  explicitly; a hit-rate is only published next to its false-positive rate. A
+- `make calibrate` writes the precision/recall curve, with each point's
+  support and lower bound and undefined values written as `undefined`, and
+  prints τ* or fails explicitly; a hit-rate is only published next to its false-positive rate. A
   hit-rate without its FP rate is marketing, not engineering.
 
 **The implemented shadow namespace:** tenant | the route's physical model |
@@ -406,7 +410,8 @@ own regions dies. Handled by different pieces:
 - **Circuit breaker per backend** — one per backend in each process: closed /
   open / half-open, with a minimum-request threshold on the failure window
   (2 failures out of 2 requests is not a signal), cooldown, and K probe
-  requests in half-open. Detection and recovery times are measured, not
+  requests in half-open. Only those probes decide half-open: an attempt
+  admitted before the breaker opened is ignored when it ends. Detection and recovery times are measured, not
   asserted: every transition is a `breaker_state` log record, the parameters
   are configuration (`PUSAQ_BREAKER_*`), and `make breakertest` fails the mock
   provider at a known instant and reads both times from the logs
@@ -437,10 +442,11 @@ own regions dies. Handled by different pieces:
 The gateway sees every LLM request in the company — its log *is* the AI cost
 accounting system. Every request admitted to the pipeline emits one
 `cost_event`: request ID, timestamp, operation, tenant, outcome and error
-code, latency; for completions, the requested model, the route's physical
-model (`served_model`), the route reason, prompt and completion tokens, and
-the tokens charged; when present, the feature tag, run ID, region, policy
-flags, cache-skip reason, the backend that served it and the attempts, the
+code, latency in milliseconds, backend attempts; for completions, the
+requested model, the route's physical model (`served_model`), the route
+reason, prompt and completion tokens, and the tokens charged; when present,
+the feature tag, run ID, region, policy flags, cache-skip reason, store
+decisions that failed open, the backend that served it, the
 **cost in $ against a versioned price table** (`PUSAQ_PRICES`,
 `PUSAQ_PRICE_TABLE_VERSION`; the table version travels in the event — prices
 change and historical reports must still add up), and the tenant's spend for
@@ -455,7 +461,8 @@ Cost events are enqueued without waiting for the telemetry sink:
 a single goroutine drains a bounded buffer and writes one line per event;
 overflow drops the event and counts it, and the count is logged at shutdown
 (`telemetry_dropped`) — losing an observability record is acceptable,
-degrading a user request is not.
+degrading a user request is not. Shutdown stops intake only once no event is
+mid-enqueue, so every event is either written or counted as dropped.
 
 There is no live dashboard and no metrics endpoint; reports are computed from
 the event stream: `loadtest/verify-*.sh` for measurements, and
@@ -531,7 +538,7 @@ disappointing numbers included.
 | Breaker detection ([report](measurements/breaker-detection.md)) | `make breakertest`: the mock primary fails on command for a known window under steady traffic with a healthy fallback | Detection time (failure start → breaker open), recovery time (failure end → closed), probes, extra attempts, fallback-served requests, client errors (must be zero) |
 | Regional failover ([report](measurements/regional-failover.md)) | `make chaos-run`: the two-region runtime module, sustained k6 against the global LB, region A's readiness failed at a known instant through the admin endpoint; every request tagged with the run id and answered with its region; per-region readiness probes as an independent timeline | Time until new requests are answered by the other region, longest interval without a success, first-attempt failures / recovered by one retry / failed after retry, streams complete / interrupted / refused, latency before / during / after per region, the split tenant's admissions per region (**counted, not estimated**, cross-checked against the gateways' events) |
 | Content rules ([report](measurements/content-rules.md)) | `go test -v -run TestContentRulesCorpus ./internal/policy`: the policy filter's sensitive-data, injection and temporal rules against a labeled EN/ES corpus with hard negatives | Precision and recall per family against published floors the suite enforces; every miss and false alarm listed |
-| Cache threshold calibration | `make calibrate`: the τ sweep over a labeled pair dataset with the gateway's own embedder | The precision/recall curve and τ*, or an explicit failure when no τ reaches the precision floor |
+| Cache threshold calibration | `make calibrate`: the τ sweep over a labeled pair dataset with the gateway's own embedder | The precision/recall curve with support and lower bounds, and τ*, or an explicit failure when no τ's precision lower bound reaches the floor |
 
 The [measurement index](measurements/README.md) also covers lease ownership,
 unattempted-reservation settlement and independent evidence verification.

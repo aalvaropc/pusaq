@@ -3,10 +3,13 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aalvaropc/pusaq/internal/core"
 )
@@ -95,6 +98,34 @@ func TestRequestIDAssignedAndStable(t *testing.T) {
 	}
 	if events[0].RequestID != seen {
 		t.Fatalf("cost event ID %q != handler-observed ID %q", events[0].RequestID, seen)
+	}
+}
+
+func TestAccountingRecordsLatencyInMilliseconds(t *testing.T) {
+	const pause = 20 * time.Millisecond
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			var events []core.CostEvent
+			h := core.Chain(Accounting(func(e core.CostEvent) { events = append(events, e) }, discardLogger()), RequestID())(
+				func(context.Context, *core.Request) (*core.Response, error) {
+					if stream {
+						return &core.Response{Status: http.StatusOK, Stream: io.NopCloser(strings.NewReader("x"))}, nil
+					}
+					time.Sleep(pause)
+					return &core.Response{Status: http.StatusOK}, nil
+				})
+			resp, err := h(context.Background(), &core.Request{Op: "test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stream {
+				time.Sleep(pause)
+				_, _ = io.ReadAll(resp.Stream)
+			}
+			if ms := events[0].LatencyMS; ms < pause.Milliseconds() || ms >= 1000 {
+				t.Fatalf("latency_ms = %d, want the %s pause in milliseconds", ms, pause)
+			}
+		})
 	}
 }
 

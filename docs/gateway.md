@@ -110,7 +110,9 @@ with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
 the gateway **fails open** within a 250 ms budget per store call —
 temporarily inexact limits beat an outage caused by the limiter itself —
 unless the tenant's policy sets `fail_closed`, in which case it answers 503
-`store_unavailable`.
+`store_unavailable`. A request let through this way carries `fail_open` on
+its cost event, naming each decision the store could not make: `rpm`,
+`tpm`, or `budget`.
 Unset `PUSAQ_REDIS_ADDR` disables limiting with a startup warning.
 
 Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one
@@ -137,8 +139,10 @@ when actual usage is known the difference is reconciled back atomically —
 on success, on error, and at stream end. A confirmed reservation is fully
 returned if no provider was invoked. After any provider invocation, unknown
 usage keeps the charge, including errors, timeouts and abandoned streams.
-Every cost event records `tokens_charged` next to actual usage, so the
-estimate's error is measurable from the event stream. In the
+Every charged request's cost event records `tokens_charged` next to actual
+usage, so the estimate's error is measurable from the event stream; a charge
+skipped because the store failed open leaves `tokens_charged` out and records
+`fail_open` `tpm`, so it is not mistaken for token limiting turned off. In the
 [mock experiment](measurements/tpm-overrun.md), window consumption stays
 within the stated tolerance and peak excess stays below the experiment's
 reservation-error bound. Those numerical bounds depend on the recorded
@@ -161,7 +165,11 @@ probes — configurable with `PUSAQ_BREAKER_WINDOW`, `PUSAQ_BREAKER_MIN_SAMPLES`
 `PUSAQ_BREAKER_THRESHOLD`, `PUSAQ_BREAKER_COOLDOWN`, `PUSAQ_BREAKER_PROBES`,
 validated and logged at startup. Every transition is one `breaker_state`
 log record (`backend`, `from`, `to`), which is what detection and recovery
-times are measured from. On an
+times are measured from. An attempt's outcome counts only while the breaker
+is still in the state that admitted it: half-open is decided by its own
+probes alone, a request admitted before the breaker opened changes nothing
+when it ends, and the window after recovery holds only attempts admitted
+since the breaker closed. On an
 upstream error or an open breaker, the route's fallback backends are tried
 in order — at most once each, same model contract; streams fall back only
 before the first byte. A started stream feeds its backend's breaker when it
@@ -169,7 +177,8 @@ ends: a mid-stream failure or a missing `[DONE]` as a failure, a completed
 stream as a success, a client that leaves as nothing. A provider's rejection
 of the request (400, 413, 422) ends the chain without counting as a failure,
 and so does a client that leaves. Failover is observable per request: every
-cost event records `served_provider` and `attempts`. Backends come from
+cost event records `attempts` (0 when no backend was tried), and
+`served_provider` when a backend answered. Backends come from
 `PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
 
 ## Semantic cache (shadow mode)
@@ -219,11 +228,20 @@ caps exclude allocator and collection metadata and do not bound process RSS.
 The threshold is never a judgment call: `make calibrate`
 sweeps a labeled pair dataset (equivalent vs trap pairs) with the same
 embedder implementations the gateway runs, writes the precision/recall
-curve to the ignored `out/calibration.csv`, and prints `τ* = min{τ : precision ≥ 0.99}` — or fails loudly when
-the embedder cannot separate the traps (which the local embedder, being
-lexical, often cannot: that failure is the harness working). The seed
-dataset (60 pairs) exercises the harness; it is not a production corpus,
-and `PUSAQ_CACHE_TAU` only labels the shadow records.
+curve to the ignored `out/calibration.csv`, and prints τ\*, the smallest τ whose one-sided Clopper–Pearson lower
+bound on precision reaches 0.99 at 95% confidence (`cachecal -floor`,
+`-confidence`). The bound needs support: with no false hit, at least 299
+predicted hits; a τ whose observed precision is 1.0 from a handful of hits
+does not qualify. Each curve row carries its predicted hits, false hits,
+precision, lower bound, recall and F1; a ratio without a denominator, such
+as precision at a τ with no hit, is written `undefined`, never 0. The
+command fails loudly when the embedder cannot separate the traps (which the
+local embedder, being lexical, often cannot: that failure is the harness
+working) or when the best τ lacks support, and says which. The bound holds
+per τ and for the dataset's pairs, not family-wise over the sweep nor for
+production traffic. The seed dataset (60 pairs, 30 equivalent) exercises the
+harness and cannot certify a τ; it is not a production corpus, and
+`PUSAQ_CACHE_TAU` only labels the shadow records.
 
 ## Tenant policies
 

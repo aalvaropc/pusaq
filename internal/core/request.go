@@ -55,6 +55,7 @@ type Request struct {
 	// empty when eligible.
 	PolicyFlags []string
 	CacheSkip   string
+	FailOpen    []string
 	// ServedModel is the physical upstream model that handled the request.
 	ServedModel string
 	// ServedProvider is the upstream backend that actually answered
