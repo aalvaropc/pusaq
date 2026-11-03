@@ -18,7 +18,8 @@ to stdout. Saturation drops events rather than waiting for the sink;
 `telemetry_dropped` reports the count at shutdown. A produced event therefore
 does not guarantee a persisted log record. Completion events include resolved
 model and usage when available; configured prices add `cost_usd`,
-`price_table_version` and, for estimated costs, `cost_estimated`.
+`price_table_version` and, for estimated costs, `cost_estimated`. The
+[local event report](#local-event-report) reads these records back.
 
 Prompt text, raw provider bodies, URL-bearing transport errors and recovered
 panic values are omitted from gateway diagnostics. Policy events carry rule
@@ -130,6 +131,64 @@ Image builds admit only Dockerfile, the Go module manifests, `cmd/` and
 environment files, Git metadata and measurement output, are excluded.
 
 The mock provider's admin routes are unauthenticated: `POST /admin/fail?for=5s` fails every completion for 5 s, `DELETE /admin/fail` clears it, `GET /stats` counts what reached it.
+
+## Local event report
+
+`make dashboard` turns the gateway's own log records into one HTML file,
+`loadtest/out/dashboard.html`, and prints a short summary. By default it
+saves the Compose stack's container logs (default and `loadtest` profile
+services) to `loadtest/out/dashboard-events.log` and reads them;
+`DASHBOARD_LOG=<file>` reads an existing log file instead, and
+`DASHBOARD_RUN_ID=<id>` keeps the cost events of one `metadata.run_id`.
+It needs Go on the host and no cloud account:
+
+```sh
+make up
+make smoke
+make dashboard
+make dashboard DASHBOARD_LOG=gateway.log DASHBOARD_RUN_ID=20261103T100000Z
+```
+
+The target runs `go run ./cmd/eventreport -in <file|-> -out <html> [-run-id <id>]`.
+Lines that are not gateway records (container output, plain text, malformed
+JSON, other messages) are skipped and counted in the summary, and a repeated
+cost event counts once. The command fails without writing a report when the
+selection holds no cost events. The page carries inline styles and graphics
+only: no scripts and no external requests.
+
+| View | What it shows |
+|---|---|
+| Cost per tenant | Requests, provider-reported tokens and USD per tenant. Estimated cost (`cost_estimated`, priced from the reservation) is its own column and never part of measured cost; unpriced events had no provider answer or no price table. |
+| Latency per route | p50, p95, p99 and max of successful requests per requested alias and served model. |
+| Outcomes | Cost events by outcome and error code, with the HTTP status the client received. |
+| Fallback and breakers | Per backend: requests for which it was the first choice, served at first try or after fallback, breaker skips and failed attempts; attempts per served request; `breaker_state` transitions. |
+| Rate limiting | Per tenant: `rate_limited` denials by limit, budget and fail-closed refusals, and fail-open admissions by store from the `failing open` warnings. A request-limit denial has no `requested_model` (it is decided before alias resolution); a token-limit denial has one. |
+| Shadow cache | Predicted hit-rate at the configured τ next to its false-positive bound, a τ sweep with both numbers for every τ, best-neighbor similarity by fingerprint agreement, and `cache_skip` reasons. |
+
+Percentiles use the nearest-rank method: the value at rank ⌈p·n/100⌉ of the
+ascending sample, over the whole milliseconds the gateway writes in
+`latency_ms`. A streamed request's latency runs until its stream ends. The
+predicted hit-rate is the `shadow_hit` records over eligible successful
+completions (no `cache_skip`); evaluations without a neighbor, dropped or
+skipped count as misses. The false-positive bound is the predicted hits whose
+neighbor fingerprint differs from the response fingerprint, over predicted
+hits: identical fingerprints are certainly correct answers, so the semantic
+false-positive rate is at most this bound. Without `cache_shadow` records the
+view reports neither number. When every record saw the same response
+fingerprint, as with the mock provider's single canned answer, the report
+states that the bound is zero by construction and cannot detect false
+positives in that input.
+
+The report describes its input only. On the local stack the upstreams are
+mock providers, prices are synthetic and the `local` embedder is lexical, so
+its latencies, dollars and cache numbers describe that stack, not a provider
+or a production embedder. Events the emitter dropped are absent from every
+view; drop counts appear only when the input holds the gateways' shutdown
+records. Shadow, fallback and fail-open records count only when their
+request's cost event is selected; under a run filter, breaker transitions
+count only inside the selected events' time span. `docker compose logs`
+re-reads each container's whole log, so a long-lived stack produces a large
+input.
 
 ## Measurements and how to run them
 
