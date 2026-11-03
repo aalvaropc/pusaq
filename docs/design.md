@@ -457,8 +457,10 @@ overflow drops the event and counts it, and the count is logged at shutdown
 (`telemetry_dropped`) — losing an observability record is acceptable,
 degrading a user request is not.
 
-There is no dashboard and no metrics endpoint; reports are computed from the
-event stream (`loadtest/verify-*.sh`).
+There is no live dashboard and no metrics endpoint; reports are computed from
+the event stream: `loadtest/verify-*.sh` for measurements, and
+`cmd/eventreport` (`make dashboard`) for a static HTML report of cost,
+latency, outcomes, fallback, limits and the shadow cache.
 
 Authentication runs before body reads. Authenticated body failures are
 accounted; readiness-injection refusals happen outside the pipeline. Logs

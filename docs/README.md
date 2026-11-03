@@ -10,6 +10,7 @@ The gateway emits JSON accounting events and supports provider fallback.
 |---|---|
 | Try the gateway with local mocks | [Quick start](../README.md#quick-start) |
 | Run locally, authenticate clients or inspect logs | [Operations](operations.md) |
+| See cost per tenant, latency and shadow-cache numbers from local logs | [Local event report](operations.md#local-event-report) |
 | Understand accepted requests, SSE and errors | [Gateway reference](gateway.md) |
 | Configure tenants, providers, quotas or shadow sampling | [Configuration](configuration.md) |
 | Understand the request pipeline and design choices | [Architecture](design.md) |

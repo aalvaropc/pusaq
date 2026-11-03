@@ -23,7 +23,7 @@ Your app → Pusaq → Primary provider
 | Routing | Configurable aliases, feature rules, circuit breakers and fallback |
 | Tenant controls | API keys, model permissions and monthly spending limits |
 | Quotas | Request and token buckets with atomic Redis operations |
-| Visibility | Buffered and SSE responses, token usage and JSON cost events |
+| Visibility | Buffered and SSE responses, token usage, JSON cost events and a [local event report](docs/operations.md#local-event-report) |
 | Policy filter | Content heuristics and a semantic cache in shadow mode |
 
 ## Quick start

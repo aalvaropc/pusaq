@@ -1,0 +1,11 @@
+events: 10 of 11 cost events (run_id r1) from events.log
+window: 2026-11-03 10:00:01Z .. 2026-11-03 10:00:10Z
+cost: measured $0.006000 (4 events), estimated $0.000500 (1 events), unpriced 5 events
+  tenant tenant-b: 4 requests, 10 prompt + 10 completion tokens, measured $0.004000, estimated $0.000000
+  tenant tenant-a: 6 requests, 20 prompt + 40 completion tokens, measured $0.002000, estimated $0.000500
+latency (successful, nearest-rank): n=5 p50 300 ms, p95 500 ms, p99 500 ms, max 500 ms
+outcomes: success 5, error/rate_limited 2, error/budget_exceeded 1, error/store_unavailable 1, error/upstream_error 1
+fallback: 40.0% (2/5) served after fallback, 1 upstream errors unserved, 1 breaker transitions
+limits: 429 request 1, 429 token 1, 402 budget 1, 503 fail-closed 1, fail-open request 1 / token 0 / spend 0
+shadow cache: predicted hit-rate 50.0% (2/4), false-positive bound 50.0% (1/2) (fingerprint mismatches), τ 0.95
+skipped: 2 non-JSON lines, 2 malformed, 1 other records, 1 duplicate events, 1 records without a cost event
