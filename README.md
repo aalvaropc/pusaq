@@ -28,8 +28,8 @@ Your app → Pusaq → Primary provider
 
 ## Quick start
 
-Requires Docker Compose, Make and curl. Starts Redis and mock providers with no
-provider API key or cloud account.
+Requires Docker Compose, Make and curl. Starts the gateway, Redis and two mock
+providers with no provider API key or cloud account.
 
 ```sh
 git clone https://github.com/aalvaropc/pusaq.git

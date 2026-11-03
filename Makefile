@@ -62,7 +62,7 @@ TF_RUNTIME := terraform -chdir=infra/terraform/runtime
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-up: ## Start local environment (Redis + mock provider)
+up: ## Start local environment (gateway on 8080, Redis, mock provider and fallback mock)
 	docker compose up -d --build
 
 down: ## Stop local environment

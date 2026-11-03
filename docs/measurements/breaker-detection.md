@@ -14,27 +14,32 @@ promptly. These are the two numbers, measured rather than asserted.
 ## Hypothesis
 
 With window W = 20 (filled by the warm-up), threshold θ = 0.5, minimum
-samples 10, cooldown 10 s, and 1 probe, the breaker opens on the
-⌊W·θ⌋ + 1 = 11th consecutive failure. At r = 12 requests/s per replica
-(three tenants at 8 rps, round-robin over two replicas), that is 11/12 s
-plus at most one inter-arrival gap:
+samples 10, cooldown 10 s and up to 3 concurrent half-open probes (the
+gateway default), the breaker opens on the ⌊W·θ⌋ + 1 = 11th consecutive
+failure. At r = 12 requests/s per replica (three tenants at 8 rps,
+round-robin over two replicas), that is 11/12 s plus at most one
+inter-arrival gap. Against a zero-latency mock a probe finishes long before
+the next request arrives (≈ 83 ms apart), so each half-open episode is
+decided by its first probe:
 
 - **detection** (failure start → open) ∈ [0.83, 0.92] s;
 - **open duration** = cooldown + one inter-arrival ≈ 10.0–10.1 s;
 - **recovery** (failure end → closed) = open duration − failure window
-  ≈ 5.9 s for a 5 s window, with **1 probe**;
+  ≈ 5.9 s for a 5 s window, with **1 half-open episode**;
 - a 15 s window makes the first probe (at ≈ 10.9 s) fail: one
-  half-open → open, a second cooldown, **2 probes**, closing ≈ 20.9 s
-  after opening;
+  half-open → open, a second cooldown, **2 half-open episodes**, closing
+  ≈ 20.9 s after opening;
 - **zero 502s**: the fallback carries every request the primary drops;
 - **11 requests per replica pay an extra attempt** (the failures that
   tripped the breaker); 12 with the 15 s window (one failed probe).
 
 ## Protocol
 
-The 2026-09-13 runs below use one half-open probe. The current gateway
-default is three (`PUSAQ_BREAKER_PROBES`), so running the recipe with current
-defaults is a new experiment. See [shared-store-clock.md](shared-store-clock.md#breaker-and-fallback)
+The 2026-09-13 runs below use the gateway's breaker defaults, including
+three half-open probe slots (`PUSAQ_BREAKER_PROBES` defaults to 3 and the
+Compose profile does not set it). The Half-open episodes column counts
+`half_open → closed` and `half_open → open` transitions, not configured
+probe slots. See [shared-store-clock.md](shared-store-clock.md#breaker-and-fallback)
 for the 2026-10-20 local breaker run.
 
 ```
@@ -74,7 +79,7 @@ reaching clients.
 | Host | Linux 7.1 (Fedora), Intel Core i5-13600K (20 threads), 31 GiB; all containers on this one host |
 | Docker / Compose | Docker 29.8.0, Compose v5.5.1 |
 | Images | `redis:7-alpine`, `nginx:1.27-alpine`, `grafana/k6:1.4.0`, gateway and mocks built from the commit under test |
-| Breaker | window 20, min samples 10, threshold 0.5, cooldown 10 s, probes 1 (historical settings) |
+| Breaker | window 20, min samples 10, threshold 0.5, cooldown 10 s, 3 half-open probe slots (defaults) |
 | Traffic | 3 tenants × 8 rps = 24 rps, 12 rps per replica; `pusaq/fast`; 45 s |
 | Mocks | primary and fallback at 0 ms latency, error rate 0 |
 
@@ -82,7 +87,7 @@ reaching clients.
 
 Runs of 2026-09-13. Every run: k6 thresholds passed, `verify-breaker.sh` OK.
 
-| Run | Window | Replica | Transitions | Detection | Open for | Recovery | Probes | Reopened | Extra attempts | Served by backup | 502 to clients |
+| Run | Window | Replica | Transitions | Detection | Open for | Recovery | Half-open episodes | Reopened | Extra attempts | Served by backup | 502 to clients |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `breaker-5s` | 5 s | a | closed→open→half_open→closed | **0.876 s** | 10.084 s | **5.960 s** | 1 | 0 | 11 | 131 | 0 |
 | `breaker-5s` | 5 s | b | closed→open→half_open→closed | **0.834 s** | 10.084 s | **5.918 s** | 1 | 0 | 11 | 131 | 0 |
@@ -99,7 +104,7 @@ Reading: every number lands where the formula put it. Detection is the
 cooldown plus one inter-arrival (10.08 s); recovery is that minus the 5 s
 window (≈ 5.9 s). With the longer window the first probe meets a still-dead
 primary, reopens the breaker for a second cooldown, and the second probe
-closes it — 12 extra attempts, 2 probes, recovery again ≈ 6 s after the
+closes it — 12 extra attempts, 2 half-open episodes, recovery again ≈ 6 s after the
 window ends. The fallback absorbed 131 and 251 requests per replica
 respectively (the 11–12 fallbacks plus everything routed around the open
 breaker).

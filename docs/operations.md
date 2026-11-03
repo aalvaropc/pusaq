@@ -111,9 +111,9 @@ as described in [configuration](configuration.md#upstreams-and-routing).
 
 ### Development checks
 
-Use Go 1.26.10+ and golangci-lint 2.12.x. The shell measurement fixtures also
-require Bash, jq, bc, awk and GNU date. These checks do not require a cloud
-account:
+Use Go 1.26.10+ and golangci-lint 2.12.x. The measurement fixtures also
+require Bash, jq, bc, awk, GNU date and Node.js. These checks do not require
+a cloud account:
 
 ```sh
 make test
@@ -134,6 +134,13 @@ Image builds admit only Dockerfile, the Go module manifests, `cmd/` and
 environment files, Git metadata and measurement output, are excluded.
 
 The mock provider's admin routes are unauthenticated: `POST /admin/fail?for=5s` fails every completion for 5 s, `DELETE /admin/fail` clears it, `GET /stats` counts what reached it.
+
+The mock's response latency comes from `--latency-p50` and `--latency-max`:
+90 % of responses are uniform in [0.5 × p50, 1.5 × p50] capped at the
+maximum, 10 % uniform in [p50, maximum]. The maximum is the largest latency
+it produces, not a percentile: with 200 ms / 800 ms the median is ≈ 211 ms
+and the p99 ≈ 740 ms; with both equal to 2 s every response takes 1–2 s.
+`--latency-p99` is accepted as the same setting as `--latency-max`.
 
 ## Local event report
 
@@ -252,6 +259,14 @@ unexpected counts for its run and tenant. Chaos compares main successes
 streams by region. Local comparisons are exact; cloud main successes retain
 one shared tolerance of five events across regions. Platform, transport and
 pre-admission readiness refusals are reported without requiring cost events.
+Streams end complete, interrupted (the response started and ended without
+`[DONE]`), never started (no response byte arrived; retried once) or
+refused. Times are the send instants k6 records before each request, and
+latency percentiles interpolate linearly between the closest ranks, as k6
+does. `readiness_window` records and fail-open warnings carry no run id:
+collection keeps those logged between the run's start and end on the k6
+clock, widened by `CHAOS_CLOCK_SLACK_SECONDS` (5), and an injected run must
+contain exactly one down record for the failed region.
 
 ## CI and image publication
 
@@ -360,3 +375,13 @@ Logging ([`fetch-events.sh`](../loadtest/fetch-events.sh)), and computes the
 numbers ([`verify-chaos.sh`](../loadtest/verify-chaos.sh)); `make chaos-local`
 runs the same harness on the Compose profile at no cost (nginx has no health
 checks there, so it checks the plumbing, not the failover).
+
+The run reads `CHAOS_EXPERIMENT` (`region-fail` or `none`), `CHAOS_QPS`,
+`CHAOS_STREAM_QPS`, `CHAOS_SPLIT_QPS`, `CHAOS_WARMUP`, `CHAOS_FAIL_FOR`,
+`CHAOS_DURATION` and `CHAOS_TIMEOUT` (Go durations such as `500ms`, `30s` or
+`1m30s`), plus `REGION_A` (overrides the warm-up choice) and `K6_IMAGE` from
+the environment. After k6 finishes, collection polls Cloud Logging every
+`CHAOS_LOG_POLL_SECONDS` (10) until it returns a cost event for every attempt
+a gateway answered past readiness and, in an injected run, the failed
+region's `readiness_window` down record; after `CHAOS_LOG_WAIT_SECONDS` (180)
+it verifies whatever arrived, and missing evidence fails verification.

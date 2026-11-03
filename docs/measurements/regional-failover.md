@@ -57,7 +57,12 @@ produced it. Arms:
 - **stream** — 2 rps of streamed completions lasting ~2.4 s each (the mock
   spaces chunks 200 ms apart), so dozens are in flight at the flip;
   complete / interrupted (200 then cut) / refused (non-200 before the
-  first byte, retried once).
+  first byte, retried once). The harness of these runs also counted any
+  transport failure (k6 status 0) as interrupted, whether or not the
+  response had started; every run recorded zero interrupted, so no stream
+  failed in transport either. The current harness reports a stream that
+  fails before its first response byte as never started and retries it
+  once.
 - **split** — a tenant offered more than one region's share of its quota
   (per region: 300/min, burst 50).
 - **probe** — `GET /readyz` on each region's own URL and on the balancer,
@@ -67,10 +72,14 @@ produced it. Arms:
   balancer sends this client to, measured in warm-up (≥ 90 % required).
 
 `loadtest/verify-chaos.sh` computes everything from k6's per-request points
-(send time = completion minus duration, one clock) and cross-checks against
-the gateways' cost events read from Cloud Logging by run id: successes per
-tenant and region, the split tenant's admissions, `stream_interrupted`
-events, the `readiness_window` record, fail-open warnings (must be zero).
+(one clock) and cross-checks against the gateways' cost events read from
+Cloud Logging by run id: successes per tenant and region, the split
+tenant's admissions, `stream_interrupted` events, the `readiness_window`
+record, fail-open warnings (must be zero). In these runs the send time was
+the completion time minus k6's request duration, and the harness waited a
+fixed 30 s for Cloud Logging. The current harness records the send instant
+before each request, interpolates percentiles and polls Cloud Logging until
+the run's records arrive (see [operations](../operations.md#cloud-measurement-environment)).
 
 ## Environment
 
@@ -79,7 +88,7 @@ events, the `readiness_window` record, fail-open warnings (must be zero).
 | Regions | us-central1, us-east1; region A (balancer's choice for this client) = **us-east1** in every run |
 | Gateway | Cloud Run, 1 vCPU / 512 MiB, CPU always allocated, min = max = 1 instance per region; readiness probe `GET /readyz` every 2 s, timeout 1 s, failure threshold 1; image `pusaq:1f53ef8` |
 | Store | Memorystore for Redis Basic 1 GB per region (direct peering, Direct VPC egress) |
-| Upstream | mock provider per region, internal ingress; latency p50 200 ms / p99 800 ms; stream chunks every 200 ms |
+| Upstream | mock provider per region, internal ingress; `--latency-p50 200ms --latency-p99 800ms`, where 800 ms is the mock's maximum latency, not its p99 (90 % of responses uniform in [100, 300] ms, 10 % in [200, 800] ms: median ≈ 211 ms, p99 ≈ 740 ms); stream chunks every 200 ms |
 | Balancer | global external Application Load Balancer, serverless NEG per region, Cloud Run service health; outlier detection off; plain HTTP |
 | Quotas | per region per tenant: 300 requests/min, burst 50 (half the nominal 600/min) |
 | Client | k6 1.4.0 in Docker on one laptop in Lima; ~0.2 s round trip to either region |
@@ -114,7 +123,9 @@ What the refusals were, by latency:
 | 503 `not_ready` (with `X-Pusaq-Region`) | 11 | +0.25 to +0.75 s | 106–118 ms | A's gateway, before Cloud Run took the instance out of rotation |
 | 429 without a gateway region | 134 | +0.61 to +7.6 s (one straggler at +19.3 s in run 3) | **10.1–11.4 s** | Cloud Run, after holding the request ~10 s with no ready instance in A |
 
-Latency of successful main requests, first attempts (p50 / p95 / p99, ms):
+Latency of successful main requests, first attempts (p50 / p95 / p99, ms;
+the verifier of these runs took the sorted value at index ⌊(n − 1)·p⌋,
+without interpolation):
 
 | Run | A before the flip | B during the window | A after |
 |---|---|---|---|
@@ -196,9 +207,11 @@ events 0.
   every run (`outlier_detection`, default false).
 - **Plain HTTP** on a global address with throwaway keys: acceptable for
   synthetic traffic on a deployment that lived about an hour.
-- **Clocks.** Every time above comes from k6's clock (send time =
-  completion minus duration); server timestamps are used only to
-  cross-check.
+- **Clocks.** Every time above comes from k6's clock; server timestamps
+  are used only to cross-check. Send time was completion minus k6's
+  request duration, which excludes connection set-up (DNS and TCP connect;
+  no TLS on plain HTTP), so a request that opened a new connection is
+  placed that set-up time after the instant it was sent.
 - **Cost.** The deployment existed for about an hour (two Memorystore
   instances, four always-allocated Cloud Run instances, one forwarding
   rule): under one dollar at the published hourly rates; the label-filtered
