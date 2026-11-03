@@ -199,17 +199,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// sampleLatency: 90% uniform in [0.5×P50, 1.5×P50] capped at max, 10% uniform in [P50, max].
 func (s *Server) sampleLatency() time.Duration {
-	if s.opts.LatencyMax == 0 {
+	return s.opts.SampleLatency(s.random)
+}
+
+// SampleLatency draws a latency: 90% uniform in [0.5×P50, 1.5×P50] capped at LatencyMax, 10% uniform in [P50, LatencyMax].
+func (o Options) SampleLatency(random func() float64) time.Duration {
+	if o.LatencyMax == 0 {
 		return 0
 	}
-	if s.random() < 0.9 {
-		d := time.Duration(float64(s.opts.LatencyP50) * (0.5 + s.random()))
-		return min(d, s.opts.LatencyMax)
+	if random() < 0.9 {
+		d := time.Duration(float64(o.LatencyP50) * (0.5 + random()))
+		return min(d, o.LatencyMax)
 	}
-	spread := s.opts.LatencyMax - s.opts.LatencyP50
-	return s.opts.LatencyP50 + time.Duration(s.random()*float64(spread))
+	spread := o.LatencyMax - o.LatencyP50
+	return o.LatencyP50 + time.Duration(random()*float64(spread))
 }
 
 func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
