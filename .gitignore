@@ -15,8 +15,13 @@ coverage.html
 # Terraform
 *.tfstate
 *.tfstate.*
+*.tfplan
 .terraform/
 infra/terraform/**/terraform.tfvars
+*.auto.tfvars
+*.auto.tfvars.json
+crash.log
+crash.*.log
 
 # Editor
 .idea/
@@ -28,8 +33,7 @@ infra/terraform/**/terraform.tfvars
 AGENTS.md
 .agents/
 
-# Load test output
+# Load test and calibration output
 /loadtest/out/*
 !/loadtest/out/.gitkeep
-
-# Terraform local variables
+/out/

@@ -70,6 +70,8 @@ resource "google_compute_target_http_proxy" "gateway" {
 resource "google_compute_global_address" "gateway" {
   name       = "pusaq-gateway"
   ip_version = "IPV4"
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_compute_global_forwarding_rule" "gateway" {

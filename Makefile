@@ -97,8 +97,9 @@ lint-docs: ## Fail on planning or tracking language and unchecked archived tasks
 tidy: ## Tidy module files
 	go mod tidy
 
-calibrate: ## Calibrate the cache threshold on the seed dataset (local embedder)
-	go run ./cmd/cachecal -pairs testdata/calibration/seed-pairs.csv -out calibration.csv
+calibrate: ## Calibrate the cache threshold on the seed dataset (local embedder); curve in out/
+	mkdir -p out
+	go run ./cmd/cachecal -pairs testdata/calibration/seed-pairs.csv -out out/calibration.csv
 
 smoke: ## Send a chat completion through the gateway (gateway + mock must be running)
 	curl -sS -X POST localhost:8080/v1/chat/completions \
@@ -162,9 +163,9 @@ infra-destroy: ## Destroy the cloud foundation (never disables shared APIs)
 infra-fmt: ## Format Terraform files
 	terraform fmt -recursive infra/terraform
 
-infra-validate: ## Validate both Terraform modules without touching the backend
-	$(TF_FOUNDATION) init -backend=false -input=false >/dev/null && $(TF_FOUNDATION) validate
-	$(TF_RUNTIME) init -backend=false -input=false >/dev/null && $(TF_RUNTIME) validate
+infra-validate: ## Validate and test both Terraform modules against their locks, without the backend
+	$(TF_FOUNDATION) init -backend=false -input=false -lockfile=readonly >/dev/null && $(TF_FOUNDATION) validate && $(TF_FOUNDATION) test
+	$(TF_RUNTIME) init -backend=false -input=false -lockfile=readonly >/dev/null && $(TF_RUNTIME) validate && $(TF_RUNTIME) test
 
 runtime-init: ## Initialize the runtime module (state in the existing bucket)
 	$(TF_RUNTIME) init -backend-config="bucket=$(TF_STATE_BUCKET)"

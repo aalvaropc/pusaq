@@ -120,6 +120,8 @@ go build ./...
 
 `make test` includes the race detector and coverage. `make lint` runs
 golangci-lint, go vet and the repository documentation guard.
+`go test -run '^$' -bench . -benchmem ./internal/policy` measures the CPU
+time and allocations of the content rules on English and Spanish prompts.
 
 ### Container boundaries
 
@@ -199,7 +201,7 @@ jobs succeed:
 |---|---|
 | Go | golangci-lint, go vet, race tests, build and measurement fixtures |
 | Documentation | Repository documentation guard |
-| Infrastructure | Terraform formatting, validation and foundation mock tests |
+| Infrastructure | Terraform formatting, validation against the committed provider locks, and mock tests for both modules |
 | Security | govulncheck, actionlint, zizmor and PR dependency review |
 | Static analysis | CodeQL for Go and Actions |
 | Images | Trivy for both image targets; fixable HIGH/CRITICAL findings fail CI |
@@ -263,6 +265,20 @@ NEGs that follows Cloud Run service health — the balancer stops sending new
 requests to a region whose instances fail their readiness probe. Plain HTTP
 on a global address, throwaway API keys, a generated admin token; nothing
 here is a standing deployment.
+
+The readiness probe is tight on purpose: every 2 s, a 1 s timeout, and one
+failure marks the instance not ready. `/readyz` reads an in-process flag
+without I/O, so a failed probe means a drain or an injected window, never a
+slow dependency, and the short period keeps detection small next to the
+failover gap the run measures.
+
+The API keys and the admin token are Secret Manager secrets that reach the
+gateway as secret references, never as plain environment values. The gateway
+runs as its own service account, which can read only those two secrets.
+Terraform writes the API keys write-only, so they never reach the state; to
+change them on a live deployment, also increment `api_keys_version`. The
+admin token remains in the runtime state: `make chaos-run` reads it from the
+module outputs.
 
 ```sh
 cp infra/terraform/runtime/terraform.tfvars.example infra/terraform/runtime/terraform.tfvars
