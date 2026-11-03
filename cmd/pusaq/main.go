@@ -55,7 +55,7 @@ func run(logger *slog.Logger, lookup func(string) (string, bool)) error {
 		a.emitter.Close()
 		return err
 	}
-	return a.serve(ctx, ln)
+	return a.serve(ctx, stop, ln)
 }
 
 type app struct {
@@ -285,7 +285,7 @@ func priceTable(cfg config.Config, logger *slog.Logger) *pricing.Table {
 	return table
 }
 
-func (a *app) serve(ctx context.Context, ln net.Listener) error {
+func (a *app) serve(ctx context.Context, stop context.CancelFunc, ln net.Listener) error {
 	httpServer := newHTTPServer(a.cfg.Addr, a.srv)
 	serveErr := make(chan error, 1)
 	go func() {
@@ -300,6 +300,7 @@ func (a *app) serve(ctx context.Context, ln net.Listener) error {
 		return err
 	case <-ctx.Done():
 	}
+	stop()
 
 	// Probes see the 503 during the drain delay; in-flight requests then get the grace period.
 	a.logger.Info("draining",
