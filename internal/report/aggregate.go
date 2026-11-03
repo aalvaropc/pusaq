@@ -217,7 +217,11 @@ type ShadowView struct {
 	Skips     []ReasonCount
 	Dropped   *uint64
 	Skipped   *uint64
+	Responses int
 }
+
+// SingleResponse reports whether every record saw the same response, which makes fingerprint agreement uninformative.
+func (v ShadowView) SingleResponse() bool { return v.Records > 1 && v.Responses == 1 }
 
 // Options select what Build aggregates.
 type Options struct {
@@ -612,12 +616,14 @@ func shadowView(events []Event, in *Input, selected map[string]Event) ShadowView
 	}
 
 	var hits, mismatches int
+	responses := make(map[string]bool)
 	v.Histogram = make([]Bin, HistogramBins)
 	for i := range v.Histogram {
 		v.Histogram[i].Lo = float64(i) / HistogramBins
 		v.Histogram[i].Hi = float64(i+1) / HistogramBins
 	}
 	for _, s := range records {
+		responses[s.ResponseFingerprint] = true
 		if s.Hit {
 			hits++
 			if s.FingerprintsDiffer() {
@@ -631,6 +637,7 @@ func shadowView(events []Event, in *Input, selected map[string]Event) ShadowView
 			b.Match++
 		}
 	}
+	v.Responses = len(responses)
 	v.HitRate = Ratio{hits, v.Eligible}
 	v.FalsePos = Ratio{mismatches, hits}
 

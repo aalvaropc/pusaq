@@ -224,6 +224,7 @@ svg .m2 { fill: var(--s2); }
 <div><b>{{.Shadow.HitRate}}</b><span>predicted hit-rate at the configured τ</span></div>
 <div><b>≤ {{.Shadow.FalsePos}}</b><span>false-positive bound (fingerprint mismatches among predicted hits)</span></div>
 </div>
+{{if .Shadow.SingleResponse}}<p class="notice">Every shadow record in this selection saw the same response fingerprint, as an upstream that gives every prompt one canned answer (the mock provider) produces. Fingerprints then always agree, so the false-positive bound is zero by construction and cannot detect false positives here.</p>{{end}}
 <p class="meta">{{.Shadow.Records}} evaluations found a neighbor; {{.Shadow.Eligible}} eligible successful completions.{{if .Shadow.Dropped}} Shutdown counters: {{.Shadow.Dropped}} samples dropped, {{.Shadow.Skipped}} evaluations skipped (whole process lifetime).{{end}}</p>
 <h3>τ sweep</h3>
 <div class="scroll"><table>

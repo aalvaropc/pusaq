@@ -108,3 +108,24 @@ func TestHTMLSaysWhenViewsHaveNoData(t *testing.T) {
 		t.Error("hit-rate shown without shadow records")
 	}
 }
+
+func TestSingleResponseFingerprintIsFlagged(t *testing.T) {
+	lines := []string{eventLine("1", "t", "success", "", 1, ""), eventLine("2", "t", "success", "", 1, ""), eventLine("3", "t", "success", "", 1, "")}
+	for _, id := range []string{"2", "3"} {
+		lines = append(lines, `{"msg":"cache_shadow","request_id":"`+id+`","shadow_hit":true,"best_similarity":0.99,"neighbor_fingerprint":"same","response_fingerprint":"same"}`)
+	}
+	r := build(t, parse(t, strings.Join(lines, "\n")), "")
+	if !r.Shadow.SingleResponse() || r.Shadow.FalsePos != (Ratio{0, 2}) {
+		t.Fatalf("shadow = %+v", r.Shadow)
+	}
+	var summary bytes.Buffer
+	if err := WriteSummary(&summary, r, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary.String(), "the bound cannot detect false positives in this input") {
+		t.Fatalf("summary:\n%s", summary.String())
+	}
+	if !strings.Contains(render(t, r), "the false-positive bound is zero by construction") {
+		t.Fatal("report does not flag a single response fingerprint")
+	}
+}

@@ -100,7 +100,8 @@ func TestBuildFixtureRun(t *testing.T) {
 	}
 
 	s := r.Shadow
-	if !s.Enabled || s.Records != 3 || s.Eligible != 4 || s.HitRate != (Ratio{2, 4}) || s.FalsePos != (Ratio{1, 2}) {
+	if !s.Enabled || s.Records != 3 || s.Eligible != 4 || s.HitRate != (Ratio{2, 4}) || s.FalsePos != (Ratio{1, 2}) ||
+		s.Responses != 3 || s.SingleResponse() {
 		t.Fatalf("shadow = %+v", s)
 	}
 	wantSweep := []SweepRow{

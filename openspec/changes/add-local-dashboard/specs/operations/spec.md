@@ -47,6 +47,11 @@ The shadow cache view SHALL show the predicted hit-rate — records labeled `sha
 - **WHEN** the input holds eligible completions and `cache_shadow` records, some predicted hits with differing fingerprints
 - **THEN** the shadow view shows the predicted hit-rate over eligible completions together with the share of predicted hits whose fingerprints differ, at the configured τ and at each τ of the sweep
 
+#### Scenario: One response fingerprint makes the bound uninformative
+
+- **WHEN** every selected `cache_shadow` record carries the same response fingerprint, as the mock provider's canned answer produces
+- **THEN** the report and the summary state that the false-positive bound is zero by construction and cannot detect false positives in that input
+
 ### Requirement: Local dashboard target
 
 `make dashboard` SHALL collect the gateway records from the local Compose stack, or read an existing log file when one is given, and write the report under an ignored output directory, without cloud resources.

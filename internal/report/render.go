@@ -200,6 +200,9 @@ func WriteSummary(w io.Writer, r *Report, input string) error {
 	if s := r.Shadow; s.Enabled {
 		fmt.Fprintf(&b, "shadow cache: predicted hit-rate %s, false-positive bound %s (fingerprint mismatches), τ %s\n",
 			s.HitRate, s.FalsePos, tauList(s.Taus))
+		if s.SingleResponse() {
+			fmt.Fprintf(&b, "  every shadow record saw the same response fingerprint: the bound cannot detect false positives in this input\n")
+		}
 	} else {
 		fmt.Fprintf(&b, "shadow cache: no records in this input\n")
 	}
