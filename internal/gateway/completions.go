@@ -292,18 +292,26 @@ func reservation(cr completionRequest, reserveDefault int) int {
 // request has fully finished (buffered return or stream end) — the hot path
 // does nothing but this registration. completed gates the offer: a stream
 // that died mid-way must never be inserted as a cacheable observation.
-func offerShadow(req *core.Request, shape cacheShape, opts CompletionsOptions, completed func() bool, fingerprint func() string) {
+func offerShadow(req *core.Request, shape cacheShape, opts CompletionsOptions, completed func() bool, reportedModel, fingerprint func() string) {
 	if opts.Shadow == nil || req.CacheSkip != "" {
 		return
 	}
-	tenant, model, id := req.Tenant, req.ServedModel, req.ID
+	key := semcache.Key{
+		Tenant:       req.Tenant,
+		RouteModel:   req.ServedModel,
+		SystemPrompt: shape.SystemPrompt,
+		Temperature:  shape.Temperature,
+		MaxTokens:    shape.MaxTokens,
+	}
+	id := req.ID
 	req.OnFinalize(func() {
 		if !completed() {
 			return
 		}
+		key.ReportedModel = reportedModel()
 		opts.Shadow.Offer(semcache.Sample{
 			RequestID:   id,
-			Namespace:   semcache.Namespace(tenant, model, shape.SystemPrompt, shape.Temperature),
+			Namespace:   key.Namespace(),
 			Prompt:      shape.UserContent,
 			Fingerprint: fingerprint(),
 		})
@@ -393,7 +401,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		for _, c := range upstream.Choices {
 			content.WriteString(c.Message.Content)
 		}
-		offerShadow(req, shape, opts, always, func() string { return semcache.Fingerprint(content.String()) })
+		offerShadow(req, shape, opts, always, func() string { return upstream.Model }, func() string { return semcache.Fingerprint(content.String()) })
 
 		body, err := json.Marshal(completionResponse{
 			ID:      upstream.ID,
@@ -565,7 +573,7 @@ func streamCompletion(ctx context.Context, providers map[string]provider.Provide
 
 	scanner := &usageScanningStream{inner: upstream, req: req}
 	req.OnFinalize(func() { scanner.settle(br) })
-	offerShadow(req, shape, opts, scanner.completed, scanner.contentFingerprint)
+	offerShadow(req, shape, opts, scanner.completed, scanner.reportedModel, scanner.contentFingerprint)
 
 	resp := &core.Response{
 		Status: http.StatusOK,
@@ -593,6 +601,7 @@ type usageScanningStream struct {
 	hasData    bool
 	eventError bool
 	digest     hash.Hash
+	model      string
 	ready      []byte
 	done       bool
 	failed     bool
@@ -600,6 +609,8 @@ type usageScanningStream struct {
 }
 
 func (u *usageScanningStream) completed() bool { return u.done }
+
+func (u *usageScanningStream) reportedModel() string { return u.model }
 
 func (u *usageScanningStream) contentFingerprint() string {
 	if u.digest == nil {
@@ -725,6 +736,7 @@ func (u *usageScanningStream) dispatch() error {
 	}
 	var chunk struct {
 		Error   json.RawMessage `json:"error"`
+		Model   string          `json:"model"`
 		Usage   *core.Usage     `json:"usage"`
 		Choices []struct {
 			Delta struct {
@@ -740,6 +752,9 @@ func (u *usageScanningStream) dispatch() error {
 	}
 	if chunk.Usage != nil {
 		u.req.Usage = *chunk.Usage
+	}
+	if u.model == "" {
+		u.model = chunk.Model
 	}
 	if u.digest == nil {
 		u.digest = sha256.New()

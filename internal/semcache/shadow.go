@@ -3,6 +3,7 @@ package semcache
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"log/slog"
 	"strings"
@@ -170,23 +171,29 @@ func (s *Shadow) evaluate(sample Sample) {
 	}
 }
 
-// PolicyVersion names the generation of eligibility rules entries were
-// inserted under. It is part of the namespace: when the rules change, old
-// entries must not be neighbors of new lookups.
-const PolicyVersion = "v1"
+// PolicyVersion versions the eligibility rules and the namespace derivation.
+const PolicyVersion = "v2"
 
-// Namespace derives the cache namespace per constitution rule 2: tenant,
-// served physical model, system-prompt content, the request's temperature
-// (formatted, or "none" when the client omitted it — the provider default
-// is a distinct key from any explicit value), and the policy version, plus
-// fixed tools=none and format=none markers: the accepted request subset
-// carries neither tools nor a response format.
-// Language is content, not configuration: it lives in the embedding space.
-func Namespace(tenant, servedModel, systemPrompt, temperature string) string {
+// Key is the namespace material of one evaluated request.
+type Key struct {
+	Tenant        string
+	RouteModel    string
+	ReportedModel string
+	SystemPrompt  string
+	Temperature   string
+	MaxTokens     string
+}
+
+// Namespace derives the cache namespace per constitution rule 2.
+func (k Key) Namespace() string {
+	reported := k.ReportedModel
+	if reported == "" {
+		reported = k.RouteModel
+	}
 	h := sha256.New()
-	for _, part := range []string{tenant, servedModel, systemPrompt, "tools=none", "format=none", "temp=" + temperature, "policy=" + PolicyVersion} {
+	for _, part := range []string{k.Tenant, k.RouteModel, reported, k.SystemPrompt, "tools=none", "format=none", "temp=" + k.Temperature, "max_tokens=" + k.MaxTokens, "policy=" + PolicyVersion} {
+		_, _ = h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(part))))
 		_, _ = h.Write([]byte(part))
-		_, _ = h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }

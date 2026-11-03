@@ -125,7 +125,7 @@ func TestShadowHitAndMissRecords(t *testing.T) {
 	// occasional undercount; this test needs determinism).
 	s := NewShadow(embed.Local{}, NewIndex(100), cap.logger(), 0.9, 1, 16)
 
-	ns := Namespace("t1", "m1", "", "none")
+	ns := baseKey().Namespace()
 	s.Offer(Sample{RequestID: "r1", Namespace: ns, Prompt: "how do I cancel my subscription", Fingerprint: "fp1"})
 	s.Offer(Sample{RequestID: "r2", Namespace: ns, Prompt: "how do I cancel my subscription now", Fingerprint: "fp2"})
 	s.Offer(Sample{RequestID: "r3", Namespace: ns, Prompt: "zzzz qqqq wwww completely different", Fingerprint: "fp3"})
@@ -211,31 +211,92 @@ func TestShadowEmbedderFailureSkipsAndCounts(t *testing.T) {
 	}
 }
 
+func baseKey() Key {
+	return Key{Tenant: "t1", RouteModel: "m1", ReportedModel: "m1-v1", SystemPrompt: "sys", Temperature: "none", MaxTokens: "none"}
+}
+
 func TestNamespaceDerivation(t *testing.T) {
-	base := Namespace("t1", "m1", "sys", "none")
-	if Namespace("t2", "m1", "sys", "none") == base {
-		t.Fatal("different tenants share a namespace")
-	}
-	if Namespace("t1", "m2", "sys", "none") == base {
-		t.Fatal("different models share a namespace")
-	}
-	if Namespace("t1", "m1", "other-sys", "none") == base {
-		t.Fatal("different system prompts share a namespace")
-	}
-	if Namespace("t1", "m1", "sys", "none") != base {
+	base := baseKey().Namespace()
+	if baseKey().Namespace() != base {
 		t.Fatal("namespace derivation is not deterministic")
 	}
-	// Temperature is part of the key: the provider default ("none"), an
-	// explicit 0, and an explicit 1 are three answer spaces.
-	if Namespace("t1", "m1", "sys", "0") == base || Namespace("t1", "m1", "sys", "1") == base || Namespace("t1", "m1", "sys", "0") == Namespace("t1", "m1", "sys", "1") {
-		t.Fatal("different temperatures share a namespace")
+	for _, tt := range []struct {
+		name   string
+		mutate func(*Key)
+	}{
+		{"tenant", func(k *Key) { k.Tenant = "t2" }},
+		{"route model", func(k *Key) { k.RouteModel = "m2" }},
+		{"reported model", func(k *Key) { k.ReportedModel = "m1-v2" }},
+		{"system prompt", func(k *Key) { k.SystemPrompt = "other-sys" }},
+		{"temperature 0", func(k *Key) { k.Temperature = "0" }},
+		{"temperature 1", func(k *Key) { k.Temperature = "1" }},
+		{"max_tokens 32", func(k *Key) { k.MaxTokens = "32" }},
+		{"max_tokens 64", func(k *Key) { k.MaxTokens = "64" }},
+	} {
+		k := baseKey()
+		tt.mutate(&k)
+		if k.Namespace() == base {
+			t.Fatalf("different %s shares a namespace", tt.name)
+		}
+	}
+	explicit := func(field func(*Key, string)) []string {
+		var out []string
+		for _, v := range []string{"none", "0", "1"} {
+			k := baseKey()
+			field(&k, v)
+			out = append(out, k.Namespace())
+		}
+		return out
+	}
+	for name, values := range map[string][]string{
+		"temperatures": explicit(func(k *Key, v string) { k.Temperature = v }),
+		"max_tokens":   explicit(func(k *Key, v string) { k.MaxTokens = v }),
+	} {
+		if values[0] == values[1] || values[0] == values[2] || values[1] == values[2] {
+			t.Fatalf("different %s share a namespace: %v", name, values)
+		}
+	}
+}
+
+func TestNamespaceUnreportedModelKeysOnRouteModel(t *testing.T) {
+	unreported := baseKey()
+	unreported.ReportedModel = ""
+	reportedRoute := baseKey()
+	reportedRoute.ReportedModel = reportedRoute.RouteModel
+	if unreported.Namespace() != reportedRoute.Namespace() {
+		t.Fatal("an unreported model does not key on the route model")
+	}
+	if unreported.Namespace() == baseKey().Namespace() {
+		t.Fatal("an unreported model shares the namespace of a different reported model")
+	}
+	otherRoute := unreported
+	otherRoute.RouteModel = "m2"
+	if otherRoute.Namespace() == unreported.Namespace() {
+		t.Fatal("unreported models on different routes share a namespace")
+	}
+}
+
+func TestNamespaceSameReportedModelOnDifferentRoutes(t *testing.T) {
+	a, b := baseKey(), baseKey()
+	b.RouteModel = "m2"
+	if a.Namespace() == b.Namespace() {
+		t.Fatal("different routes reporting the same model share a namespace")
+	}
+}
+
+func TestNamespaceComponentsCannotShift(t *testing.T) {
+	a, b := baseKey(), baseKey()
+	a.ReportedModel, a.SystemPrompt = "m1\x00x", "sys"
+	b.ReportedModel, b.SystemPrompt = "m1", "x\x00sys"
+	if a.Namespace() == b.Namespace() {
+		t.Fatal("bytes shifted between the reported model and the system prompt keep the namespace")
 	}
 }
 
 func TestShadowCloseDrainsQueue(t *testing.T) {
 	cap := &capture{}
 	s := NewShadow(embed.Local{}, NewIndex(100), cap.logger(), 0.9, 1, 16)
-	ns := Namespace("t", "m", "", "none")
+	ns := baseKey().Namespace()
 	s.Offer(Sample{RequestID: "a", Namespace: ns, Prompt: "one two three"})
 	s.Offer(Sample{RequestID: "b", Namespace: ns, Prompt: "one two three four"})
 	s.Close()
