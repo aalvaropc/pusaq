@@ -119,7 +119,7 @@ func run(logger *slog.Logger) error {
 		rpm, err := ratelimit.New(client, "rpm", ratelimit.Limits{
 			Burst: cfg.RPMBurst,
 			Rate:  cfg.RPMLimit / 60.0, // requests/minute → tokens/second
-			TTL:   config.DefaultBucketTTL,
+			TTL:   bucketTTLFloor,
 		})
 		if err != nil {
 			return err
@@ -138,7 +138,7 @@ func run(logger *slog.Logger) error {
 			tpm, err := ratelimit.New(client, "tpm", ratelimit.Limits{
 				Burst: cfg.TPMBurst,
 				Rate:  cfg.TPMLimit / 60.0, // tokens/minute → tokens/second
-				TTL:   config.DefaultBucketTTL,
+				TTL:   bucketTTLFloor,
 			})
 			if err != nil {
 				return err
@@ -301,6 +301,7 @@ func run(logger *slog.Logger) error {
 const (
 	readHeaderTimeout = 10 * time.Second
 	idleTimeout       = 120 * time.Second
+	bucketTTLFloor    = time.Minute
 )
 
 // redisOptions leaves the time budget to the callers' contexts: no internal
