@@ -22,8 +22,7 @@ import (
 	"github.com/aalvaropc/pusaq/internal/semcache"
 )
 
-// ServedModelHeader reports the physical model that served the request
-// (constitution rule 7).
+// ServedModelHeader carries the route's physical model (constitution rule 7).
 const ServedModelHeader = "X-Pusaq-Model"
 
 // RouteReasonHeader reports how the requested alias was resolved: "direct"
