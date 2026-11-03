@@ -97,8 +97,9 @@ lint-docs: ## Fail on planning or tracking language and unchecked archived tasks
 tidy: ## Tidy module files
 	go mod tidy
 
-calibrate: ## Calibrate the cache threshold on the seed dataset (local embedder)
-	go run ./cmd/cachecal -pairs testdata/calibration/seed-pairs.csv -out calibration.csv
+calibrate: ## Calibrate the cache threshold on the seed dataset (local embedder); curve in out/
+	mkdir -p out
+	go run ./cmd/cachecal -pairs testdata/calibration/seed-pairs.csv -out out/calibration.csv
 
 smoke: ## Send a chat completion through the gateway (gateway + mock must be running)
 	curl -sS -X POST localhost:8080/v1/chat/completions \

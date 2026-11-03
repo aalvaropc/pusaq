@@ -33,6 +33,7 @@ crash.*.log
 AGENTS.md
 .agents/
 
-# Load test output
+# Load test and calibration output
 /loadtest/out/*
 !/loadtest/out/.gitkeep
+/out/

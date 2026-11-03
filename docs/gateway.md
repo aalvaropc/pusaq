@@ -212,7 +212,7 @@ caps exclude allocator and collection metadata and do not bound process RSS.
 The threshold is never a judgment call: `make calibrate`
 sweeps a labeled pair dataset (equivalent vs trap pairs) with the same
 embedder implementations the gateway runs, writes the precision/recall
-curve, and prints `τ* = min{τ : precision ≥ 0.99}` — or fails loudly when
+curve to the ignored `out/calibration.csv`, and prints `τ* = min{τ : precision ≥ 0.99}` — or fails loudly when
 the embedder cannot separate the traps (which the local embedder, being
 lexical, often cannot: that failure is the harness working). The seed
 dataset (60 pairs) exercises the harness; it is not a production corpus,
