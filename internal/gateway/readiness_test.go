@@ -75,6 +75,19 @@ func TestAdminReadinessRejectsWrongToken(t *testing.T) {
 	}
 }
 
+func TestAdminReadinessAcceptsBearerSchemeVariants(t *testing.T) {
+	for _, header := range []string{"bearer " + testAdminToken, "BEARER " + testAdminToken, "Bearer\t" + testAdminToken} {
+		s, _ := newOperableServer(t, WithAdminToken(testAdminToken))
+		req := httptest.NewRequest(http.MethodPost, "/admin/readiness?state=up", nil)
+		req.Header.Set("Authorization", header)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Authorization %q = %d %s, want 200", header, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestAdminReadinessRejectsBadParameters(t *testing.T) {
 	s, _ := newOperableServer(t, WithAdminToken(testAdminToken))
 	for _, q := range []string{"", "state=sideways", "state=down", "state=down&for=0s", "state=down&for=-1s", "state=down&for=nope", "state=down&for=2h"} {

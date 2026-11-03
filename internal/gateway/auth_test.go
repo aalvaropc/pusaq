@@ -100,6 +100,41 @@ func TestAuthEndToEnd(t *testing.T) {
 	}
 }
 
+func TestBearerSchemeMatching(t *testing.T) {
+	tests := []struct {
+		header      string
+		wantStatus  int
+		wantMessage string
+	}{
+		{"Bearer sk-support", http.StatusOK, ""},
+		{"bearer sk-support", http.StatusOK, ""},
+		{"BEARER sk-support", http.StatusOK, ""},
+		{"bEaReR sk-support", http.StatusOK, ""},
+		{"Bearer\tsk-support", http.StatusOK, ""},
+		{"Bearer \t sk-support ", http.StatusOK, ""},
+		{"Bearer sk-nope", http.StatusUnauthorized, "unknown API key"},
+		{"Basic sk-support", http.StatusUnauthorized, "missing API key"},
+		{"Bearersk-support", http.StatusUnauthorized, "missing API key"},
+		{"sk-support", http.StatusUnauthorized, "missing API key"},
+		{"Bearer ", http.StatusUnauthorized, "missing API key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.header, func(t *testing.T) {
+			s, events := newAuthedServer(t)
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(validPayload())))
+			req.Header.Set("Authorization", tt.header)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			if rec.Code != tt.wantStatus || !strings.Contains(rec.Body.String(), tt.wantMessage) {
+				t.Fatalf("status = %d body = %s, want %d %q", rec.Code, rec.Body.String(), tt.wantStatus, tt.wantMessage)
+			}
+			if tt.wantStatus == http.StatusOK && (len(*events) != 1 || (*events)[0].Tenant != "team-support") {
+				t.Fatalf("events = %+v, want one team-support event", *events)
+			}
+		})
+	}
+}
+
 func TestOperationalEndpointsUnauthenticated(t *testing.T) {
 	s, _ := newAuthedServer(t)
 	for _, path := range []string{"/healthz", "/readyz"} {

@@ -196,8 +196,7 @@ func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 // with not_ready while in-flight ones finish — and `state=up` ends it.
 // One log record per action is the observable the measurement reads.
 func (s *Server) handleAdminReadiness(w http.ResponseWriter, r *http.Request) {
-	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(token)), []byte(s.adminToken)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(bearerToken(r.Header.Get("Authorization"))), []byte(s.adminToken)) != 1 {
 		s.writeError(w, "", core.NewError(core.CodeUnauthorized, "admin token required"))
 		return
 	}
@@ -236,6 +235,14 @@ func (s *Server) handleAdminReadiness(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.writeError(w, "", core.InvalidField("state", `state must be "down" or "up"`))
 	}
+}
+
+func bearerToken(header string) string {
+	i := strings.IndexAny(header, " \t")
+	if i < 0 || !strings.EqualFold(header[:i], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(header[i:])
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, v any) {
@@ -279,9 +286,7 @@ func (s *Server) pipelineHandler(op string, terminal core.Handler) http.Handler 
 			payloadIncomplete = false
 			return body, nil
 		}
-		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-			req.APIKey = strings.TrimSpace(token)
-		}
+		req.APIKey = bearerToken(r.Header.Get("Authorization"))
 		resp, err := h(r.Context(), req)
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.WriteIdleTimeout))
 		if err != nil {
