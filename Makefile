@@ -55,7 +55,7 @@ TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
 # measurement run (created before it, destroyed the same day).
 TF_RUNTIME := terraform -chdir=infra/terraform/runtime
 
-.PHONY: help up down run mock test test-loadtest lint lint-docs tidy smoke calibrate loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
+.PHONY: help up down run mock test test-loadtest lint lint-docs tidy smoke calibrate dashboard loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
         infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate \
         runtime-init runtime-plan runtime-apply runtime-destroy
 
@@ -106,6 +106,17 @@ smoke: ## Send a chat completion through the gateway (gateway + mock must be run
 		-H 'Content-Type: application/json' \
 		-d '{"model":"pusaq/fast","messages":[{"role":"user","content":"hello"}]}' \
 		-w '\nstatus: %{http_code}\n'
+
+DASHBOARD_LOG ?=
+DASHBOARD_RUN_ID ?=
+DASHBOARD_OUT ?= loadtest/out/dashboard.html
+DASHBOARD_EVENTS := loadtest/out/dashboard-events.log
+
+dashboard: ## Event report (HTML) from the Compose stack's logs, or from DASHBOARD_LOG; DASHBOARD_RUN_ID filters
+	@mkdir -p $(dir $(DASHBOARD_OUT))
+	@if [ -n "$(DASHBOARD_LOG)" ]; then src="$(DASHBOARD_LOG)"; \
+	else src="$(DASHBOARD_EVENTS)"; docker compose --profile loadtest logs --no-color > "$$src" || exit 1; fi; \
+	go run ./cmd/eventreport -in "$$src" -out "$(DASHBOARD_OUT)" $(if $(DASHBOARD_RUN_ID),-run-id "$(DASHBOARD_RUN_ID)")
 
 loadtest: ## Limiter load test: 2 replicas behind nginx, k6 in Docker, cross-checked report
 	docker compose --profile loadtest up -d --build --force-recreate \
