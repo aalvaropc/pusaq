@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/provider"
+	"github.com/aalvaropc/pusaq/internal/ratelimit"
 	"github.com/aalvaropc/pusaq/internal/spend"
 )
 
@@ -272,5 +274,51 @@ func TestFailClosedBudgetRead(t *testing.T) {
 	open, _ := policyServer(t, okProvider(), nil, CompletionsOptions{Policies: supportOnly(Policy{BudgetUSD: 1}), Spend: sp, Prices: testPrices()})
 	if rec := postAs(open, "sk-support", supportBody); rec.Code != http.StatusOK {
 		t.Fatalf("fail-open status = %d, want 200", rec.Code)
+	}
+}
+
+func TestFailOpenIsRecordedOnTheEvent(t *testing.T) {
+	down := errors.New("dial tcp: connection refused")
+	tests := []struct {
+		name        string
+		rpmErr      error
+		tokens      *fakeTokenLimiter
+		spendErr    error
+		want        string
+		wantCharged bool
+	}{
+		{"stores answer", nil, &fakeTokenLimiter{allowed: true}, nil, "", true},
+		{"tpm disabled", nil, nil, nil, "", false},
+		{"rpm", down, &fakeTokenLimiter{allowed: true}, nil, "rpm", true},
+		{"tpm", nil, &fakeTokenLimiter{allowErr: down}, nil, "tpm", false},
+		{"budget", nil, &fakeTokenLimiter{allowed: true}, down, "budget", true},
+		{"all three", down, &fakeTokenLimiter{allowErr: down}, down, "rpm,budget,tpm", false},
+	}
+	for _, stream := range []bool{false, true} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s/stream=%t", tt.name, stream), func(t *testing.T) {
+				p := okProvider()
+				p.sse = fakeSSE
+				opts := CompletionsOptions{
+					Policies: supportOnly(Policy{BudgetUSD: 1}), Spend: &fakeSpend{err: tt.spendErr},
+					Prices: testPrices(), ReserveDefault: 10,
+				}
+				if tt.tokens != nil {
+					opts.Tokens = tt.tokens
+				}
+				s, events := policyServer(t, p, &fakeAdmitter{decision: ratelimit.Decision{Allowed: true}, err: tt.rpmErr}, opts)
+				body := strings.TrimSuffix(supportBody, "}") + fmt.Sprintf(`,"stream":%t}`, stream)
+				if rec := postAs(s, "sk-support", body); rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200", rec.Code)
+				}
+				e := (*events)[0]
+				if got := strings.Join(e.FailOpen, ","); got != tt.want {
+					t.Fatalf("fail_open = %q, want %q", got, tt.want)
+				}
+				if charged := e.TokensCharged > 0; charged != tt.wantCharged {
+					t.Fatalf("tokens_charged = %d, want charged=%t", e.TokensCharged, tt.wantCharged)
+				}
+			})
+		}
 	}
 }

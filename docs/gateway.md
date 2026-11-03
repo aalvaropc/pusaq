@@ -110,7 +110,9 @@ with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
 the gateway **fails open** within a 250 ms budget per store call —
 temporarily inexact limits beat an outage caused by the limiter itself —
 unless the tenant's policy sets `fail_closed`, in which case it answers 503
-`store_unavailable`.
+`store_unavailable`. A request let through this way carries `fail_open` on
+its cost event, naming each decision the store could not make: `rpm`,
+`tpm`, or `budget`.
 Unset `PUSAQ_REDIS_ADDR` disables limiting with a startup warning.
 
 Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one
@@ -137,8 +139,10 @@ when actual usage is known the difference is reconciled back atomically —
 on success, on error, and at stream end. A confirmed reservation is fully
 returned if no provider was invoked. After any provider invocation, unknown
 usage keeps the charge, including errors, timeouts and abandoned streams.
-Every cost event records `tokens_charged` next to actual usage, so the
-estimate's error is measurable from the event stream. In the
+Every charged request's cost event records `tokens_charged` next to actual
+usage, so the estimate's error is measurable from the event stream; a charge
+skipped because the store failed open leaves `tokens_charged` out and records
+`fail_open` `tpm`, so it is not mistaken for token limiting turned off. In the
 [mock experiment](measurements/tpm-overrun.md), window consumption stays
 within the stated tolerance and peak excess stays below the experiment's
 reservation-error bound. Those numerical bounds depend on the recorded
@@ -173,7 +177,8 @@ ends: a mid-stream failure or a missing `[DONE]` as a failure, a completed
 stream as a success, a client that leaves as nothing. A provider's rejection
 of the request (400, 413, 422) ends the chain without counting as a failure,
 and so does a client that leaves. Failover is observable per request: every
-cost event records `served_provider` and `attempts`. Backends come from
+cost event records `attempts` (0 when no backend was tried), and
+`served_provider` when a backend answered. Backends come from
 `PUSAQ_UPSTREAMS="name=url,..."` (first = primary, rest = fallbacks).
 
 ## Semantic cache (shadow mode)

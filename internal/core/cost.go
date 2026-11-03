@@ -19,13 +19,13 @@ const (
 // admitted request, regardless of outcome. Fields are additive: consumers
 // ignore fields they do not read.
 type CostEvent struct {
-	RequestID string        `json:"request_id"`
-	Timestamp time.Time     `json:"timestamp"`
-	Op        string        `json:"op"`
-	Tenant    string        `json:"tenant,omitempty"`
-	Outcome   Outcome       `json:"outcome"`
-	ErrorCode Code          `json:"error_code,omitempty"`
-	Latency   time.Duration `json:"latency_ms"`
+	RequestID string    `json:"request_id"`
+	Timestamp time.Time `json:"timestamp"`
+	Op        string    `json:"op"`
+	Tenant    string    `json:"tenant,omitempty"`
+	Outcome   Outcome   `json:"outcome"`
+	ErrorCode Code      `json:"error_code,omitempty"`
+	LatencyMS int64     `json:"latency_ms"`
 
 	// RequestedModel and ServedModel are set for operations that resolve
 	// models (empty otherwise); Usage carries provider-reported tokens.
@@ -46,10 +46,11 @@ type CostEvent struct {
 	// decisions auditable per request.
 	PolicyFlags []string `json:"policy_flags,omitempty"`
 	CacheSkip   string   `json:"cache_skip,omitempty"`
+	FailOpen    []string `json:"fail_open,omitempty"`
 	// ServedProvider names the backend that answered (after fallback);
 	// Attempts counts backend attempts, so failover is observable.
 	ServedProvider string `json:"served_provider,omitempty"`
-	Attempts       int    `json:"attempts,omitempty"`
+	Attempts       int    `json:"attempts"`
 	Usage          Usage  `json:"usage,omitzero"`
 	// TokensCharged is the admission charge (input estimate + output
 	// reservation) so reservation error is measurable against Usage.

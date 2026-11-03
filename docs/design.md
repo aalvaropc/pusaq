@@ -266,7 +266,7 @@ round-trips and latency added by the limiter.
 
 **Store outage.** When Redis does not answer, the request limit, the token
 charge, and the budget read fail open by default after at most 250 ms per
-call, each logged — a gateway that
+call, each logged and named in the cost event's `fail_open` — a gateway that
 rejects everything because its semaphore died trades a cost problem for an
 availability outage. A tenant with `fail_closed=true` gets 503
 `store_unavailable` instead. A reconciliation that fails leaves its charge in
@@ -438,10 +438,11 @@ own regions dies. Handled by different pieces:
 The gateway sees every LLM request in the company — its log *is* the AI cost
 accounting system. Every request admitted to the pipeline emits one
 `cost_event`: request ID, timestamp, operation, tenant, outcome and error
-code, latency; for completions, the requested model, the route's physical
-model (`served_model`), the route reason, prompt and completion tokens, and
-the tokens charged; when present, the feature tag, run ID, region, policy
-flags, cache-skip reason, the backend that served it and the attempts, the
+code, latency in milliseconds, backend attempts; for completions, the
+requested model, the route's physical model (`served_model`), the route
+reason, prompt and completion tokens, and the tokens charged; when present,
+the feature tag, run ID, region, policy flags, cache-skip reason, store
+decisions that failed open, the backend that served it, the
 **cost in $ against a versioned price table** (`PUSAQ_PRICES`,
 `PUSAQ_PRICE_TABLE_VERSION`; the table version travels in the event — prices
 change and historical reports must still add up), and the tenant's spend for
@@ -456,7 +457,8 @@ Cost events are enqueued without waiting for the telemetry sink:
 a single goroutine drains a bounded buffer and writes one line per event;
 overflow drops the event and counts it, and the count is logged at shutdown
 (`telemetry_dropped`) — losing an observability record is acceptable,
-degrading a user request is not.
+degrading a user request is not. Shutdown stops intake only once no event is
+mid-enqueue, so every event is either written or counted as dropped.
 
 There is no live dashboard and no metrics endpoint; reports are computed from
 the event stream: `loadtest/verify-*.sh` for measurements, and

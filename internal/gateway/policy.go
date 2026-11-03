@@ -110,6 +110,7 @@ func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, a
 		}
 		opts.Logger.Warn("spend store unavailable, failing open",
 			slog.String("request_id", req.ID), slog.String("tenant", req.Tenant), slog.String("error_code", string(core.AsError(err).Code)))
+		req.FailOpen = append(req.FailOpen, "budget")
 	} else if spent >= p.BudgetUSD {
 		req.SpendUSDMonth = spent
 		return flags, &core.Error{

@@ -457,6 +457,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 			slog.String("tenant", req.Tenant),
 			slog.String("error_code", string(core.AsError(err).Code)),
 		)
+		req.FailOpen = append(req.FailOpen, "tpm")
 		return nil
 	}
 	if !d.Allowed {

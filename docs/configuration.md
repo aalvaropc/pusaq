@@ -63,7 +63,7 @@ timeout; idle HTTP connections have a fixed 120 s timeout. SSE has a fixed
 Buckets expire after 10 minutes of inactivity. RPM and TPM require
 `PUSAQ_REDIS_ADDR`; no Redis address disables both. A store call has a 250 ms
 context budget. Store errors fail open unless the tenant's policy sets
-`fail_closed=true`. See [quota semantics](gateway.md#rate-limiting).
+`fail_closed=true`; the cost event then names the decision in `fail_open`. See [quota semantics](gateway.md#rate-limiting).
 
 ## Circuit breakers (per upstream backend)
 

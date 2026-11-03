@@ -15,8 +15,11 @@ refusals happen before accounting and produce no cost event or request ID.
 
 Events are offered to a bounded asynchronous emitter that writes JSON lines
 to stdout. Saturation drops events rather than waiting for the sink;
-`telemetry_dropped` reports the count at shutdown. A produced event therefore
-does not guarantee a persisted log record. Completion events include resolved
+`telemetry_dropped` reports the count at shutdown; every emitted event is
+either written or counted there, including events racing shutdown. A produced
+event therefore does not guarantee a persisted log record. Every event carries
+`latency_ms` and `attempts`; `fail_open` lists the store decisions (`rpm`,
+`tpm`, `budget`) a store outage skipped. Completion events include resolved
 model and usage when available; configured prices add `cost_usd`,
 `price_table_version` and, for estimated costs, `cost_estimated`. The
 [local event report](#local-event-report) reads these records back.

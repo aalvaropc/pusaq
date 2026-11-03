@@ -35,7 +35,8 @@ func (s SlogSink) Write(event core.CostEvent) {
 		slog.String("tenant", event.Tenant),
 		slog.String("outcome", string(event.Outcome)),
 		slog.String("error_code", string(event.ErrorCode)),
-		slog.Int64("latency_ms", event.Latency.Milliseconds()),
+		slog.Int64("latency_ms", event.LatencyMS),
+		slog.Int("attempts", event.Attempts),
 	}
 	if event.RequestedModel != "" {
 		attrs = append(attrs,
@@ -61,14 +62,14 @@ func (s SlogSink) Write(event core.CostEvent) {
 	if event.CacheSkip != "" {
 		attrs = append(attrs, slog.String("cache_skip", event.CacheSkip))
 	}
+	if len(event.FailOpen) > 0 {
+		attrs = append(attrs, slog.String("fail_open", strings.Join(event.FailOpen, ",")))
+	}
 	if event.TokensCharged > 0 {
 		attrs = append(attrs, slog.Int("tokens_charged", event.TokensCharged))
 	}
 	if event.ServedProvider != "" {
-		attrs = append(attrs,
-			slog.String("served_provider", event.ServedProvider),
-			slog.Int("attempts", event.Attempts),
-		)
+		attrs = append(attrs, slog.String("served_provider", event.ServedProvider))
 	}
 	if event.Cost.TableVersion != "" {
 		attrs = append(attrs,
@@ -86,13 +87,15 @@ func (s SlogSink) Write(event core.CostEvent) {
 }
 
 // Emitter delivers cost events to a Sink from a single drain goroutine.
-// Emit never blocks and never panics: when the buffer is full — or the
-// emitter is closed — the event is dropped and the drop counter incremented.
+// Emit never waits for the sink and never panics: when the buffer is full
+// — or the emitter is closed — the event is dropped and counted.
 type Emitter struct {
 	sink    Sink
 	events  chan core.CostEvent
 	dropped atomic.Uint64
-	closed  atomic.Bool
+
+	mu     sync.RWMutex
+	closed bool
 
 	closeOnce sync.Once
 	quit      chan struct{}
@@ -132,10 +135,12 @@ func (e *Emitter) drain() {
 	}
 }
 
-// Emit enqueues an event without ever blocking the caller. Events offered
+// Emit enqueues an event without waiting for the sink. Events offered
 // while the buffer is full, or after Close, are dropped and counted.
 func (e *Emitter) Emit(event core.CostEvent) {
-	if e.closed.Load() {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.closed {
 		e.dropped.Add(1)
 		return
 	}
@@ -149,13 +154,14 @@ func (e *Emitter) Emit(event core.CostEvent) {
 // Dropped reports how many events have been dropped so far.
 func (e *Emitter) Dropped() uint64 { return e.dropped.Load() }
 
-// Close stops intake, flushes already-buffered events to the sink, and
-// returns once the drain goroutine has exited. Safe to call more than once.
-// The gateway calls it after the HTTP server has fully drained, so no
-// producers remain by the time events stop being accepted.
+// Close stops intake once no Emit is in progress, flushes buffered events
+// to the sink, and returns once the drain goroutine has exited. Safe to
+// call more than once.
 func (e *Emitter) Close() {
 	e.closeOnce.Do(func() {
-		e.closed.Store(true)
+		e.mu.Lock()
+		e.closed = true
+		e.mu.Unlock()
 		close(e.quit)
 	})
 	<-e.done

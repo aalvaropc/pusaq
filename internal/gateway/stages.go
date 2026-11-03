@@ -106,6 +106,7 @@ func RateLimit(limiter Admitter, policies PolicyFor, logger *slog.Logger) core.S
 					slog.String("tenant", req.Tenant),
 					slog.String("error_code", string(core.AsError(err).Code)),
 				)
+				req.FailOpen = append(req.FailOpen, "rpm")
 				return next(ctx, req)
 			}
 			if !d.Allowed {
@@ -147,7 +148,7 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					Op:             req.Op,
 					Tenant:         req.Tenant,
 					Outcome:        core.OutcomeSuccess,
-					Latency:        time.Since(start),
+					LatencyMS:      time.Since(start).Milliseconds(),
 					RequestedModel: req.RequestedModel,
 					ServedModel:    req.ServedModel,
 					FeatureTag:     req.FeatureTag,
@@ -155,6 +156,7 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 					RunID:          req.RunID,
 					PolicyFlags:    req.PolicyFlags,
 					CacheSkip:      req.CacheSkip,
+					FailOpen:       req.FailOpen,
 					Usage:          req.Usage,
 				}
 				if r := recover(); r != nil {
@@ -242,7 +244,7 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			Tenant:         f.req.Tenant,
 			Outcome:        outcome,
 			ErrorCode:      code,
-			Latency:        time.Since(f.start),
+			LatencyMS:      time.Since(f.start).Milliseconds(),
 			RequestedModel: f.req.RequestedModel,
 			ServedModel:    f.req.ServedModel,
 			FeatureTag:     f.req.FeatureTag,
@@ -250,6 +252,7 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			RunID:          f.req.RunID,
 			PolicyFlags:    f.req.PolicyFlags,
 			CacheSkip:      f.req.CacheSkip,
+			FailOpen:       f.req.FailOpen,
 			Usage:          f.req.Usage,
 			TokensCharged:  f.req.TokensCharged,
 			ServedProvider: f.req.ServedProvider,
