@@ -25,6 +25,7 @@ import (
 	"github.com/aalvaropc/pusaq/internal/retry"
 	"github.com/aalvaropc/pusaq/internal/semcache"
 	"github.com/aalvaropc/pusaq/internal/spend"
+	"github.com/aalvaropc/pusaq/internal/storegate"
 	"github.com/aalvaropc/pusaq/internal/telemetry"
 
 	"github.com/redis/go-redis/v9"
@@ -195,6 +196,20 @@ func (a *app) limits(opts *gateway.CompletionsOptions) (core.Stage, error) {
 		return nil, nil
 	}
 	client := redis.NewClient(redisOptions(cfg.RedisAddr))
+	storegate.Attach(client, func(from, to breaker.State) {
+		logger.Info("breaker_state",
+			slog.String("component", "store"),
+			slog.String("from", string(from)),
+			slog.String("to", string(to)),
+		)
+	})
+	logger.Info("store gate configured",
+		slog.Int("window", storegate.Window),
+		slog.Int("min_samples", storegate.MinSamples),
+		slog.Float64("threshold", storegate.FailureThreshold),
+		slog.Duration("cooldown", storegate.Cooldown),
+		slog.Duration("probe_budget", storegate.ProbeBudget),
+	)
 	rpm, err := ratelimit.New(client, "rpm", ratelimit.Limits{
 		Burst: cfg.RPMBurst,
 		Rate:  cfg.RPMLimit / 60.0,
