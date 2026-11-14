@@ -327,4 +327,24 @@ func TestZeroTicketIsNoOp(t *testing.T) {
 	var tk Ticket
 	tk.Record(false)
 	tk.Release()
+	if tk.Probe() {
+		t.Fatal("zero ticket reported as a probe")
+	}
+}
+
+func TestTicketsSayWhetherTheyProbe(t *testing.T) {
+	b, now := testBreaker()
+	if mustAllow(t, b, "closed attempt").Probe() {
+		t.Fatal("closed admission reported as a probe")
+	}
+	failN(b, 4)
+	*now = now.Add(10 * time.Second)
+	probe := mustAllow(t, b, "half-open probe")
+	if !probe.Probe() {
+		t.Fatal("half-open admission not reported as a probe")
+	}
+	probe.Record(true)
+	if mustAllow(t, b, "attempt after recovery").Probe() {
+		t.Fatal("admission after recovery reported as a probe")
+	}
 }

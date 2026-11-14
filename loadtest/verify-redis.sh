@@ -33,6 +33,7 @@ jq -n -c --arg run "$run_id" --slurpfile p "$tmp/points.jsonl" --slurpfile e "$e
       sort as $s | ((length - 1) * q) as $h | ($h | floor) as $i
       | $s[$i] + ($h - $i) * ($s[[$i + 1, length - 1] | min] - $s[$i]) | . * 100 | round / 100 end;
   def r3: . * 1000 | round / 1000;
+  def epoch: (.[0:19] + "Z" | fromdateiso8601) + (((capture("^.{19}[.](?<f>[0-9]+)") | .f) // "0") | "0." + . | tonumber);
   def decision: if test("^rate limiter") then "rpm" elif test("^token limiter") then "tpm" elif test("^spend store") then "budget" else "?" end;
   def class: if .status == 200 then "ok" elif .status == 429 then "limited" elif .code == "store_unavailable" then "store_unavailable"
     elif .status >= 500 then "other_5xx" elif .status == 0 then "transport" else "other" end;
@@ -46,6 +47,27 @@ jq -n -c --arg run "$run_id" --slurpfile p "$tmp/points.jsonl" --slurpfile e "$e
       | .failed = ((.fo | length) > 0 or .class == "store_unavailable"))) as $pts
   | ($pts | map(select(.rid != "none")) | map({key: .rid, value: true}) | from_entries) as $answered
   | ($e | map(select(.msg != "cost_event" and $byid[.request_id // ""] != null))) as $warn
+  | ($e | map(select(.msg == "breaker_state" and .component == "store")
+      | . + {utc: (.time // "" | test("^[0-9-]{10}T[0-9:]{8}([.][0-9]+)?Z$"))} | . + {t: (if .utc then .time | epoch else null end)})) as $gate
+  | ([$e[] | .replica // empty] | unique) as $replicas
+  | [$replicas[] as $rep
+      | ($gate | map(select(.replica == $rep and .utc)) | sort_by(.t)) as $g
+      | ($pts | map(select(.failed and .event.replica == $rep))) as $f
+      | ($warn | map(select(.replica == $rep and (.time // "" | test("Z$"))) | .time | epoch | select(. >= $t0)) | min) as $first
+      | ($g | map(select(.to == "open" and .t >= $t0)) | first) as $opened
+      | {replica: $rep,
+         opened: (if $opened then ($opened.t - $t0 | r3) else null end),
+         after_first_failure: (if $opened and $first then ($opened.t - $first | r3) else null end),
+         probes: ($g | map(select(.to == "half_open")) | length),
+         reopened: ($g | map(select(.from == "half_open" and .to == "open")) | length),
+         closed: ($g | map(select(.to == "closed")) | last | if . then (.t - $t1 | r3) else null end),
+         last_state: ($g | last | .to // null),
+         early: ($g | map(select(.t < $t0)) | length),
+         opened_in_window: ($g | map(select(.to == "open" and .t >= $t0 and .t < $t1)) | length),
+         deadline_failures: ($f | map(select(.period == "during" and .v >= 250)) | length),
+         fast_failures: ($f | map(select(.period == "during" and .v < 250)) | length),
+         failures_after: ($f | map(select(.period == "after")) | length),
+         last_failure_after: ($f | map(select(.period == "after")) | max_by(.t) | if . then (.t - $t1 | r3) else null end)}] as $gaterows
   | ($pts | map(select(.tenant == "open"))) as $open
   | (($w.restore_end_ms - $w.inject_start_ms) / 1000) as $W
   | ($w.rpm_limit / 60) as $r
@@ -80,7 +102,13 @@ jq -n -c --arg run "$run_id" --slurpfile p "$tmp/points.jsonl" --slurpfile e "$e
         last_failure_after: ($pts | map(select(.failed and .period == "after")) | max_by(.t) | if . then (.t - $t1 | r3) else null end),
         first_decision_after: ($pts | map(select(.period == "after" and .status != 0 and (.failed | not))) | min_by(.t) | if . then (.t - $t1 | r3) else null end)},
       reconciliation_failures: ($warn | map(select(.msg | test("reconciliation failed"))) | length),
+      gate: $gaterows,
       failures: ([
+        [ $gate[] | select(.utc | not) | "store gate record of \(.replica // "an unknown replica") without a UTC time: \(.time // "none")" ],
+        [ $gaterows[] | select(.early > 0) | "store gate of \(.replica) changed state \(.early) times before the injection" ],
+        [ $gaterows[] | (.deadline_failures + .fast_failures) as $n | select($n > 0 and .opened_in_window == 0)
+          | "store gate of \(.replica) never opened during the window although it met \($n) store failures" ],
+        [ $gaterows[] | select(.last_state != null and .last_state != "closed") | "store gate of \(.replica) still \(.last_state) at the end of the run" ],
         [ ($pts | map(select(.t == null)) | length) as $n | select($n > 0) | "\($n) k6 points without a recorded send time" ],
         [ ($pts | map(select(.rid == "none" and (.class == "ok" or .class == "limited" or .class == "store_unavailable"))) | length) as $n
           | select($n > 0) | "\($n) gateway answers (200/429/503 store_unavailable) without a request id" ],
@@ -129,6 +157,7 @@ echo "overrun: open tenant admitted $(res .overrun.admitted) during the window v
 usd() { res "$1 | . * 1e6 | round / 1e6 | if . == 0 then 0 else . end"; }
 echo "spend:   $(res .spend.events) budget successes, Σcost $(usd .spend.cost) USD; lost increments (warnings) $(res .spend.lost), $(usd .spend.lost_usd) USD; store counter $(usd .spend.counter) USD = Σcost − Σlost + $(usd .spend.late) applied after the gateway reported them lost"
 echo "store:   first failure +$(res '.recovery.first_failure // "none"') s after the injection; during the window $(res .recovery.deadline_failures) failures answered in 250 ms or more$(res '.recovery.last_deadline_failure | if . then " (the last sent at +\(.) s)" else "" end') and $(res .recovery.fast_failures) faster; $(res .recovery.failures_after) failures sent after the restore$(res '.recovery.last_failure_after | if . then ", the last at +\(.) s" else "" end'); first store decision after the restore at +$(res '.recovery.first_decision_after // "none"') s; token reconciliation failures $(res .reconciliation_failures)"
+res '.gate[] | "gate:    \(.replica) opened \(if .opened then "+\(.opened) s after the injection" else "never" end)\(if .after_first_failure then " (\(.after_first_failure) s after its first logged store failure)" else "" end); \(.probes) probes, \(.reopened) reopened; \(if .closed then "last closed \(if .closed >= 0 then "+" else "" end)\(.closed) s from the restore" else "never closed" end); window failures \(.deadline_failures) deadline-bound / \(.fast_failures) faster; \(.failures_after) failures sent after the restore\(if .last_failure_after then ", the last at +\(.last_failure_after) s" else "" end)"'
 
 status=0
 while IFS= read -r failure; do

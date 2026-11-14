@@ -82,10 +82,14 @@ jq -n --arg run "$run" --arg arm "$arm" --arg inject "$inject" --arg restore "$r
    spend_counter_usd: ($counter | tonumber? // null)}' >"$window"
 
 "${compose[@]}" stop pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b || keep_first $?
-"${compose[@]}" logs --no-log-prefix pusaq-a pusaq-b 2>/dev/null \
-  | jq -R -c --arg run "$run" 'fromjson? | select((.msg == "cost_event" and .run_id == $run)
-      or ((.msg // "") | test("store unavailable, failing (open|closed)$|spend under-counted$|reconciliation failed")))' >"$events" \
-  || keep_first $?
+: >"$events"
+for replica in pusaq-a pusaq-b; do
+  "${compose[@]}" logs --no-log-prefix "$replica" 2>/dev/null \
+    | jq -R -c --arg run "$run" --arg replica "$replica" 'fromjson? | select((.msg == "cost_event" and .run_id == $run)
+        or (.msg == "breaker_state" and .component == "store")
+        or ((.msg // "") | test("store unavailable, failing (open|closed)$|spend under-counted$|reconciliation failed"))) | . + {replica: $replica}' >>"$events" \
+    || keep_first $?
+done
 echo "events: $(wc -l <"$events") records → $events"
 "$here/verify-redis.sh" "$run" || keep_first $?
 exit "$status"

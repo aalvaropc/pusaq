@@ -33,10 +33,13 @@ func parse(t *testing.T, text string) *Input {
 func TestParseFixtureCounts(t *testing.T) {
 	in := loadFixture(t)
 	got := []int{in.Lines, in.NonJSON, in.Malformed, in.Other, in.Duplicates,
-		len(in.Events), len(in.Shadow), len(in.Transitions), len(in.Misses)}
-	want := []int{34, 2, 2, 4, 1, 11, 5, 2, 4}
+		len(in.Events), len(in.Shadow), len(in.Transitions), len(in.StoreTransitions), len(in.Misses)}
+	want := []int{36, 2, 2, 4, 1, 11, 5, 2, 2, 4}
 	if !slices.Equal(got, want) {
-		t.Fatalf("lines, nonJSON, malformed, other, duplicates, events, shadow, transitions, misses = %v, want %v", got, want)
+		t.Fatalf("lines, nonJSON, malformed, other, duplicates, events, shadow, transitions, store transitions, misses = %v, want %v", got, want)
+	}
+	if st := in.StoreTransitions[0]; st.Backend != "" || st.From != "closed" || st.To != "open" || st.Source != "pusaq-2" {
+		t.Fatalf("first store transition = %+v", st)
 	}
 	if !slices.Equal(in.Taus, []float64{0.95}) || !slices.Equal(in.Embedders, []string{"local"}) {
 		t.Fatalf("taus %v embedders %v", in.Taus, in.Embedders)
@@ -71,6 +74,14 @@ func TestParseLineShapes(t *testing.T) {
 		{"event without latency", `{"msg":"cost_event","request_id":"r","outcome":"success"}`, func(in *Input) bool { return in.Malformed == 1 }},
 		{"shadow without similarity", `{"msg":"cache_shadow","request_id":"r","shadow_hit":true}`, func(in *Input) bool { return in.Malformed == 1 }},
 		{"fallback without backend", `{"msg":"backend failed, trying next","request_id":"r"}`, func(in *Input) bool { return in.Malformed == 1 }},
+		{"breaker without backend or component", `{"msg":"breaker_state","from":"closed","to":"open"}`, func(in *Input) bool { return in.Malformed == 1 }},
+		{"breaker with backend and store component", `{"msg":"breaker_state","backend":"mock","component":"store","from":"closed","to":"open"}`,
+			func(in *Input) bool { return in.Malformed == 1 }},
+		{"store breaker without target state", `{"msg":"breaker_state","component":"store","from":"closed"}`, func(in *Input) bool { return in.Malformed == 1 }},
+		{"store breaker", `{"msg":"breaker_state","component":"store","from":"closed","to":"open"}`,
+			func(in *Input) bool { return len(in.StoreTransitions) == 1 && len(in.Transitions) == 0 }},
+		{"backend breaker", `{"msg":"breaker_state","backend":"mock","from":"closed","to":"open"}`,
+			func(in *Input) bool { return len(in.Transitions) == 1 && len(in.StoreTransitions) == 0 }},
 		{"other record", `{"msg":"gateway listening","addr":":8080"}`, func(in *Input) bool { return in.Other == 1 }},
 		{"no msg", `{"level":"INFO"}`, func(in *Input) bool { return in.Other == 1 }},
 		{"long event", `{"msg":"cost_event","request_id":"r","outcome":"success","latency_ms":1,"feature_tag":"` + long + `"}`,

@@ -170,10 +170,11 @@ type TenantLimits struct {
 	FailOpenBudget  int
 }
 
-// LimitView is the rate-limiting table.
+// LimitView is the rate-limiting table and the store gate's transitions.
 type LimitView struct {
-	Tenants []TenantLimits
-	Total   TenantLimits
+	Tenants          []TenantLimits
+	Total            TenantLimits
+	StoreTransitions []Transition
 }
 
 // HasData reports whether any limit denied or failed open.
@@ -267,7 +268,7 @@ func Build(in *Input, opts Options) (*Report, error) {
 	r.Latency = latencyView(events)
 	r.Outcomes = outcomeView(events)
 	r.Fallback = fallbackView(events, in, selected, opts.RunID != "")
-	r.Limits = limitView(events)
+	r.Limits = limitView(events, in, opts.RunID != "")
 	r.Shadow = shadowView(events, in, selected)
 	return r, nil
 }
@@ -510,18 +511,24 @@ func fallbackView(events []Event, in *Input, selected map[string]Event, windowed
 	}
 	slices.SortFunc(v.Attempts, func(a, b AttemptCount) int { return cmp.Compare(a.Attempts, b.Attempts) })
 
-	from, to := span(events)
-	for _, t := range in.Transitions {
-		if windowed && (t.Time.Before(from) || t.Time.After(to)) {
-			continue
-		}
-		v.Transitions = append(v.Transitions, t)
-	}
-	slices.SortStableFunc(v.Transitions, func(a, b Transition) int { return a.Time.Compare(b.Time) })
+	v.Transitions = transitionsIn(in.Transitions, events, windowed)
 	return v
 }
 
-func limitView(events []Event) LimitView {
+func transitionsIn(all []Transition, events []Event, windowed bool) []Transition {
+	from, to := span(events)
+	var out []Transition
+	for _, t := range all {
+		if windowed && (t.Time.Before(from) || t.Time.After(to)) {
+			continue
+		}
+		out = append(out, t)
+	}
+	slices.SortStableFunc(out, func(a, b Transition) int { return a.Time.Compare(b.Time) })
+	return out
+}
+
+func limitView(events []Event, in *Input, windowed bool) LimitView {
 	byTenant := make(map[string]*TenantLimits)
 	tenant := func(name string) *TenantLimits {
 		if byTenant[name] == nil {
@@ -561,6 +568,7 @@ func limitView(events []Event) LimitView {
 		v.Tenants = append(v.Tenants, *t)
 	}
 	slices.SortFunc(v.Tenants, func(a, b TenantLimits) int { return cmp.Compare(a.Tenant, b.Tenant) })
+	v.StoreTransitions = transitionsIn(in.StoreTransitions, events, windowed)
 	return v
 }
 

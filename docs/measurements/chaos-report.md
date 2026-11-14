@@ -10,7 +10,7 @@ Failure modes that were not run are listed as not measured.
 |---|---|---|---|---|
 | Region failure | Region A's readiness failed for 60 s through the admin endpoint (the instance keeps running) | 2026-10-07; Cloud Run in two regions behind a global load balancer | New requests answered by B 4.1–5.6 s after the flip; one retry recovered 41 of 45 first-attempt failures; 0 interrupted streams; split quota +5 % over one region's share | [regional-failover.md](regional-failover.md) |
 | Provider failure | Primary mock answers 500 for 5 s or 15 s | 2026-09-13; Compose, two replicas, zero-latency mocks | Breaker opened 0.834–0.918 s after the failure started and closed 5.918–6.084 s after it ended; 0 client errors | [breaker-detection.md](breaker-detection.md) |
-| Store outage | Redis paused (hung) or stopped (down) for 30 s | 2026-11-14; Compose, two replicas, one Redis | Each store call bounded at 250 ms; the fail-open tenant got ≈ 304–320 requests over its configured rate; 147–165 budget increments lost and logged; recovery after a stop 0.009–4.859 s per replica | [redis-outage.md](redis-outage.md) |
+| Store outage | Redis paused (hung) or stopped (down) for 30 s | 2026-11-14; Compose, two replicas, one Redis | Without the store gate, every store call waited up to 250 ms for the whole outage (hung p50 505 ms); with it, each replica stops calling Redis 0.86–1.09 s after the injection (p50 2.2–2.4 ms during the outage) and recovers 0.08–1.05 s after the restore; the fail-open tenant got ≈ 302–320 requests over its configured rate and 147–165 budget increments were lost and logged in both builds | [redis-outage.md](redis-outage.md) |
 
 ## Region failure
 
@@ -76,8 +76,10 @@ recorded detection 0.834–0.875 s and recovery 5.917–5.960 s.
 
 ## Store outage
 
-Source: [redis-outage.md](redis-outage.md), three runs of 2026-11-14, each
-with a hung and a down arm.
+Source: [redis-outage.md](redis-outage.md), three runs of 2026-11-14 on a
+gateway without the store gate (`a66bd72`) and three on the current one
+(`df1941f`), each with a hung and a down arm. The hypothesis and what broke
+are the first build's; the fix and its verification are the second's.
 
 - **Hypothesis.** Hung: every store call waits for its 250 ms budget (two
   calls for the fail-open tenant, four for the budgeted one, one before a
@@ -105,12 +107,31 @@ with a hung and a down arm.
   operation at the context deadline; each store call runs under the 250 ms
   limiter budget; the tenant's policy picks fail open (with `fail_open` on
   the cost event) or fail closed (503 `store_unavailable`); a failed spend
-  increment is logged with its request.
-- **Verification.** Every answered request matched one cost event; every
-  `fail_open` entry matched a gateway warning; no fail-closed request was
-  admitted without a decision; the spend counter equalled Σcost − Σlost in
-  all six arms; 0 gateway 5xx other than `store_unavailable`, 0 transport
-  failures, 0 dropped iterations.
+  increment is logged with its request. A per-call budget alone made a hung
+  store cost 250 ms per decision for the whole outage, so each instance
+  also runs a store gate in its Redis client: more than half of its last 20
+  store calls (at least 10) unanswered opens it, every store call then
+  fails at once with the same fail-open or fail-closed outcome, and one
+  second after it opens a background `PING` decides whether calls resume; its
+  transitions are `breaker_state` records with `component` `store`. The
+  client opens a connection in one attempt of at most 250 ms, which bounded
+  recovery after a stop: with go-redis's default dial attempts the gated
+  build recovered in 0.51–8.28 s per replica.
+- **Verification.** Without the gate: every answered request matched one
+  cost event; every `fail_open` entry matched a gateway warning; no
+  fail-closed request was admitted without a decision; the spend counter
+  equalled Σcost − Σlost in all six arms; 0 gateway 5xx other than
+  `store_unavailable`, 0 transport failures, 0 dropped iterations. With the
+  gate, the same checks held in all six arms, and each replica's gate opened
+  0.86–1.09 s after the injection (0.42–0.74 s after its first logged store
+  failure). During the window p50 was 2.2–2.4 ms for the fail-open and
+  budgeted tenants and 1.3 ms for the fail-closed 503s in both arms; p99
+  stayed at 503 ms for the open tenant in the hung arm, from the 23 requests
+  caught before detection. The gates closed 0.085–0.253 s after an unpause
+  and 0.60–1.05 s after a start. The price is that tail: 4–5 (hung) and
+  25–31 (down) requests per run met a store failure after the restore,
+  1 and 5 of them fail-closed refusals. Overrun (+302.2 to +312.7 over r·W)
+  and lost increments (152–161, all logged) stayed as without the gate.
 
 ## Not measured
 

@@ -18,6 +18,11 @@ trade is only honest with its price measured: how much traffic gets through
 unlimited, how slow requests become, which spend is never counted and how
 long the effect outlasts the outage.
 
+The runs below up to [Caveats](#caveats) measure a gateway without memory of
+store failures (`a66bd72`). [Store health gate](#store-health-gate-2026-11-14)
+measures the current gateway, which stops calling a store that keeps
+failing, with the same harness.
+
 ## Hypothesis (written before the run)
 
 - **Hung** (Redis process frozen): every store call waits for its 250 ms
@@ -256,9 +261,12 @@ requests per replica.
   answers slowly but within 250 ms, or a host whose resolver answers at once
   would each look different. On a host where the stopped name fails
   immediately, the down arm would show fast failures from the start.
-- **Recovery after a stop is the client's**, not the gateway's: 0.009 s and
-  4.859 s for two replicas in the same run. The 1 s probe interval and 5 s
-  dial timeout are go-redis defaults this gateway does not override.
+- **Recovery after a stop was the client's** in the runs above, not the
+  gateway's: 0.009 s and 4.859 s for two replicas in the same run, from
+  go-redis defaults (1 s dial probe, 5 s dial timeout) the gateway built
+  from `a66bd72` did not override. The current gateway dials once within
+  250 ms and probes through its store gate
+  ([below](#store-health-gate-2026-11-14)).
 - **One Redis for both replicas.** The outage removes the limit for every
   replica at once; per-region stores are not exercised.
 - **Strict mode only.** Lease mode, which holds local tokens, was not run.
@@ -269,3 +277,150 @@ requests per replica.
 - **Synthetic prices and a zero-latency mock**: dollars and latencies
   describe this stack. With real provider latency, more requests are in
   flight when the store fails.
+
+## Store health gate (2026-11-14)
+
+**Change under test.** Each gateway instance runs a store gate in its Redis
+client ([design §5.2](../design.md#52-the-jump-to-distributed-atomic-lua)): when more
+than half of its last 20 store calls (at least 10) went unanswered, every
+store call fails at once — the same fail-open or fail-closed outcome without
+the 250 ms wait — and one second after it opens the next call starts a background
+`PING` bounded by 250 ms; an answer closes the gate. The store client opens
+a connection in one attempt of at most 250 ms. Each transition is a
+`breaker_state` record with `component` `store`.
+
+**Hypothesis (written before the first gated run).** Each replica's gate
+opens after about 11 unanswered calls, a fraction of a second after its
+first failure; from then on every decision is made at once, so the p50 of
+all three tenants during the window returns to the level before it, while
+the p99 keeps the requests caught in flight before detection (≈ 500 ms for
+the open tenant). Overrun and lost increments do not change in kind: the
+gate changes how fast a decision is skipped, not which ones are. The price
+is paid after the restore: decisions stay skipped until a probe is answered,
+at most about one cool-down plus one probe per replica.
+
+**Protocol and environment.** As above — same host, stack, tenants, rates
+and windows, `make chaos-redis` with `RUN_ID=redis-gate-20261114-s1`…`s3` —
+with two additions: the orchestrator collects each replica's records tagged
+with its service name, including the gate's `breaker_state` records, and the
+verifier reports per replica when the gate opened (from the injection and
+from the replica's first logged store failure), how many probes it ran, when
+it last closed and the last request after the restore that met a store
+failure. It fails when a gate changes state before the injection, never
+opens during a window in which its replica met store failures, or is not
+closed when the run ends. Gateway built from `df1941f`. Every arm passed
+verification: every answered request matched one cost event, fail-open
+entries matched warnings, fail-closed refusals matched warnings, the counter
+stayed within bounds; 0 transport failures, 0 gateway 5xx other than
+`store_unavailable`, 0 dropped iterations, 0 token reconciliation failures.
+
+### Before and after
+
+Ranges over three runs of each arm. An old value without a range is from
+run 3, the only run whose full table the report above gives.
+
+| | Hung, `a66bd72` | Hung, gate | Down, `a66bd72` | Down, gate |
+|---|---|---|---|---|
+| Open tenant p50 during the window (ms) | 503.50–506.44 | **2.17–2.26** | 2.59–5.53 | **2.18–2.19** |
+| Open tenant p95 / p99 during (ms) | 514.46 / 522.42 | 3.05–3.25 / 503.30–503.40 | 508.95 / 512.44 | 3.00–3.25 / 5.11–253.23 |
+| Budgeted tenant p50 during (ms) | 1004.6–1006.4 | **2.27–2.36** | 4.92 | 2.29–2.33 |
+| Fail-closed tenant p50 during (ms) | 252.0–253.4 | **1.28–1.32** | 3.55 | 1.25–1.32 |
+| Store failures in the window: deadline-bound / faster | 902–904 / 0 | 23 / 884–887 | 219–340 / 607–736 | 3–11 / 922–933 |
+| Gate opened after the injection, per replica (s) | — | 0.887–0.985 | — | 0.857–1.087 |
+| … after the replica's first logged store failure (s) | — | 0.450–0.499 | — | 0.421–0.742 |
+| Overrun over r·W (requests) | +303.7 to +304.2 | +302.2 to +303.7 | +311.4 to +320.3 | +311.4 to +312.7 |
+| Budget increments lost | 147 | 152–153 | 158–165 | 161 |
+| Store failures sent after the restore | 0 | 4–5 | 16–74 | 25–31 |
+| Fail-closed refusals after the restore | 0 | 1 | 1–13 | 5 |
+| Recovery: last failure after the restore, per replica (s) | none | 0.081–0.248 | 0.009–4.859 | 0.599–1.049 |
+
+### Both arms, three runs
+
+| | Hung s1 | Hung s2 | Hung s3 | Down s1 | Down s2 | Down s3 |
+|---|---|---|---|---|---|---|
+| Window W (s) | 30.51 | 30.54 | 30.38 | 31.46 | 31.53 | 31.51 |
+| Injection command (s) | 0.26 | 0.28 | 0.16 | 0.80 | 0.87 | 0.77 |
+| First store failure after the injection started (s) | +0.262 | +0.267 | +0.183 | +0.334 | +0.383 | +0.335 |
+| Gate opened, replica a / b (s after the injection) | 0.964 / 0.965 | 0.969 / 0.970 | 0.887 / 0.985 | 1.087 / 0.938 | 0.857 / 0.981 | 0.857 / 0.869 |
+| … after the replica's first logged store failure (s) | 0.451 / 0.452 | 0.450 / 0.451 | 0.452 / 0.499 | 0.742 / 0.550 | 0.421 / 0.595 | 0.519 / 0.482 |
+| Probes per replica, of which reopened | 23, 22 | 23, 22 | 23, 22 | 25, 24 | 25, 24 | 25, 24 |
+| Store failures in the window: deadline-bound / faster | 23 / 886 | 23 / 887 | 23 / 884 | 11 / 922 | 3 / 933 | 4 / 932 |
+| Open tenant p50 / p95 / p99 during (ms) | 2.17 / 3.05 / 503.30 | 2.18 / 3.25 / 503.40 | 2.26 / 3.06 / 503.33 | 2.19 / 3.25 / 253.23 | 2.18 / 3.00 / 5.11 | 2.19 / 3.02 / 19.41 |
+| Budgeted tenant p50 / p95 / p99 during (ms) | 2.32 / 3.16 / 503.82 | 2.27 / 3.39 / 504.72 | 2.36 / 3.19 / 376.33 | 2.29 / 3.30 / 35.78 | 2.29 / 3.40 / 46.54 | 2.33 / 3.13 / 40.88 |
+| Fail-closed tenant p50 / p95 / p99 during (ms) | 1.32 / 2.05 / 251.93 | 1.28 / 1.90 / 252.51 | 1.31 / 1.98 / 252.22 | 1.25 / 2.47 / 151.25 | 1.27 / 1.85 / 45.44 | 1.32 / 1.92 / 38.82 |
+| Open tenant: admitted during the window / r·W | 608 / 305.1 | 609 / 305.4 | 606 / 303.8 | 626 / 314.6 | 628 / 315.3 | 627 / 315.1 |
+| **Overrun over the configured rate** | **+302.9** | **+303.7** | **+302.2** | **+311.4** | **+312.7** | **+311.9** |
+| Open tenant: admitted over the run vs B + r·T = 920 | 1243 | 1243 | 1241 | 1259 | 1259 | 1259 |
+| Fail-closed refusals during / after the window | 152 / 1 | 152 / 1 | 151 / 1 | 155 / 5 | 156 / 5 | 156 / 5 |
+| Budget increments lost (warnings), USD | 153, 5.202 | 152, 5.168 | 152, 5.168 | 161, 5.474 | 161, 5.474 | 161, 5.474 |
+| Spend counter / Σcost (USD) | 10.132 / 15.334 | 10.166 / 15.334 | 10.166 / 15.334 | 9.860 / 15.334 | 9.860 / 15.334 | 9.860 / 15.334 |
+| Increments applied after being reported lost | 0 | 0 | 0 | 0 | 0 | 0 |
+| Store failures sent after the restore | 5 | 4 | 5 | 31 | 25 | 28 |
+| Gate last closed, replica a / b (s after the restore) | 0.105 / 0.154 | 0.085 / 0.135 | 0.103 / 0.253 | 1.033 / 0.930 | 0.604 / 1.051 | 0.874 / 0.874 |
+| **Recovery**: last failure after the restore, a / b (s) | **0.101 / 0.151** | **0.081 / 0.131** | **0.099 / 0.248** | **1.029 / 0.928** | **0.599 / 1.049** | **0.871 / 0.871** |
+| First store decision after the restore (s) | +0.151 | +0.131 | +0.149 | +1.028 | +0.699 | +0.921 |
+
+### Reading
+
+- **Detection.** Each replica's gate opened 0.42–0.74 s after its first
+  logged store failure and 0.86–1.09 s after the injection command started:
+  the 11 unanswered calls of the rule, each waiting its 250 ms in the hung
+  arm. Those calls are the 23 deadline-bound failures of each hung window
+  (11–12 per replica) and its p99 of 503 ms for the open tenant and
+  376–505 ms for the budgeted one; the hypothesis held.
+- **During the window.** Once open, the gates skipped every store call: p50
+  2.2–2.4 ms for the fail-open and budgeted tenants and 1.3 ms for the
+  fail-closed tenant's 503s, against 2.1–4.3 ms before the window, when every
+  request made its store calls, and instead of 505 ms, 1 005 ms and 253 ms
+  without the gate. Each replica ran one probe per 1.3 s (cool-down, then
+  the next request, then the 250 ms `PING`); every probe during the window
+  failed and cost no request anything.
+- **What did not change.** The open tenant's overrun (+302.2 to +312.7 over
+  r·W) and the lost increments (152–161, all logged; counter =
+  Σcost − Σlost exactly) are close to the runs without the gate (+303.7 to
+  +320.3; 147–165): skipping a call fails it exactly as a timeout did. No
+  increment reported lost was applied afterwards; a skipped increment is never
+  sent.
+- **What the gate costs.** After the restore, each replica keeps skipping
+  until a probe is answered. In the hung arm the gates closed 0.085–0.253 s
+  after the unpause returned, against a first store decision 6–42 ms after
+  it without the gate: 4–5 requests per run met a store failure after the
+  restore (one of them a fail-closed refusal), against none. In the down arm
+  the gates closed 0.60–1.05 s after the start returned, with 25–31 such
+  requests and 5 fail-closed refusals per run, against 16–74 and 1–13
+  without the gate.
+- **Down arm: the dial settings decide recovery.** The first gated runs left
+  go-redis's dial defaults (5 attempts, 100 ms apart, up to 5 s each, on the
+  client's own context rather than the caller's). Built from `bcec212`,
+  five down arms (three runs and two diagnostic runs with full logs) took
+  0.51–8.28 s per replica to recover: after the start, up to six
+  consecutive probes timed out, while a Go program on the same network
+  resolved `redis` and connected in 1–2 ms from its first attempt after the
+  start. The same program measured lookups of
+  the stopped name at 0.15–0.29 s and once 4.15 s. Go shares one in-flight
+  lookup among concurrent lookups of a name and cancels it only when its
+  last waiter leaves, so overlapping background dials could keep a lookup
+  begun during the outage answering probes after the restore — an
+  explanation consistent with these records, not a trace of it. Bounding
+  each attempt to 250 ms (`f89ff66`, three runs) gave 0.44–3.28 s, and its
+  logs show a dial begun after the restore still ending in `no such host`; with a
+  single 250 ms attempt (`df1941f`) probe dials no longer overlap, and the
+  three runs above recovered in 0.60–1.05 s. The single attempt also made
+  the window's failures fast: 3–11 deadline-bound failures per down window
+  instead of 21–24. The hung arm, where dials succeed, measured the same in
+  all three builds (open tenant p50 2.0–2.7 ms during the window, gates
+  closed 0.03–0.25 s after the unpause).
+- **Rule 6.** The gate is per replica and remembers only its own calls; the
+  two replicas opened up to 0.15 s and closed up to 0.45 s apart. Limits during the outage are as absent as before.
+
+### Caveats
+
+- **Run 3 of the hung arm** shows a slower period after the restore
+  (open tenant p95 14.1 ms against 4.5 ms in runs 1–2) with the gates
+  already closed at +0.10 and +0.25 s; the host was shared with other
+  workloads, and the run's before period was normal.
+- **Lease mode** was not run under an outage; the gate's effect on held
+  leases and on lease returns is covered by tests only.
+- **A store that answers `PING` but not scripts**, a slow store within the
+  budget, a partition that drops packets and a managed Redis failover were
+  not measured, as for the runs above.

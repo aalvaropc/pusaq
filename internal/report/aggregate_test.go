@@ -98,6 +98,9 @@ func TestBuildFixtureRun(t *testing.T) {
 	if !slices.Equal(r.Limits.Tenants, wantLimits) || !r.Limits.HasData() {
 		t.Fatalf("limits = %+v", r.Limits.Tenants)
 	}
+	if st := r.Limits.StoreTransitions; len(st) != 1 || st[0].Source != "pusaq-2" || st[0].To != "open" {
+		t.Fatalf("store transitions in the run's span = %+v, want the one closed→open", st)
+	}
 
 	s := r.Shadow
 	if !s.Enabled || s.Records != 3 || s.Eligible != 4 || s.HitRate != (Ratio{2, 4}) || s.FalsePos != (Ratio{1, 2}) ||
@@ -131,8 +134,9 @@ func TestBuildWithoutRunKeepsEverything(t *testing.T) {
 	if r.Shadow.HitRate != (Ratio{3, 5}) || r.Shadow.FalsePos != (Ratio{2, 3}) {
 		t.Fatalf("shadow %v %v", r.Shadow.HitRate, r.Shadow.FalsePos)
 	}
-	if len(r.Fallback.Transitions) != 2 || r.Limits.Total.FailOpenToken != 1 || r.Latency.All.Max != 9000 {
-		t.Fatalf("transitions %d fail-open token %d max %d", len(r.Fallback.Transitions), r.Limits.Total.FailOpenToken, r.Latency.All.Max)
+	if len(r.Fallback.Transitions) != 2 || len(r.Limits.StoreTransitions) != 2 || r.Limits.Total.FailOpenToken != 1 || r.Latency.All.Max != 9000 {
+		t.Fatalf("transitions %d store transitions %d fail-open token %d max %d",
+			len(r.Fallback.Transitions), len(r.Limits.StoreTransitions), r.Limits.Total.FailOpenToken, r.Latency.All.Max)
 	}
 }
 

@@ -283,6 +283,35 @@ func TestWiringRoutesThroughBreakersAndFallback(t *testing.T) {
 	}
 }
 
+func TestWiringGatesTheStoreAndLogsItsTransitions(t *testing.T) {
+	mr := miniredis.RunT(t)
+	a, logs := testApp(t, map[string]string{
+		"PUSAQ_DEV_MODE":   "true",
+		"PUSAQ_UPSTREAMS":  "primary=" + upstreamURL(t, &fakeUpstream{}),
+		"PUSAQ_REDIS_ADDR": mr.Addr(),
+	})
+	if cfg := logs.find(t, "store gate configured"); len(cfg) != 1 || cfg[0]["window"] != 20.0 || cfg[0]["min_samples"] != 10.0 || cfg[0]["cooldown"] != float64(time.Second) {
+		t.Fatalf("store gate configured records = %v", cfg)
+	}
+	if rec := complete(a.srv, "", prompt("pusaq/fast", "hello")); rec.Code != http.StatusOK {
+		t.Fatalf("healthy completion = %d %s", rec.Code, rec.Body.String())
+	}
+	mr.Close()
+	for i := 0; len(logs.find(t, "breaker_state")) == 0; i++ {
+		if i == 10 {
+			t.Fatal("store gate never opened with the store gone")
+		}
+		if rec := complete(a.srv, "", prompt("pusaq/fast", "hello")); rec.Code != http.StatusOK {
+			t.Fatalf("fail-open completion = %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	transitions := logs.find(t, "breaker_state")
+	if len(transitions) != 1 || transitions[0]["component"] != "store" || transitions[0]["backend"] != nil ||
+		transitions[0]["from"] != "closed" || transitions[0]["to"] != "open" {
+		t.Fatalf("breaker_state records = %v, want one store closed→open", transitions)
+	}
+}
+
 func TestWiringShadowCacheCaps(t *testing.T) {
 	tests := []struct {
 		name        string
