@@ -205,7 +205,7 @@ input.
 
 ## Measurements and how to run them
 
-The [measurement index](measurements/README.md) identifies all ten reports,
+The [measurement index](measurements/README.md) identifies all twelve reports,
 their dates and the commands that exercise each mechanism. Run load tests
 against the local mock stack; their Make targets flush the stack's Redis.
 Commands and reports include:
@@ -238,6 +238,19 @@ Commands and reports include:
   instance keeps running); the split tenant's quota overruns its one-region
   share by ~5 %. `make chaos-run` runs it against the runtime module;
   `make chaos-local` checks the harness on the Compose profile.
+- [`redis-outage.md`](measurements/redis-outage.md) — the Compose Redis
+  paused (hung) and stopped (down) for 30 s under steady load from a
+  fail-open, a budgeted and a fail-closed tenant: latency per store call,
+  admissions above the configured rate, budget increments lost and recovery
+  per replica. `make chaos-redis` runs both arms; `REDIS_ARMS`,
+  `REDIS_WARMUP`, `REDIS_FAIL_FOR` and `REDIS_DURATION` (whole seconds) and
+  the per-tenant rates `REDIS_OPEN_RPS`, `REDIS_BUDGET_RPS` and
+  `REDIS_CLOSED_RPS` adjust it. The orchestrator restores the store from a
+  trap whatever stage fails, and the verifier joins every request to its
+  cost event by request id.
+- [`chaos-report.md`](measurements/chaos-report.md) — region, provider
+  and store failures side by side, each from its source report, with the
+  failure modes that were not measured.
 - [`content-rules.md`](measurements/content-rules.md) — precision and
   recall of the policy filter's content rules (sensitive data, injection
   phrasing, temporal cues) on a 204-row labeled EN/ES corpus with hard
