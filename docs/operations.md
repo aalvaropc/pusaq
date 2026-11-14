@@ -174,7 +174,7 @@ only: no scripts and no external requests.
 | Latency per route | p50, p95, p99 and max of successful requests per requested alias and served model. |
 | Outcomes | Cost events by outcome and error code, with the HTTP status the client received. |
 | Fallback and breakers | Per backend: requests for which it was the first choice, served at first try or after fallback, breaker skips and failed attempts; attempts per served request; `breaker_state` transitions. |
-| Rate limiting | Per tenant: `rate_limited` denials by limit, budget and fail-closed refusals, and fail-open admissions by store from the `failing open` warnings. A request-limit denial has no `requested_model` (it is decided before alias resolution); a token-limit denial has one. |
+| Rate limiting | Per tenant: `rate_limited` denials by limit, budget and fail-closed refusals, and fail-open admissions by decision (`rpm`, `tpm`, `budget`) from each cost event's `fail_open`; `failing open` warning lines are not counted. A request-limit denial has no `requested_model` (it is decided before alias resolution); a token-limit denial has one. |
 | Shadow cache | Predicted hit-rate at the configured τ next to its false-positive bound, a τ sweep with both numbers for every τ, best-neighbor similarity by fingerprint agreement, and `cache_skip` reasons. |
 
 Percentiles use the nearest-rank method: the value at rank ⌈p·n/100⌉ of the
@@ -196,8 +196,9 @@ mock providers, prices are synthetic and the `local` embedder is lexical, so
 its latencies, dollars and cache numbers describe that stack, not a provider
 or a production embedder. Events the emitter dropped are absent from every
 view; drop counts appear only when the input holds the gateways' shutdown
-records. Shadow, fallback and fail-open records count only when their
-request's cost event is selected; under a run filter, breaker transitions
+records. Shadow and fallback records count only when their request's cost event
+is selected; logs from gateways that do not write `fail_open` show no
+fail-open admissions; under a run filter, breaker transitions
 count only inside the selected events' time span. `docker compose logs`
 re-reads each container's whole log, so a long-lived stack produces a large
 input.

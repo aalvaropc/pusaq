@@ -12,27 +12,21 @@ import (
 )
 
 const (
-	msgCostEvent       = "cost_event"
-	msgShadow          = "cache_shadow"
-	msgBreakerState    = "breaker_state"
-	msgBreakerSkip     = "backend breaker open, skipping"
-	msgBackendFailed   = "backend failed, trying next"
-	msgRequestFailOpen = "rate limiter store unavailable, failing open"
-	msgTokenFailOpen   = "token limiter store unavailable, failing open"
-	msgSpendFailOpen   = "spend store unavailable, failing open"
-	msgShadowConfig    = "semantic cache in shadow mode: measuring, never serving"
-	msgShadowStopped   = "shadow cache stopped"
-	msgGatewayStopped  = "gateway stopped"
+	msgCostEvent      = "cost_event"
+	msgShadow         = "cache_shadow"
+	msgBreakerState   = "breaker_state"
+	msgBreakerSkip    = "backend breaker open, skipping"
+	msgBackendFailed  = "backend failed, trying next"
+	msgShadowConfig   = "semantic cache in shadow mode: measuring, never serving"
+	msgShadowStopped  = "shadow cache stopped"
+	msgGatewayStopped = "gateway stopped"
 )
 
-// Store names the limit store a fail-open admission bypassed.
-type Store string
-
-// Stores whose unavailability admits requests without a decision.
+// Decisions a store outage can skip, as the cost event's fail_open names them.
 const (
-	StoreRequest Store = "request"
-	StoreToken   Store = "token"
-	StoreSpend   Store = "spend"
+	FailOpenRequest = "rpm"
+	FailOpenToken   = "tpm"
+	FailOpenBudget  = "budget"
 )
 
 // Event is one cost_event record as the telemetry slog sink writes it.
@@ -56,6 +50,7 @@ type Event struct {
 	CostUSD          float64
 	CostEstimated    bool
 	PriceVersion     string
+	FailOpen         []string
 }
 
 // ShadowRecord is one cache_shadow evaluation that found a neighbor.
@@ -89,12 +84,6 @@ type BackendMiss struct {
 	Skipped   bool
 }
 
-// FailOpen is one admission made without a store decision.
-type FailOpen struct {
-	RequestID string
-	Store     Store
-}
-
 // Input is everything read from the log lines, before selection.
 type Input struct {
 	Lines      int
@@ -107,7 +96,6 @@ type Input struct {
 	Shadow      []ShadowRecord
 	Transitions []Transition
 	Misses      []BackendMiss
-	FailOpens   []FailOpen
 
 	Taus      []float64
 	Embedders []string
@@ -138,6 +126,7 @@ type line struct {
 	CostUSD           *float64  `json:"cost_usd"`
 	PriceTableVersion string    `json:"price_table_version"`
 	CostEstimated     bool      `json:"cost_estimated"`
+	FailOpen          string    `json:"fail_open"`
 
 	ShadowHit           *bool    `json:"shadow_hit"`
 	BestSimilarity      *float64 `json:"best_similarity"`
@@ -234,11 +223,6 @@ func (in *Input) addRecord(l line, source string, seen map[string]bool, taus map
 			return errIncomplete
 		}
 		in.Misses = append(in.Misses, BackendMiss{RequestID: l.RequestID, Backend: l.Backend, Skipped: l.Msg == msgBreakerSkip})
-	case msgRequestFailOpen, msgTokenFailOpen, msgSpendFailOpen:
-		if l.RequestID == "" {
-			return errIncomplete
-		}
-		in.FailOpens = append(in.FailOpens, FailOpen{RequestID: l.RequestID, Store: failOpenStore(l.Msg)})
 	case msgShadowConfig:
 		if l.Tau != nil && !taus[*l.Tau] {
 			taus[*l.Tau] = true
@@ -280,18 +264,10 @@ func eventFrom(l line, source string) Event {
 		e.Priced = true
 		e.CostUSD = *l.CostUSD
 	}
-	return e
-}
-
-func failOpenStore(msg string) Store {
-	switch msg {
-	case msgTokenFailOpen:
-		return StoreToken
-	case msgSpendFailOpen:
-		return StoreSpend
-	default:
-		return StoreRequest
+	if l.FailOpen != "" {
+		e.FailOpen = strings.Split(l.FailOpen, ",")
 	}
+	return e
 }
 
 func addName(list *[]string, seen map[string]bool, name string) {

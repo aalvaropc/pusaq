@@ -205,14 +205,14 @@ svg .m2 { fill: var(--s2); }
 
 <section id="limits">
 <h2>5 · Rate limiting</h2>
-<p class="lede">The request limit runs before alias resolution, so its <code>rate_limited</code> events carry no <code>requested_model</code>; the token limit runs after it, so its events do. Fail-open admissions are the <code>failing open</code> warnings of selected requests: admitted without a store decision. Fail-closed refusals are <code>store_unavailable</code> events.</p>
+<p class="lede">The request limit runs before alias resolution, so its <code>rate_limited</code> events carry no <code>requested_model</code>; the token limit runs after it, so its events do. Fail-open admissions are the decisions each event names in <code>fail_open</code> (<code>rpm</code>, <code>tpm</code>, <code>budget</code>): admitted without that store decision. Fail-closed refusals are <code>store_unavailable</code> events.</p>
 {{if not .Limits.HasData}}<p class="empty">No limit denials and no fail-open admissions in this selection.</p>{{end}}
 <div class="scroll"><table>
-<thead><tr><th>Tenant</th><th>Requests</th><th>429 request limit</th><th>429 token limit</th><th>402 budget</th><th>503 fail-closed</th><th>Fail-open request</th><th>Fail-open token</th><th>Fail-open spend</th></tr></thead>
+<thead><tr><th>Tenant</th><th>Requests</th><th>429 request limit</th><th>429 token limit</th><th>402 budget</th><th>503 fail-closed</th><th>Fail-open rpm</th><th>Fail-open tpm</th><th>Fail-open budget</th></tr></thead>
 <tbody>
-{{range .Limits.Tenants}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.RequestLimited}}</td><td>{{.TokenLimited}}</td><td>{{.BudgetExceeded}}</td><td>{{.FailClosed}}</td><td>{{.FailOpenRequest}}</td><td>{{.FailOpenToken}}</td><td>{{.FailOpenSpend}}</td></tr>
+{{range .Limits.Tenants}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.RequestLimited}}</td><td>{{.TokenLimited}}</td><td>{{.BudgetExceeded}}</td><td>{{.FailClosed}}</td><td>{{.FailOpenRequest}}</td><td>{{.FailOpenToken}}</td><td>{{.FailOpenBudget}}</td></tr>
 {{end}}</tbody>
-<tfoot>{{with .Limits.Total}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.RequestLimited}}</td><td>{{.TokenLimited}}</td><td>{{.BudgetExceeded}}</td><td>{{.FailClosed}}</td><td>{{.FailOpenRequest}}</td><td>{{.FailOpenToken}}</td><td>{{.FailOpenSpend}}</td></tr>{{end}}</tfoot>
+<tfoot>{{with .Limits.Total}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.RequestLimited}}</td><td>{{.TokenLimited}}</td><td>{{.BudgetExceeded}}</td><td>{{.FailClosed}}</td><td>{{.FailOpenRequest}}</td><td>{{.FailOpenToken}}</td><td>{{.FailOpenBudget}}</td></tr>{{end}}</tfoot>
 </table></div>
 </section>
 

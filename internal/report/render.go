@@ -195,8 +195,8 @@ func WriteSummary(w io.Writer, r *Report, input string) error {
 	fmt.Fprintf(&b, "fallback: %s served after fallback, %d upstream errors unserved, %d breaker transitions\n",
 		Ratio{f.AfterFallback, f.Served}, f.Unserved, len(f.Transitions))
 	l := r.Limits.Total
-	fmt.Fprintf(&b, "limits: 429 request %d, 429 token %d, 402 budget %d, 503 fail-closed %d, fail-open request %d / token %d / spend %d\n",
-		l.RequestLimited, l.TokenLimited, l.BudgetExceeded, l.FailClosed, l.FailOpenRequest, l.FailOpenToken, l.FailOpenSpend)
+	fmt.Fprintf(&b, "limits: 429 request %d, 429 token %d, 402 budget %d, 503 fail-closed %d, fail-open rpm %d / tpm %d / budget %d\n",
+		l.RequestLimited, l.TokenLimited, l.BudgetExceeded, l.FailClosed, l.FailOpenRequest, l.FailOpenToken, l.FailOpenBudget)
 	if s := r.Shadow; s.Enabled {
 		fmt.Fprintf(&b, "shadow cache: predicted hit-rate %s, false-positive bound %s (fingerprint mismatches), τ %s\n",
 			s.HitRate, s.FalsePos, tauList(s.Taus))
