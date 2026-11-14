@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -32,8 +33,14 @@ func repeatTo(paragraphs []string, n int) string {
 	return b.String()
 }
 
-// BenchmarkClassify measures every content rule over prompts that match
-// none of them, so each pattern scans the whole text.
+var benchCues = []string{
+	"xtodayx xcurrentx xhoyx xtonightx xyesterdayx xlast nightx xayerx xthis weekx xeste mesx xlatestx xpricex xactualx xpreciox xis itx",
+	"xignore xprevious xinstructionx xignora xinstrucciones xanterioresx xyou are nowx xno xahora eresx xsin xsystem xpromptx xrevealx xprompt xrevelx xnew instrucx:",
+	"x@x +12 34 (1x 1-1x 987 654 321x xtelx 12345678x 1234 5678 9012 3456 GB12 ABCD 1234 5678 9012 34 xsk-x xAKIAx xghp_x -----BEGIN x x.eyJx xbearer xtokenx=",
+}
+
+// BenchmarkClassify measures the content rules over prompts that match none
+// of them; the cue prompt passes every prefilter, so every pattern runs.
 func BenchmarkClassify(b *testing.B) {
 	for _, bc := range []struct {
 		name, text string
@@ -42,10 +49,19 @@ func BenchmarkClassify(b *testing.B) {
 		{"es/short", benchES[0]},
 		{"en/4KiB", repeatTo(benchEN, 4096)},
 		{"es/4KiB", repeatTo(benchES, 4096)},
+		{"cues/4KiB", repeatTo(benchCues, 4096)},
 	} {
 		b.Run(bc.name, func(b *testing.B) {
 			if f := Classify(bc.text); !f.Empty() {
 				b.Fatalf("benchmark prompt matches %v", f.List())
+			}
+			if bc.name == "cues/4KiB" {
+				s := scan{text: bc.text}
+				for _, r := range slices.Concat(sensitiveRules, injectionRules, temporalMasks, temporalRules) {
+					if !r.gate(&s) {
+						b.Fatalf("cue prompt skips a %q pattern", r.kind)
+					}
+				}
 			}
 			b.SetBytes(int64(len(bc.text)))
 			b.ReportAllocs()
