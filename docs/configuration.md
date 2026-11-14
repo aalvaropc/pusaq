@@ -68,8 +68,14 @@ not an environment setting.
 An idle bucket expires once its refill would have filled it again, and no
 sooner than one minute after its last update. RPM and TPM require
 `PUSAQ_REDIS_ADDR`; no Redis address disables both. A store call has a 250 ms
-context budget. Store errors fail open unless the tenant's policy sets
-`fail_closed=true`; the cost event then names the decision in `fail_open`. See [quota semantics](gateway.md#rate-limiting).
+context budget, and a connection to Redis is opened in one attempt of at
+most 250 ms.
+Store errors fail open unless the tenant's policy sets `fail_closed=true`;
+the cost event then names the decision in `fail_open`.
+The store gate that skips a failing store has no settings: its rule (more
+than half of the last 20 calls unanswered, at least 10), its 1 s cool-down
+and its 250 ms probe are constants stated in the `store gate configured`
+startup record. See [quota semantics](gateway.md#rate-limiting).
 
 ## Circuit breakers (per upstream backend)
 

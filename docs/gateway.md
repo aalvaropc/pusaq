@@ -153,7 +153,15 @@ temporarily inexact limits beat an outage caused by the limiter itself —
 unless the tenant's policy sets `fail_closed`, in which case it answers 503
 `store_unavailable`. A request let through this way carries `fail_open` on
 its cost event, naming each decision the store could not make: `rpm`,
-`tpm`, or `budget`.
+`tpm`, or `budget`. Each instance also stops calling a store that keeps
+failing: when more than half of its last 20 store calls (at least 10) went
+unanswered, its store gate opens and every store call fails at once — the
+same fail-open or fail-closed outcome without the 250 ms wait, and a skipped
+reconciliation, spend increment or lease return is lost like a timed-out
+one. One second after the gate opens, the next store call starts a background `PING` with
+the same 250 ms budget; an answer closes the gate, anything else keeps it
+open for another second. Each transition is a `breaker_state` log record
+with `component` `store`.
 Unset `PUSAQ_REDIS_ADDR` disables limiting with a startup warning.
 
 Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one

@@ -279,6 +279,42 @@ the bucket until the bucket's TTL; a spend update that fails under-counts the
 month. The price of failing open is measured with Redis paused and stopped
 under load ([measurements](measurements/redis-outage.md)).
 
+A per-call budget alone makes a hung store cost 250 ms per decision for the
+whole outage, so each instance also remembers that the store is failing: a
+**store gate** in its Redis client, built on the same circuit breaker as the
+backends (§5.6). A call the store did not answer — a deadline, a connection
+or dial error, a pool timeout — is a failure; a reply, error replies
+included, is a success; a call its caller canceled counts as nothing. When
+more than half of the last 20 calls, with at least 10 counted, failed, the
+gate opens and every store call — admission in either mode, lease returns,
+token charge and reconciliation, budget read and spend increment — fails at
+once without reaching Redis, and its caller applies the usual fail-open or
+fail-closed outcome. After 1 s the next call takes the single half-open
+slot for a background `PING` bounded by 250 ms and is itself skipped, as is
+every call while the probe runs; an answer closes the gate with an empty
+window, anything else reopens it for another second. The breaker was reused
+rather than a new state machine written because it already holds exactly
+this logic, tested and measured: the window with its minimum sample, the
+cool-down, bounded probes, and tickets that count only in the state that
+admitted them, so a call admitted before the gate opened cannot decide the
+probe. A ratio over a window was preferred to N consecutive failures, which
+trips by chance under a partial failure rate and resets on any interleaved
+success. A `PING` probe was preferred to letting one real call through,
+which would make one request per second per instance wait 250 ms for as
+long as a hung store stays hung. The rule, the 1 s cool-down and the probe
+budget are constants, announced at startup; a healthy store sees exactly the
+calls it saw without the gate. What the gate costs: about 11 failed calls per
+instance before it opens (each taking the full budget against a hung store),
+and up to one cool-down after the store answers again during which
+fail-open tenants are still admitted without a decision and fail-closed
+tenants refused. The gate is per instance and every transition is a
+`breaker_state` record with `component` `store`. The client opens a
+connection in one attempt of at most the same 250 ms: go-redis dials on its
+own context, by default up to five attempts of up to 5 s each, and dials and
+name lookups begun while Redis was stopped otherwise kept the probes after
+its restart failing for seconds
+([measurements](measurements/redis-outage.md#store-health-gate-2026-11-14)).
+
 ### 5.3 The limit that actually matters: TPM
 
 RPM protects infrastructure; invoices and provider quotas are measured in
@@ -517,7 +553,8 @@ usage chunk, a client that left mid-stream, a stream that failed — is priced
 from the request's reservation and the event says so (`cost_estimated`); the
 monthly spend counts that estimate. Shadow-cache evaluations are separate
 `cache_shadow` records (similarity, neighbor, response fingerprints, embedder
-latency), and breaker transitions are `breaker_state` records.
+latency), and breaker transitions — backends and the store gate
+(`component` `store`) — are `breaker_state` records.
 
 Cost events are enqueued without waiting for the telemetry sink:
 a single goroutine drains a bounded buffer and writes one line per event;

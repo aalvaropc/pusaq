@@ -20,7 +20,9 @@ to stdout. Saturation drops events rather than waiting for the sink;
 either written or counted there, including events racing shutdown. A produced
 event therefore does not guarantee a persisted log record. Every event carries
 `latency_ms` and `attempts`; `fail_open` lists the store decisions (`rpm`,
-`tpm`, `budget`) a store outage skipped. Completion events include resolved
+`tpm`, `budget`) a store outage skipped. The store gate's transitions are
+`breaker_state` records with `component` `store`; its constants are in the
+`store gate configured` startup record. Completion events include resolved
 model and usage when available; configured prices add `cost_usd`,
 `price_table_version` and, for estimated costs, `cost_estimated`. The
 [local event report](#local-event-report) reads these records back.
@@ -187,7 +189,7 @@ only: no scripts and no external requests.
 | Latency per route | p50, p95, p99 and max of successful requests per requested alias and served model. |
 | Outcomes | Cost events by outcome and error code, with the HTTP status the client received. |
 | Fallback and breakers | Per backend: requests for which it was the first choice, served at first try or after fallback, breaker skips and failed attempts; attempts per served request; `breaker_state` transitions. |
-| Rate limiting | Per tenant: `rate_limited` denials by limit, budget and fail-closed refusals, and fail-open admissions by decision (`rpm`, `tpm`, `budget`) from each cost event's `fail_open`; `failing open` warning lines are not counted. A request-limit denial has no `requested_model` (it is decided before alias resolution); a token-limit denial has one. |
+| Rate limiting | Per tenant: `rate_limited` denials by limit, budget and fail-closed refusals, and fail-open admissions by decision (`rpm`, `tpm`, `budget`) from each cost event's `fail_open`; `failing open` warning lines are not counted. A request-limit denial has no `requested_model` (it is decided before alias resolution); a token-limit denial has one. Store gate transitions (`breaker_state` with `component` `store`) are listed per replica and never counted as backend breaker transitions. |
 | Shadow cache | Predicted hit-rate at the configured τ next to its false-positive bound, a τ sweep with both numbers for every τ, best-neighbor similarity by fingerprint agreement, and `cache_skip` reasons. |
 
 Percentiles use the nearest-rank method: the value at rank ⌈p·n/100⌉ of the
@@ -255,7 +257,9 @@ Commands and reports include:
   paused (hung) and stopped (down) for 30 s under steady load from a
   fail-open, a budgeted and a fail-closed tenant: latency per store call,
   admissions above the configured rate, budget increments lost and recovery
-  per replica. `make chaos-redis` runs both arms; `REDIS_ARMS`,
+  per replica, and when each replica's store gate opened and closed (the
+  harness collects every replica's records tagged with its service name).
+  `make chaos-redis` runs both arms; `REDIS_ARMS`,
   `REDIS_WARMUP`, `REDIS_FAIL_FOR` and `REDIS_DURATION` (whole seconds) and
   the per-tenant rates `REDIS_OPEN_RPS`, `REDIS_BUDGET_RPS` and
   `REDIS_CLOSED_RPS` adjust it. The orchestrator restores the store from a
