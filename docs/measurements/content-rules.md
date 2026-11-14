@@ -115,6 +115,69 @@ cue-based temporal rules miss what has no cue and are fooled by a title.
 The floors, not the perfect scores, are the guarantee: they are what the
 suite enforces on every change.
 
+## Scan cost (2026-11-14)
+
+The families run on every admitted completion request, before any provider
+call, so their CPU cost is paid per request.
+
+Each rule carries a prefilter: a condition that every match of its pattern
+needs. For the case-insensitive phrase rules it is a literal in a case-folded
+copy of the text with whitespace runs collapsed (Unicode simple folding, so
+`ſ` and the Kelvin sign count as `s` and `k`); for the secret shapes, a
+case-sensitive literal (`sk-`, `AKIA`, `.eyJ`, `-----BEGIN `…); for phones,
+cards and IBANs, a digit shape (a run of 8 digits, 13 digits chained by
+single spaces or hyphens, two capitals before two digits…). A pattern runs
+over the full text only when its prefilter holds, so the kinds reported are
+those of running every pattern. One pass builds the folded copy and a
+trigram bitmap that answers most literal probes without a substring search.
+
+Equivalence is tested against `internal/policy/reference_test.go`, a
+verbatim copy of the patterns and of the scan without prefilters:
+
+- every corpus row gets the same kinds, so the family counts under Results
+  and the rows per kind are unchanged;
+- 3,000 seeded inputs (corpus rows, cue words, digit shapes, case and
+  Unicode-fold variants, whitespace variants, invalid UTF-8; every kind
+  fires on at least 10 of them) classify identically;
+- `FuzzClassify` compares one and two texts against the reference:
+  60 s locally with `-fuzzminimizetime 2s`, 1,821,742 executions, no
+  difference.
+
+Removing `today` from a prefilter, dropping the `ſ`/Kelvin folding,
+requiring 14 chained card digits or not collapsing form feeds each makes
+these tests fail.
+
+Protocol: Intel Core i5-13600K, Go 1.26.10, linux/amd64, pinned to one
+performance core, five runs per binary in two interleaved rounds; "before"
+is the same benchmark over the classifier without prefilters.
+
+```
+taskset -c 4,5 go test -run '^$' -bench BenchmarkClassify -benchmem -count 5 ./internal/policy
+```
+
+| Prompt | Bytes | Before | After | Speed-up |
+|---|---|---|---|---|
+| `en/short` | 238 | 335 µs | 4.3 µs | 79× |
+| `es/short` | 262 | 384 µs | 5.5 µs | 70× |
+| `en/4KiB` | 4,172 | 5.68 ms | 71.7 µs | 79× |
+| `es/4KiB` | 4,121 | 6.21 ms | 81.5 µs | 76× |
+| `cues/4KiB` | 4,181 | 5.52 ms | 5.59 ms | 1.0× |
+
+Medians of 10 runs per side. The machine ran in its power-saver profile
+(performance cores capped at 3.5 GHz) with other workloads active; the
+interleaved rounds expose both sides to the same conditions. Allocations go
+from 6 to 9 per call (per family: the scan state, the folded copy and the
+bitmap); bytes per call from 19.7 KB to 27.1 KB for the 4 KiB prompts.
+
+Reading: a prompt that lacks the rules' cue literals pays a folding pass
+per family and one digit-shape pass instead of 33 pattern scans (31 rules
+and two temporal masks). The `cues` prompt carries a literal for every rule
+without matching any, so every pattern still scans the whole text and its
+cost is unchanged, under 1 MB/s here: a tenant that writes such prompts
+still spends on the order of a second of gateway CPU per MiB of message
+content. The prefilters make ordinary prompts cheap; they do not bound
+that case.
+
 ## Caveats
 
 - **Author-labeled, not blind.** The corpus and the patterns share an
