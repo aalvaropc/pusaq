@@ -79,7 +79,7 @@ A tenant's policy MAY set a monthly budget in dollars. The gateway SHALL keep th
 
 ### Requirement: Fail-closed store behavior
 
-A tenant's policy MAY set `fail_closed`. For such a tenant, a store failure while deciding the request limit, charging the token limit, or reading the budget SHALL reject the request with 503 `store_unavailable`, calling no provider; tenants without the flag SHALL keep the default fail-open behavior. Token reconciliation is unaffected.
+A tenant's policy MAY set `fail_closed`. For such a tenant, a store failure while deciding the request limit, charging the token limit, or reading the budget SHALL reject the request with 503 `store_unavailable`, calling no provider; tenants without the flag SHALL keep the default fail-open behavior. A store call skipped by the instance's open store health gate is a store failure: a fail-closed tenant's request SHALL be rejected without waiting for the store. Token reconciliation is unaffected.
 
 #### Scenario: Request limit store failure rejects
 
@@ -95,6 +95,11 @@ A tenant's policy MAY set `fail_closed`. For such a tenant, a store failure whil
 
 - **WHEN** the store is unreachable when a fail-closed tenant's budget is read
 - **THEN** the response is 503 `store_unavailable`
+
+#### Scenario: Open gate rejects at once
+
+- **WHEN** the store health gate is open and a fail-closed tenant's request arrives
+- **THEN** the response is 503 `store_unavailable` without any store call, no provider is called, and the degradation is logged
 
 #### Scenario: Tenants without the flag still fail open
 

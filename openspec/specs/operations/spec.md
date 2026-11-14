@@ -126,7 +126,7 @@ The repository SHALL provide a command that reads the gateway's JSON log lines f
 
 ### Requirement: Event report views
 
-The report SHALL contain six views: requests, tokens and USD cost per tenant with estimated cost apart from measured cost; latency p50, p95 and p99 of successful requests per route by the nearest-rank method; outcomes by error code and HTTP status; fallback and breaker activity; request-limit and token-limit denials with fail-open admissions by decision from the cost event's `fail_open` field; and the shadow cache's predicted hit-rate next to its false-positive upper bound. A view without supporting records SHALL say so instead of showing numbers. The report SHALL state that its figures describe its input only.
+The report SHALL contain six views: requests, tokens and USD cost per tenant with estimated cost apart from measured cost; latency p50, p95 and p99 of successful requests per route by the nearest-rank method; outcomes by error code and HTTP status; fallback and breaker activity; request-limit and token-limit denials with fail-open admissions by decision from the cost event's `fail_open` field, and the store health gate's transitions from `breaker_state` records with `component` `store`; and the shadow cache's predicted hit-rate next to its false-positive upper bound. Store-gate transitions SHALL NOT be counted as backend breaker transitions. A view without supporting records SHALL say so instead of showing numbers. The report SHALL state that its figures describe its input only.
 
 #### Scenario: Cost per tenant separates estimated cost
 
@@ -147,6 +147,11 @@ The report SHALL contain six views: requests, tokens and USD cost per tenant wit
 
 - **WHEN** selected events carry `fail_open` values `rpm`, `tpm` and `budget`, and the input also holds `failing open` warning lines
 - **THEN** each value counts once as a fail-open admission of its decision for the event's tenant, and the warning lines add nothing
+
+#### Scenario: Store-gate transitions in the limits view
+
+- **WHEN** the input holds `breaker_state` records for a backend and for `component` `store`
+- **THEN** the store records are listed with their time, replica and states in the rate-limiting view, and only the backend records appear among the breaker transitions
 
 #### Scenario: Fallback against the first choice
 

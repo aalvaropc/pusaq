@@ -254,7 +254,7 @@ Each gateway instance SHALL keep one retry budget shared by all its requests: a 
 
 ### Requirement: Store outage is measured per arm
 
-A limit-store outage SHALL be measurable by one reproducible local command: steady traffic from a fail-open tenant with request and token limits, a budgeted tenant and a fail-closed tenant, while the store is made unavailable on purpose for a fixed window in two separate arms — hung (the store process frozen, calls wait for the limiter budget) and down (the store container stopped) — and then restored. For each arm and each period (before, during and after the window, assigned by the instant the client sent each request), the run SHALL report separately per tenant: requests admitted, limited, refused with `store_unavailable`, other gateway 5xx and transport failures; latency p50/p95/p99 interpolated between the closest ranks; and fail-open admissions by decision from the cost event's `fail_open` field. Per arm it SHALL also report the fail-open tenant's admissions during the window above its configured rate, the budget increments the gateway reported lost with the store counter's value, and the time from the restore until the last request that met a store failure. Every answered request SHALL match exactly one cost event of its run with the same tenant and classification; fail-open entries SHALL match the gateway's fail-open warnings; and the store's spend counter SHALL lie between the summed cost minus the reported lost increments and the summed cost. The results SHALL be published with their protocol and SHALL NOT be described as globally exact limits.
+A limit-store outage SHALL be measurable by one reproducible local command: steady traffic from a fail-open tenant with request and token limits, a budgeted tenant and a fail-closed tenant, while the store is made unavailable on purpose for a fixed window in two separate arms — hung (the store process frozen, calls wait for the limiter budget) and down (the store container stopped) — and then restored. For each arm and each period (before, during and after the window, assigned by the instant the client sent each request), the run SHALL report separately per tenant: requests admitted, limited, refused with `store_unavailable`, other gateway 5xx and transport failures; latency p50/p95/p99 interpolated between the closest ranks; and fail-open admissions by decision from the cost event's `fail_open` field. Per arm it SHALL also report the fail-open tenant's admissions during the window above its configured rate, the budget increments the gateway reported lost with the store counter's value, the store failures during the window that took the whole limiter budget and those that did not, and the time from the restore until the last request that met a store failure. Per replica, from the gateway records collected with the replica that wrote them, it SHALL report when the store health gate first opened — from the injection and from the replica's first logged store failure —, how many times it reopened after a probe, when it last closed relative to the restore, and the time from the restore until the replica's last request that met a store failure. Every answered request SHALL match exactly one cost event of its run with the same tenant and classification; fail-open entries SHALL match the gateway's fail-open warnings; and the store's spend counter SHALL lie between the summed cost minus the reported lost increments and the summed cost. The results SHALL be published with their protocol and SHALL NOT be described as globally exact limits.
 
 #### Scenario: Store hung under load
 
@@ -265,6 +265,16 @@ A limit-store outage SHALL be measurable by one reproducible local command: stea
 
 - **WHEN** the store container is stopped for the window and started again
 - **THEN** the same numbers are reported for that arm, separately from the hung arm
+
+#### Scenario: Gate detection and recovery per replica
+
+- **WHEN** a replica's store health gate opens during the window and closes after the restore
+- **THEN** the report gives, for that replica, the gate's opening from the injection and from its first store failure, its reopenings, its closing from the restore, and its last store failure after the restore
+
+#### Scenario: Gate records contradict the window
+
+- **WHEN** a replica's store gate opens before the injection, never opens during a window in which that replica met a store failure, or is still open at the end of the run
+- **THEN** verification fails
 
 #### Scenario: Request and event disagree
 
