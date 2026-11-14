@@ -377,9 +377,15 @@ const (
 )
 
 // redisOptions: no internal retries, deadlines from the caller's context, and
-// dial attempts, which run outside that context, bounded by the store budget.
+// one dial attempt, which runs outside that context, bounded by the store budget.
 func redisOptions(addr string) *redis.Options {
-	return &redis.Options{Addr: addr, MaxRetries: -1, ContextTimeoutEnabled: true, DialTimeout: storeDialTimeout}
+	return &redis.Options{
+		Addr:                  addr,
+		MaxRetries:            -1,
+		ContextTimeoutEnabled: true,
+		DialTimeout:           storeDialTimeout,
+		DialerRetries:         1,
+	}
 }
 
 func newEmbedder(cfg config.Config) embed.Embedder {

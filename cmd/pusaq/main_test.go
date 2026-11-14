@@ -58,7 +58,7 @@ func TestRedisOptionsHonorContextDeadline(t *testing.T) {
 	}
 }
 
-func TestRedisDialAttemptsEndWithinTheStoreBudget(t *testing.T) {
+func TestRedisDialsOnceWithinTheStoreBudget(t *testing.T) {
 	opts := redisOptions("redis.invalid:6379")
 	budgets := make(chan time.Duration, 16)
 	opts.Dialer = func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -80,6 +80,11 @@ func TestRedisDialAttemptsEndWithinTheStoreBudget(t *testing.T) {
 	}
 	if got := <-budgets; got <= 0 || got > storeDialTimeout {
 		t.Fatalf("dial attempt budget = %v, want at most %v whatever the caller's deadline", got, storeDialTimeout)
+	}
+	select {
+	case <-budgets:
+		t.Fatal("the failed dial was attempted again")
+	case <-time.After(storeDialTimeout + 250*time.Millisecond):
 	}
 }
 
