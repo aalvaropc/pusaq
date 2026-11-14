@@ -87,7 +87,7 @@ The gateway SHALL accept basic function calling. `tools` SHALL be an array of 1 
 
 ### Requirement: The mock provider calls tools deterministically
 
-The mock provider SHALL answer a request whose `tools` are present, whose `tool_choice` is not `none` and whose last message is not a tool result with exactly one tool call: to the function `tool_choice` names, otherwise the first tool; with arguments built from the top-level properties of its parameters; with an ID unique within the conversation; with `content` null and `finish_reason` `tool_calls`. Streamed, the first delta SHALL carry the ID and name and the arguments SHALL follow across several deltas. Every other request SHALL get a text answer. Every answer SHALL report usage.
+The mock provider SHALL answer a request whose `tools` are present, whose `tool_choice` is not `none` and whose last message is not a tool result with exactly one tool call: to the function `tool_choice` names, otherwise the first tool; with arguments built from the top-level properties of its parameters; with an ID unique within the conversation; with `content` null and `finish_reason` `tool_calls`. Streamed, the first delta SHALL carry the ID and name and the arguments SHALL follow in fragments of at most 8 bytes that never split a character. Every other request SHALL get a text answer. Every answer SHALL report usage.
 
 #### Scenario: Forced tool called
 
@@ -96,7 +96,7 @@ The mock provider SHALL answer a request whose `tools` are present, whose `tool_
 
 #### Scenario: Streamed arguments arrive in fragments
 
-- **WHEN** a streamed request declares tools
+- **WHEN** a streamed request declares a tool whose parameters have properties
 - **THEN** the mock's stream carries the tool call's ID and name in one delta and its arguments across several deltas, whose concatenation equals the buffered arguments, followed by `finish_reason` `tool_calls`, usage and `[DONE]`
 
 #### Scenario: Text after a tool result
