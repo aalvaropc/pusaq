@@ -394,10 +394,12 @@ for id in o1 o2 b1 c2 o5; do
   reset_redis
   redis_events "select(.msg != \"cost_event\" or .request_id != \"$id\")"
   expect 1 "missing store-outage event $id" redis_verify
+  logged "request $id (.*) has no cost event"
 done
 reset_redis
-jq -c 'select(.msg == "cost_event" and .request_id == "b2")' "$tmp/base-redis-events.jsonl" >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+jq -c 'select(.msg == "cost_event" and .request_id == "o2")' "$tmp/base-redis-events.jsonl" >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
 expect 1 'duplicate store-outage event' redis_verify
+logged 'request o2 has 2 cost events'
 reset_redis
 redis_events 'if .request_id == "o1" and .msg == "cost_event" then .tenant = "tenant-budget" else . end'
 expect 1 'event of another tenant' redis_verify
@@ -459,7 +461,10 @@ redis_window '.spend_counter_usd = null'
 expect 1 'spend counter not read' redis_verify
 reset_redis
 redis_points 'if .data.tags.rid == "b1" then .data.tags.rid = "none" else . end'
+redis_events 'select(.request_id != "b1")'
+redis_window '.spend_counter_usd = 0.034'
 expect 1 'gateway answer without a request id' redis_verify
+logged '1 gateway answers (200/429/503 store_unavailable) without a request id'
 reset_redis
 redis_points 'if .data.tags.rid == "c1" then del(.data.tags.sent_ms) else . end'
 expect 1 'point without a send time' redis_verify
