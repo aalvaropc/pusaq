@@ -9,6 +9,7 @@ Every store call on the request path is bounded by the 250 ms limiter budget, bu
 - One second after opening, the first store call takes the gate's single probe slot for a background `PING` bounded by the same 250 ms; that call and the calls during the probe are skipped. An answer closes the gate; anything else reopens it for another second.
 - Every gate transition is a `breaker_state` log record with `component` `store`. The event report shows store-gate transitions in its rate-limiting view; the store-outage harness collects them per replica and the verifier reports detection and recovery per replica.
 - No new configuration: the rule, the cooldown and the probe budget are constants. A healthy store sees exactly the calls it saw before; the gate adds no round trip.
+- The store client opens a connection in one attempt of at most 250 ms: go-redis dials on its own context, up to five attempts of up to 5 s each by default, which let dials and name lookups begun during an outage outlive the probes that follow the restore.
 - `docs/measurements/redis-outage.md` gains a dated section with both arms measured on the gated gateway next to the published runs; the chaos report's store-outage case states the fix and its verification.
 
 ## Capabilities
@@ -24,4 +25,4 @@ Every store call on the request path is bounded by the 250 ms limiter budget, bu
 
 ## Impact
 
-New package `internal/storegate`; `internal/breaker` (tickets say whether they are half-open probes); wiring and startup log in `cmd/pusaq`; `internal/report` and its template; `loadtest/redis-outage.sh`, `loadtest/verify-redis.sh` and their fixtures; `docs/design.md`, `docs/operations.md`, `docs/measurements/redis-outage.md` and `docs/measurements/chaos-report.md`. Request handling in `internal/gateway`, `internal/ratelimit` and `internal/spend` is unchanged: the gate sits in the store client they share.
+New package `internal/storegate`; `internal/breaker` (tickets say whether they are half-open probes); wiring, startup log and the store dial timeout in `cmd/pusaq`; `internal/report` and its template; `loadtest/redis-outage.sh`, `loadtest/verify-redis.sh` and their fixtures; `docs/design.md`, `docs/operations.md`, `docs/measurements/redis-outage.md` and `docs/measurements/chaos-report.md`. Request handling in `internal/gateway`, `internal/ratelimit` and `internal/spend` is unchanged: the gate sits in the store client they share.

@@ -4,6 +4,7 @@
 - [ ] 1.2 Add `internal/storegate`: the go-redis hook, failure classification, skip error and background PING probe, with deterministic tests (fake store, injected clock and probe runner), concurrency under `-race`, and a mutation check of the rule.
 - [ ] 1.3 Cover the callers with a real client: strict and lease admission, token charge and reconciliation, budget read and increment, lease refunds; fail-open recorded, fail-closed refused without a store call, healthy call counts unchanged.
 - [ ] 1.4 Wire the gate in `cmd/pusaq`: one gate per store client, `breaker_state` records with `component` `store`, the constants in the startup log.
+- [ ] 1.5 Make the store client's connection attempts single and bounded by the 250 ms store budget, with a test of the attempt's deadline and count.
 
 ## 2. Observability
 
