@@ -36,6 +36,14 @@ const (
 	DefaultCacheQueueMaxBytes = 16 << 20
 	DefaultLeaseSize          = 10
 	DefaultLeaseTTL           = 1 * time.Second
+	DefaultRetryBudgetRatio   = 0.2
+	DefaultRetryWindow        = 10 * time.Second
+)
+
+// Bounds of PUSAQ_RETRY_MAX and PUSAQ_RETRY_WINDOW.
+const (
+	MaxRetries     = 5
+	MaxRetryWindow = 10 * time.Minute
 )
 
 // MinAdminTokenLen is the shortest PUSAQ_ADMIN_TOKEN accepted: the token
@@ -223,6 +231,9 @@ type Config struct {
 	BreakerThreshold  float64
 	BreakerCooldown   time.Duration
 	BreakerProbes     int
+	RetryMax          int
+	RetryBudgetRatio  float64
+	RetryWindow       time.Duration
 	// TPMLimit is the sustained per-tenant LLM-token rate in tokens per
 	// minute (PUSAQ_TPM_LIMIT). Zero disables token limiting, announced by
 	// a startup warning.
@@ -500,6 +511,30 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("PUSAQ_BREAKER_PROBES: must be a positive integer, got %q", v)
 		}
 		cfg.BreakerProbes = n
+	}
+
+	cfg.RetryBudgetRatio = DefaultRetryBudgetRatio
+	cfg.RetryWindow = DefaultRetryWindow
+	if v, ok := lookup("PUSAQ_RETRY_MAX"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > MaxRetries {
+			return Config{}, fmt.Errorf("PUSAQ_RETRY_MAX: must be an integer from 0 to %d (0 turns retries off), got %q", MaxRetries, v)
+		}
+		cfg.RetryMax = n
+	}
+	if v, ok := lookup("PUSAQ_RETRY_BUDGET_RATIO"); ok {
+		n, err := parseFinite(v)
+		if err != nil || n <= 0 || n > 1 {
+			return Config{}, fmt.Errorf("PUSAQ_RETRY_BUDGET_RATIO: must be in (0,1], got %q", v)
+		}
+		cfg.RetryBudgetRatio = n
+	}
+	if v, ok := lookup("PUSAQ_RETRY_WINDOW"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 || d > MaxRetryWindow {
+			return Config{}, fmt.Errorf("PUSAQ_RETRY_WINDOW: must be a positive duration of at most %s, got %q", MaxRetryWindow, v)
+		}
+		cfg.RetryWindow = d
 	}
 
 	cfg.TPMLimit = DefaultTPMLimit

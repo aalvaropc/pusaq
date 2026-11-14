@@ -253,6 +253,8 @@ func TestLoad(t *testing.T) {
 			tt.want.CacheQueueMaxBytes = DefaultCacheQueueMaxBytes
 			tt.want.BodyReadTimeout = DefaultBodyReadTimeout
 			tt.want.WriteIdleTimeout = DefaultWriteIdleTimeout
+			tt.want.RetryBudgetRatio = DefaultRetryBudgetRatio
+			tt.want.RetryWindow = DefaultRetryWindow
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Load() = %+v, want %+v", got, tt.want)
 			}
@@ -437,6 +439,60 @@ func TestTokenReserveMustFitTheBurst(t *testing.T) {
 	}
 	if _, err := Load(developmentLookupFrom(map[string]string{"PUSAQ_TPM_LIMIT": "0"})); err != nil {
 		t.Fatalf("disabled token limiting rejected: %v", err)
+	}
+}
+
+func TestRetriesOffByDefault(t *testing.T) {
+	got, err := Load(developmentLookupFrom(map[string]string{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RetryMax != 0 || got.RetryBudgetRatio != 0.2 || got.RetryWindow != 10*time.Second {
+		t.Fatalf("retry config = max %d ratio %v window %v, want 0, 0.2, 10s", got.RetryMax, got.RetryBudgetRatio, got.RetryWindow)
+	}
+}
+
+func TestRetryConfigOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		max, ratio, window string
+		want               [3]any
+	}{
+		{"2", "0.1", "3s", [3]any{2, 0.1, 3 * time.Second}},
+		{"5", "1", "10m", [3]any{5, 1.0, 10 * time.Minute}},
+		{"0", "0.5", "1ms", [3]any{0, 0.5, time.Millisecond}},
+	} {
+		got, err := Load(developmentLookupFrom(map[string]string{
+			"PUSAQ_RETRY_MAX": tc.max, "PUSAQ_RETRY_BUDGET_RATIO": tc.ratio, "PUSAQ_RETRY_WINDOW": tc.window,
+		}))
+		if err != nil {
+			t.Fatalf("%v: %v", tc, err)
+		}
+		if [3]any{got.RetryMax, got.RetryBudgetRatio, got.RetryWindow} != tc.want {
+			t.Fatalf("retry config = %d %v %v, want %v", got.RetryMax, got.RetryBudgetRatio, got.RetryWindow, tc.want)
+		}
+	}
+}
+
+func TestRetryConfigRejections(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"negative max":      {"PUSAQ_RETRY_MAX": "-1"},
+		"max above 5":       {"PUSAQ_RETRY_MAX": "6"},
+		"max not integer":   {"PUSAQ_RETRY_MAX": "1.5"},
+		"empty max":         {"PUSAQ_RETRY_MAX": ""},
+		"zero ratio":        {"PUSAQ_RETRY_BUDGET_RATIO": "0"},
+		"negative ratio":    {"PUSAQ_RETRY_BUDGET_RATIO": "-0.2"},
+		"ratio above one":   {"PUSAQ_RETRY_BUDGET_RATIO": "1.01"},
+		"ratio NaN":         {"PUSAQ_RETRY_BUDGET_RATIO": "NaN"},
+		"ratio infinity":    {"PUSAQ_RETRY_BUDGET_RATIO": "Inf"},
+		"ratio text":        {"PUSAQ_RETRY_BUDGET_RATIO": "lots"},
+		"zero window":       {"PUSAQ_RETRY_WINDOW": "0s"},
+		"negative window":   {"PUSAQ_RETRY_WINDOW": "-1s"},
+		"window over bound": {"PUSAQ_RETRY_WINDOW": "11m"},
+		"window no unit":    {"PUSAQ_RETRY_WINDOW": "10"},
+	} {
+		if _, err := Load(developmentLookupFrom(env)); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
 	}
 }
 
