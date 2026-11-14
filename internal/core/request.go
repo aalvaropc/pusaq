@@ -62,6 +62,8 @@ type Request struct {
 	// (after any fallback); Attempts counts backend attempts made.
 	ServedProvider string
 	Attempts       int
+	Retries        int
+	RetryDenied    []string
 	// Usage accumulates provider-reported token counts for accounting.
 	Usage Usage
 	// TokensCharged is what the token limiter charged on admission

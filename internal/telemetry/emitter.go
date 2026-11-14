@@ -37,6 +37,7 @@ func (s SlogSink) Write(event core.CostEvent) {
 		slog.String("error_code", string(event.ErrorCode)),
 		slog.Int64("latency_ms", event.LatencyMS),
 		slog.Int("attempts", event.Attempts),
+		slog.Int("retries", event.Retries),
 	}
 	if event.RequestedModel != "" {
 		attrs = append(attrs,
@@ -64,6 +65,9 @@ func (s SlogSink) Write(event core.CostEvent) {
 	}
 	if len(event.FailOpen) > 0 {
 		attrs = append(attrs, slog.String("fail_open", strings.Join(event.FailOpen, ",")))
+	}
+	if len(event.RetryDenied) > 0 {
+		attrs = append(attrs, slog.String("retry_denied", strings.Join(event.RetryDenied, ",")))
 	}
 	if event.TokensCharged > 0 {
 		attrs = append(attrs, slog.Int("tokens_charged", event.TokensCharged))

@@ -186,6 +186,8 @@ func Accounting(emit func(core.CostEvent), logger *slog.Logger) core.Stage {
 				event.TokensCharged = req.TokensCharged
 				event.ServedProvider = req.ServedProvider
 				event.Attempts = req.Attempts
+				event.Retries = req.Retries
+				event.RetryDenied = req.RetryDenied
 				event.Cost = req.Cost
 				event.SpendUSDMonth = req.SpendUSDMonth
 				emit(event)
@@ -257,6 +259,8 @@ func (f *finalizingStream) finalize(outcome core.Outcome, code core.Code) {
 			TokensCharged:  f.req.TokensCharged,
 			ServedProvider: f.req.ServedProvider,
 			Attempts:       f.req.Attempts,
+			Retries:        f.req.Retries,
+			RetryDenied:    f.req.RetryDenied,
 			Cost:           f.req.Cost,
 			SpendUSDMonth:  f.req.SpendUSDMonth,
 		})
