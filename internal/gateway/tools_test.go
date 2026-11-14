@@ -215,6 +215,40 @@ func TestToolFieldsReachTheProvider(t *testing.T) {
 	}
 }
 
+func TestToolFieldsSurviveRetriedAttempts(t *testing.T) {
+	payload := `{"model":"pusaq/fast","messages":` + toolTurns + `,"tools":[` + weatherTool + `],` +
+		`"tool_choice":{"type":"function","function":{"name":"get_weather"}},"parallel_tool_calls":false`
+	for _, stream := range []bool{false, true} {
+		var bodies [][]byte
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			bodies = append(bodies, b)
+			if len(bodies) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			if stream {
+				_, _ = io.WriteString(w, fakeSSE)
+				return
+			}
+			_, _ = io.WriteString(w, `{"id":"c","model":"mock-model","choices":[{"index":0,"message":{"role":"assistant","content":"18C"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`)
+		}))
+		s, events := retryServer(provider.NewHTTP("primary", upstream.URL, time.Second, discardLogger()), &flakyProvider{name: "backup"},
+			CompletionsOptions{Retries: testRetries(1, time.Minute, nil, newFakeClock())})
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload+fmt.Sprintf(`,"stream":%t}`, stream))))
+		upstream.Close()
+		if rec.Code != http.StatusOK || len(bodies) != 2 || (*events)[0].Retries != 1 || (*events)[0].ServedProvider != "primary" {
+			t.Fatalf("stream=%v: status %d, %d attempts, event %+v; want one retry served by the primary", stream, rec.Code, len(bodies), (*events)[0])
+		}
+		if !bytes.Equal(bodies[0], bodies[1]) || !bytes.Contains(bodies[1], []byte(`"tools":[`+weatherTool+`]`)) ||
+			!bytes.Contains(bodies[1], []byte(`"tool_choice":{"type":"function","function":{"name":"get_weather"}},"parallel_tool_calls":false`)) ||
+			!bytes.Contains(bodies[1], []byte(`"tool_call_id":"call_1"`)) {
+			t.Fatalf("stream=%v: retried attempt differs or lost tool fields:\n%s\n%s", stream, bodies[0], bodies[1])
+		}
+	}
+}
+
 func TestToolCallReturnedBuffered(t *testing.T) {
 	p := toolCallProvider("call_9", `{"city":"Lima"}`)
 	s := shadowServer(t, p, nil)
