@@ -57,7 +57,7 @@ Quotas are regional during failover; abrupt failures can interrupt streams.
 
 ## Development
 
-Requires **Go 1.26.10+**. Run `make test` for race tests and `make lint` for
+Requires **Go 1.26.11+**. Run `make test` for race tests and `make lint` for
 static checks. See [operations](docs/operations.md) and
 [measured results](docs/measurements/README.md) for commands and limitations.
 
