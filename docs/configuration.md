@@ -81,6 +81,23 @@ context budget. Store errors fail open unless the tenant's policy sets
 | `PUSAQ_BREAKER_COOLDOWN` | `10s` | Open time before half-open probes. |
 | `PUSAQ_BREAKER_PROBES` | `3` | Probe requests allowed in half-open. |
 
+## Upstream retries
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PUSAQ_RETRY_MAX` | `0` (off) | Same-backend retries one request may make across its chain, 0–5. `0` keeps one attempt per backend. |
+| `PUSAQ_RETRY_BUDGET_RATIO` | `0.2` | Instance retry budget: each request's first upstream attempt credits this fraction of a retry, in (0, 1]. |
+| `PUSAQ_RETRY_WINDOW` | `10s` | A retry starts only if its wait ends within this long of the request's first upstream attempt; positive, at most `10m`. |
+
+The budget also refills at one retry per second and holds at most 10, so an
+instance makes at most 10 + 1/s · T + ratio · N retries over T seconds and N
+requests. The backoff is fixed: full jitter under a ceiling of 200 ms doubling
+to 2 s, replaced by a positive upstream `Retry-After`. Retries are off by
+default so the published breaker and failover recipes keep their attempt
+counts; with the default 30 s `PUSAQ_UPSTREAM_TIMEOUT`, a timed-out attempt
+is retried only with a window above the timeout. The ratio and window are
+validated and logged even when retries are off.
+
 ## Semantic cache (shadow mode)
 
 | Variable | Default | What it does |

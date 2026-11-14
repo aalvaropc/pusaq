@@ -188,10 +188,12 @@ as configured by the runtime module.
    request is not eligible goes on the cost event as `cache_skip`.
 7. **Token reservation (TPM).** Only now — after alias resolution and policy —
    the TPM bucket charges input tokens plus a reserved estimate for output,
-   once per request (the same model contract holds across the fallback chain).
+   once per request (the same model contract holds across the fallback chain
+   and its retries).
 8. **Provider call.** The OpenAI-compatible adapter calls the backend chain
-   (see §5.5), streaming passed through if requested; every answered attempt
-   feeds that backend's breaker, a started stream when it ends.
+   (see §5.5), retrying a backend within the retry bounds (§5.6), streaming
+   passed through if requested; every answered attempt feeds that backend's
+   breaker, a started stream when it ends.
 9. **Finalizers and event.** In registration order: price, monthly spend, TPM
    reconciliation (return the unused reservation — in a `defer`, so it runs on
    success, error, timeout, and cancellation alike), stream settlement when
@@ -399,14 +401,16 @@ reintroduce the cost the router exists to remove.
 entry is the primary, the rest are fallbacks in order, all called with the
 route's physical model name. A transport failure, a timeout, a non-200 answer
 other than a rejection, a 200 without a completion, or an open breaker moves
-the request to the next backend, at most once each, and counts as that
-backend's failure; the token charge is made once, before the chain. A
-provider's rejection of the request (400, 413, 422) is the client's error: it
+the request to the next backend — after the same-backend retries the failure
+allows (§5.6) — entering each at most once; every failed attempt counts as
+that backend's failure, and the token charge is made once, before the chain.
+A provider's rejection of the request (400, 413, 422) is the client's error: it
 ends the chain as `invalid_request` and counts as an answer, not a failure.
 When the client leaves, the chain stops, the interrupted attempt feeds no
-breaker, and the event records `client_canceled`. Streams fall back only
-before the first byte — a started stream is never silently restarted. No
-idempotency key is sent upstream.
+breaker, and the event records `client_canceled`. Streams retry and fall back
+only before the first byte — a started stream is never silently restarted.
+Every attempt carries `Idempotency-Key: pusaq-<request id>`, identical across
+the retries and fallbacks of one request.
 
 ### 5.6 Failover and circuit breakers
 
@@ -425,6 +429,41 @@ own regions dies. Handled by different pieces:
 - **Health signal** — passive only: real traffic outcomes. Half-open is
   entered on the next request after the cooldown, so a backend that receives
   no traffic stays open.
+- **Same-backend retries, bounded twice** — a transient failure (a reset
+  connection, a timeout before the headers, 408, 429, 500, 502, 503, 504) is
+  often gone after a short wait, and retrying is also the classic way to bury
+  a struggling upstream. Retries are therefore bounded per request
+  (`PUSAQ_RETRY_MAX` across the whole chain) and per instance by a retry
+  budget in the Finagle/Envoy style: a token bucket every request's first
+  attempt credits with a ratio (default 0.2, the default of both), refilled at
+  one retry per second up to 10. Over T seconds and N requests an instance
+  makes at most 10 + T + ratio · N retries, whatever the per-request maximum,
+  so a failing upstream receives at most 1.2 times its first-attempt load plus
+  the floor; in the gateway's test, 1000 requests against an always-failing
+  primary with two retries allowed make 3.00 attempts per request on it
+  without the budget and 1.209 with it. Waits use full jitter under a
+  ceiling of 200 ms doubling to 2 s, or the upstream's `Retry-After`, and a
+  retry starts only inside `PUSAQ_RETRY_WINDOW` from the request's first
+  attempt; a longer wait means falling back now. With the default 30 s
+  upstream timeout and 10 s window, a timed-out attempt is not retried: a
+  timed-out buffered call has usually generated, and been billed for, a
+  completion. Each retry takes its own breaker ticket after the wait, so an
+  open breaker stops retries and every failed attempt is a breaker sample.
+  **Off by default:** with retries on, a failing request feeds the breaker
+  up to `1 + max` failures, so the breaker-detection recipe's arithmetic
+  (detection at the 11th failing request, `attempts == 2` as one paid
+  fallback) and the failover recipe's attempt counts change; with
+  `PUSAQ_RETRY_MAX=0` both reproduce their published numbers, and turning
+  retries on is a choice with its own measurement.
+- **Idempotency key from the request ID** — every attempt carries
+  `Idempotency-Key: pusaq-<request id>`. The ID is gateway-generated (128
+  random bits), so keys never collide across tenants and no client picks
+  another request's key. A client-sent key is not folded in: reused with a
+  different body, it would make an upstream that honors keys return one
+  prompt's completion for another — the leak rule 2 guards the cache
+  against — and the gateway charges and accounts every client request
+  separately, which upstream deduplication of client retries would contradict.
+  Nothing is claimed for upstreams that ignore the header.
 - **Regional failover** — the global load balancer redirects *new* requests
   when region A's readiness fails (Cloud Run service health over serverless
   NEGs: a region whose instances fail their readiness probe stops receiving
@@ -449,11 +488,13 @@ own regions dies. Handled by different pieces:
 The gateway sees every LLM request in the company — its log *is* the AI cost
 accounting system. Every request admitted to the pipeline emits one
 `cost_event`: request ID, timestamp, operation, tenant, outcome and error
-code, latency in milliseconds, backend attempts; for completions, the
+code, latency in milliseconds, backend attempts and how many of them were
+same-backend retries; for completions, the
 requested model, the route's physical model (`served_model`), the route
 reason, prompt and completion tokens, and the tokens charged; when present,
 the feature tag, run ID, region, policy flags, cache-skip reason, store
-decisions that failed open, the backend that served it, the
+decisions that failed open, retries refused by the budget or the window
+(`retry_denied`), the backend that served it, the
 **cost in $ against a versioned price table** (`PUSAQ_PRICES`,
 `PUSAQ_PRICE_TABLE_VERSION`; the table version travels in the event — prices
 change and historical reports must still add up), and the tenant's spend for
