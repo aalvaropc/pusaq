@@ -102,7 +102,7 @@ number of requests, not by any real traffic pattern.
 | Item | Value |
 |---|---|
 | Date | 2026-11-14 |
-| Code | commit `358e481` |
+| Code | commit `9f4d161`; a rerun there reproduces every count, hit and cost, and lookup times vary by run |
 | Machine | Intel Core i5-13600K (20 logical CPUs), 32 GB RAM, Fedora Linux, kernel 7.3.3 |
 | Go | go1.26.10 (`GOTOOLCHAIN=go1.26.10+auto`) |
 | Command | `make replay` (defaults) |
