@@ -119,9 +119,13 @@ func (b *Breaker) State() State {
 
 // Ticket is an allowed attempt; it counts only in the state that admitted it.
 type Ticket struct {
-	b   *Breaker
-	gen uint64
+	b     *Breaker
+	gen   uint64
+	probe bool
 }
+
+// Probe reports whether the ticket is a half-open probe.
+func (t Ticket) Probe() bool { return t.probe }
 
 // Allow reports whether an attempt may proceed now. In half-open it grants
 // at most cfg.Probes concurrent probes; callers MUST call Record or Release
@@ -143,7 +147,7 @@ func (b *Breaker) Allow() (Ticket, bool) {
 	}
 	var t Ticket
 	if allowed {
-		t = Ticket{b: b, gen: b.gen}
+		t = Ticket{b: b, gen: b.gen, probe: b.state == StateHalfOpen}
 	}
 	to := b.state
 	b.mu.Unlock()
