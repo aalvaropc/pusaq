@@ -104,19 +104,19 @@ func TestRunRecordsNeighborsInRequestOrder(t *testing.T) {
 func TestHitAndFalseHitAccountingPerTau(t *testing.T) {
 	r, _ := runHandBuilt(t)
 	tests := []struct {
-		tau                         float64
-		hits, falseHits, novelHits  int
-		hitRate, fpRate, correctHit float64
+		tau                                      float64
+		hits, falseHits, novelHits, novelCorrect int
+		hitRate, fpRate, correctHit              float64
 	}{
-		{0.1, 6, 3, 4, 6.0 / 7, 3.0 / 6, 3.0 / 7},
-		{0.95, 5, 2, 3, 5.0 / 7, 2.0 / 5, 3.0 / 7},
-		{0.975, 3, 1, 1, 3.0 / 7, 1.0 / 3, 2.0 / 7},
-		{0.99, 2, 0, 0, 2.0 / 7, 0, 2.0 / 7},
+		{0.1, 6, 3, 4, 1, 6.0 / 7, 3.0 / 6, 3.0 / 7},
+		{0.95, 5, 2, 3, 1, 5.0 / 7, 2.0 / 5, 3.0 / 7},
+		{0.975, 3, 1, 1, 0, 3.0 / 7, 1.0 / 3, 2.0 / 7},
+		{0.99, 2, 0, 0, 0, 2.0 / 7, 0, 2.0 / 7},
 	}
 	for _, tt := range tests {
 		p := r.At(tt.tau)
-		if p.Requests != 8 || p.Eligible != 7 || p.Hits != tt.hits || p.FalseHits != tt.falseHits || p.NovelHits != tt.novelHits {
-			t.Errorf("τ=%g: requests %d eligible %d hits %d false %d novel %d, want 8 7 %d %d %d", tt.tau, p.Requests, p.Eligible, p.Hits, p.FalseHits, p.NovelHits, tt.hits, tt.falseHits, tt.novelHits)
+		if p.Requests != 8 || p.Eligible != 7 || p.Hits != tt.hits || p.FalseHits != tt.falseHits || p.NovelHits != tt.novelHits || p.NovelCorrectHits() != tt.novelCorrect {
+			t.Errorf("τ=%g: requests %d eligible %d hits %d false %d novel %d novel correct %d, want 8 7 %d %d %d %d", tt.tau, p.Requests, p.Eligible, p.Hits, p.FalseHits, p.NovelHits, p.NovelCorrectHits(), tt.hits, tt.falseHits, tt.novelHits, tt.novelCorrect)
 		}
 		if math.Abs(p.HitRate()-tt.hitRate) > 1e-12 || math.Abs(p.FPRate()-tt.fpRate) > 1e-12 || math.Abs(p.CorrectHitRate()-tt.correctHit) > 1e-12 {
 			t.Errorf("τ=%g: hit-rate %g FP rate %g correct-hit rate %g, want %g %g %g", tt.tau, p.HitRate(), p.FPRate(), p.CorrectHitRate(), tt.hitRate, tt.fpRate, tt.correctHit)

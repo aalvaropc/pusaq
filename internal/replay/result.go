@@ -17,6 +17,7 @@ type Point struct {
 	Hits        int
 	FalseHits   int
 	NovelHits   int
+	NovelFalse  int
 	AvoidedUSD  float64
 	WrongHitUSD float64
 	TollUSD     float64
@@ -35,6 +36,9 @@ func (p Point) CorrectHits() int { return p.Hits - p.FalseHits }
 
 // CorrectHitRate is correct hits over eligible requests.
 func (p Point) CorrectHitRate() float64 { return ratio(p.CorrectHits(), p.Eligible) }
+
+// NovelCorrectHits counts correct hits on text no earlier eligible request carried.
+func (p Point) NovelCorrectHits() int { return p.NovelHits - p.NovelFalse }
 
 // NetUSD is the provider cost avoided by correct hits minus the embedding toll.
 func (p Point) NetUSD() float64 { return usd(p.AvoidedUSD - p.TollUSD) }
@@ -61,9 +65,12 @@ func (r *Replay) At(tau float64) Point {
 		}
 		if o.Correct {
 			p.AvoidedUSD += o.ProviderUSD
-		} else {
-			p.FalseHits++
-			p.WrongHitUSD += o.ProviderUSD
+			continue
+		}
+		p.FalseHits++
+		p.WrongHitUSD += o.ProviderUSD
+		if !o.Repeat {
+			p.NovelFalse++
 		}
 	}
 	p.AvoidedUSD, p.WrongHitUSD, p.TollUSD = usd(p.AvoidedUSD), usd(p.WrongHitUSD), usd(p.TollUSD)
