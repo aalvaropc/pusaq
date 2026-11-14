@@ -51,8 +51,8 @@ binds ports to loopback. Outside that mode, API keys are required. See
 
 ## Scope
 
-Supports a [chat-completions subset](docs/gateway.md#api); tool calling and
-structured outputs are not implemented. The cache never serves responses.
+Supports a [chat-completions subset](docs/gateway.md#api) with basic function
+calling; structured outputs are not implemented. The cache never serves responses.
 Quotas are regional during failover; abrupt failures can interrupt streams.
 
 ## Development

@@ -21,13 +21,17 @@ events (`policy_flags`) and in denial messages without leaking content.
 
 | Family | Kinds | Mechanism | Stated limits |
 |---|---|---|---|
-| Sensitive (scanned in every message) | `pii:email`, `pii:phone`, `pii:card`, `pii:iban`, `secret:api_key`, `secret:private_key`, `secret:jwt`, `secret:bearer`, `secret:assignment` | Regex plus checks: card numbers need a known issuer prefix and a Luhn checksum, including candidates ending before a separated expiry or CVV; IBANs need ISO 13616 mod-97; international phones need 8–15 digits; a bare digit run counts only next to a phone cue (`tel`, `cel`, `whatsapp`, `llámame`…); dots never separate phones | Unformatted or dot-separated phone numbers without a cue pass; short passwords pass; only the listed secret shapes (`sk-…`, `AKIA…`, `ghp_…`, PEM, JWT, `Bearer …`, `password=…`) are known; Peruvian CCI numbers are not covered |
-| Injection (scanned outside the system prompt) | `injection:ignore_instructions`, `injection:role_override`, `injection:prompt_leak`, `injection:role_marker` | Phrase patterns in English and Spanish: verb + determiner + *previous/anterior* + instruction noun, adjacent; a role cue plus a no-rules cue within 40 characters; an exfiltration verb plus *your/its system prompt*; chat-template markers | Lexical: paraphrases without these lexemes pass; a developer asking to "print the system prompt" is flagged; a user correcting their own earlier message is not |
+| Sensitive (scanned in every message, tool-call arguments and tool definitions) | `pii:email`, `pii:phone`, `pii:card`, `pii:iban`, `secret:api_key`, `secret:private_key`, `secret:jwt`, `secret:bearer`, `secret:assignment` | Regex plus checks: card numbers need a known issuer prefix and a Luhn checksum, including candidates ending before a separated expiry or CVV; IBANs need ISO 13616 mod-97; international phones need 8–15 digits; a bare digit run counts only next to a phone cue (`tel`, `cel`, `whatsapp`, `llámame`…); dots never separate phones | Unformatted or dot-separated phone numbers without a cue pass; short passwords pass; only the listed secret shapes (`sk-…`, `AKIA…`, `ghp_…`, PEM, JWT, `Bearer …`, `password=…`) are known; Peruvian CCI numbers are not covered |
+| Injection (scanned outside the system prompt and tool definitions, tool results and tool-call arguments included) | `injection:ignore_instructions`, `injection:role_override`, `injection:prompt_leak`, `injection:role_marker` | Phrase patterns in English and Spanish: verb + determiner + *previous/anterior* + instruction noun, adjacent; a role cue plus a no-rules cue within 40 characters; an exfiltration verb plus *your/its system prompt*; chat-template markers | Lexical: paraphrases without these lexemes pass; a developer asking to "print the system prompt" is flagged; a user correcting their own earlier message is not |
 | Temporal (scanned in user messages) | `temporal:now`, `temporal:relative_day`, `temporal:period`, `temporal:latest`, `temporal:clock` | Cue words and phrases in both languages, after masking idioms that contain a cue without meaning "now" ("today's world", "currently logged in", "por la mañana", "hoy en día", `date.today()`) | Cue-based: "who is the president of Peru?" carries no cue and passes; bare "now"/"ahora" never count; "current" counts only next to a volatile noun; the song title "Yesterday" is flagged |
 
 Role split: system prompts routinely state today's date and set a persona
 ("you are now a pirate"), so injection and temporal rules do not read them;
-sensitive data anywhere counts.
+tool definitions are application text in the same way. Tool results are
+read for injection like user content. Sensitive data anywhere counts.
+Tool-call arguments are JSON, and `secret:assignment` does not match a
+quoted key such as `{"password":"…"}`. The corpus holds texts without
+roles, so the numbers below do not depend on the split.
 
 ## Corpus
 

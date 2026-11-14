@@ -138,6 +138,19 @@ environment files, Git metadata and measurement output, are excluded.
 
 The mock provider's admin routes are unauthenticated: `POST /admin/fail?for=5s` fails every completion for 5 s, `DELETE /admin/fail` clears it, `GET /stats` counts what reached it.
 
+The mock answers tools deterministically. When a request declares `tools`,
+its `tool_choice` is not `none` and its last message is not a tool result,
+the answer is one call to the tool `tool_choice` names, or to the first
+tool: arguments hold one value per top-level property of the tool's
+`parameters`, keys sorted (`"mock"` for strings, `1` for numbers and
+integers, `true` for booleans, `[]`, `{}`, `null` for anything else), the ID
+is `call_mock_<n>` with `n` one more than the tool calls already in the
+conversation, `content` is null and `finish_reason` is `tool_calls`. A
+stream sends the ID and name in one delta and the arguments in fragments of
+at most 8 bytes. After a tool result the mock answers a fixed text; without
+tools it answers its canned text. Usage is always 12 prompt and 11
+completion tokens.
+
 The mock's response latency comes from `--latency-p50` and `--latency-max`:
 90 % of responses are uniform in [0.5 × p50, 1.5 × p50] capped at the
 maximum, 10 % uniform in [p50, maximum]. The maximum is the largest latency
