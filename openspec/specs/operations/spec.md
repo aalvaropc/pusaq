@@ -88,7 +88,7 @@ The default Compose development stack SHALL publish the gateway, Redis and mock-
 
 ### Requirement: Failed measurements retain verification
 
-Local load, breaker, TPM and chaos commands SHALL attempt their evidence collection and verification after k6 finishes, including when k6 fails. They SHALL use one stable run id. A k6 failure SHALL retain its exit code; otherwise the first collection or verification failure SHALL determine the exit status.
+Local load, breaker, TPM, chaos and store-outage commands SHALL attempt their evidence collection and verification after k6 finishes, including when k6 fails. They SHALL use one stable run id. A k6 failure SHALL retain its exit code; otherwise the first collection or verification failure SHALL determine the exit status. The store-outage command SHALL restore the store before collection, whichever stage failed.
 
 #### Scenario: Client threshold fails
 
@@ -104,6 +104,11 @@ Local load, breaker, TPM and chaos commands SHALL attempt their evidence collect
 
 - **WHEN** execution and collection succeed but verification fails
 - **THEN** the command exits with the verification failure
+
+#### Scenario: Injection fails
+
+- **WHEN** the store-outage command cannot inject or restore the failure
+- **THEN** the store is restored, collection and verification are attempted, and the command exits with the injection failure unless k6 failed first
 
 ### Requirement: Event report from gateway log lines
 
@@ -121,7 +126,7 @@ The repository SHALL provide a command that reads the gateway's JSON log lines f
 
 ### Requirement: Event report views
 
-The report SHALL contain six views: requests, tokens and USD cost per tenant with estimated cost apart from measured cost; latency p50, p95 and p99 of successful requests per route by the nearest-rank method; outcomes by error code and HTTP status; fallback and breaker activity; request-limit and token-limit denials with fail-open admissions; and the shadow cache's predicted hit-rate next to its false-positive upper bound. A view without supporting records SHALL say so instead of showing numbers. The report SHALL state that its figures describe its input only.
+The report SHALL contain six views: requests, tokens and USD cost per tenant with estimated cost apart from measured cost; latency p50, p95 and p99 of successful requests per route by the nearest-rank method; outcomes by error code and HTTP status; fallback and breaker activity; request-limit and token-limit denials with fail-open admissions by decision from the cost event's `fail_open` field; and the shadow cache's predicted hit-rate next to its false-positive upper bound. A view without supporting records SHALL say so instead of showing numbers. The report SHALL state that its figures describe its input only.
 
 #### Scenario: Cost per tenant separates estimated cost
 
@@ -136,7 +141,12 @@ The report SHALL contain six views: requests, tokens and USD cost per tenant wit
 #### Scenario: Limit kind from the event
 
 - **WHEN** one `rate_limited` event has no `requested_model` and another has one
-- **THEN** the first counts as a request-limit denial and the second as a token-limit denial, and `failing open` warnings for selected requests count as fail-open admissions by store
+- **THEN** the first counts as a request-limit denial and the second as a token-limit denial
+
+#### Scenario: Fail-open admissions from the event field
+
+- **WHEN** selected events carry `fail_open` values `rpm`, `tpm` and `budget`, and the input also holds `failing open` warning lines
+- **THEN** each value counts once as a fail-open admission of its decision for the event's tenant, and the warning lines add nothing
 
 #### Scenario: Fallback against the first choice
 
