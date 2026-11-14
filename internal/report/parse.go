@@ -20,6 +20,8 @@ const (
 	msgShadowConfig   = "semantic cache in shadow mode: measuring, never serving"
 	msgShadowStopped  = "shadow cache stopped"
 	msgGatewayStopped = "gateway stopped"
+
+	componentStore = "store"
 )
 
 // Decisions a store outage can skip, as the cost event's fail_open names them.
@@ -94,8 +96,9 @@ type Input struct {
 
 	Events      []Event
 	Shadow      []ShadowRecord
-	Transitions []Transition
-	Misses      []BackendMiss
+	Transitions      []Transition
+	StoreTransitions []Transition
+	Misses           []BackendMiss
 
 	Taus      []float64
 	Embedders []string
@@ -134,7 +137,8 @@ type line struct {
 	ResponseFingerprint string   `json:"response_fingerprint"`
 	Embedder            string   `json:"embedder"`
 
-	Backend string `json:"backend"`
+	Backend   string `json:"backend"`
+	Component string `json:"component"`
 	From    string `json:"from"`
 	To      string `json:"to"`
 
@@ -214,10 +218,14 @@ func (in *Input) addRecord(l line, source string, seen map[string]bool, taus map
 		})
 		addName(&in.Embedders, embedders, l.Embedder)
 	case msgBreakerState:
-		if l.Backend == "" || l.To == "" {
+		switch {
+		case l.To == "" || (l.Backend == "") == (l.Component != componentStore):
 			return errIncomplete
+		case l.Component == componentStore:
+			in.StoreTransitions = append(in.StoreTransitions, Transition{Time: l.Time, Source: source, From: l.From, To: l.To})
+		default:
+			in.Transitions = append(in.Transitions, Transition{Time: l.Time, Source: source, Backend: l.Backend, From: l.From, To: l.To})
 		}
-		in.Transitions = append(in.Transitions, Transition{Time: l.Time, Source: source, Backend: l.Backend, From: l.From, To: l.To})
 	case msgBreakerSkip, msgBackendFailed:
 		if l.RequestID == "" || l.Backend == "" {
 			return errIncomplete

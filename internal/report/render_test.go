@@ -61,6 +61,9 @@ func TestHTMLIsSelfContained(t *testing.T) {
 	if strings.Contains(html, "ZgotmplZ") {
 		t.Error("template rejected a value")
 	}
+	if !strings.Contains(html, `<td class="l">pusaq-2</td><td class="l">closed</td><td class="l">open</td>`) {
+		t.Error("store gate transition missing from the rate-limiting view")
+	}
 }
 
 func TestHTMLPairsEveryHitRateWithItsBound(t *testing.T) {
@@ -97,6 +100,7 @@ func TestHTMLSaysWhenViewsHaveNoData(t *testing.T) {
 		"No successful requests in the selection",
 		"No selected request reached a backend and no breaker moved.",
 		"No limit denials and no fail-open admissions in this selection.",
+		"No store gate transitions in this selection.",
 		"the shadow cache was off for these requests, so there is no hit-rate and no false-positive bound to report",
 		"drop counts are written at gateway shutdown and are not in this input",
 	} {

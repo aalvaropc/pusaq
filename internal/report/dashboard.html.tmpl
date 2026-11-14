@@ -214,6 +214,14 @@ svg .m2 { fill: var(--s2); }
 {{end}}</tbody>
 <tfoot>{{with .Limits.Total}}<tr><td>{{.Tenant}}</td><td>{{.Requests}}</td><td>{{.RequestLimited}}</td><td>{{.TokenLimited}}</td><td>{{.BudgetExceeded}}</td><td>{{.FailClosed}}</td><td>{{.FailOpenRequest}}</td><td>{{.FailOpenToken}}</td><td>{{.FailOpenBudget}}</td></tr>{{end}}</tfoot>
 </table></div>
+<h3>Store gate transitions</h3>
+<p class="meta">The <code>breaker_state</code> records with <code>component</code> <code>store</code>{{if .RunID}} inside the selected events' time span{{end}}, per replica: while a replica's gate is open, its store calls fail at once without reaching the store.</p>
+{{if .Limits.StoreTransitions}}<div class="scroll"><table>
+<thead><tr><th>Time (UTC)</th><th class="l">Source</th><th class="l">From</th><th class="l">To</th></tr></thead>
+<tbody>
+{{range .Limits.StoreTransitions}}<tr><td>{{when .Time}}</td><td class="l">{{if .Source}}{{.Source}}{{else}}—{{end}}</td><td class="l">{{.From}}</td><td class="l">{{.To}}</td></tr>
+{{end}}</tbody>
+</table></div>{{else}}<p class="empty">No store gate transitions in this selection.</p>{{end}}
 </section>
 
 <section id="shadow">

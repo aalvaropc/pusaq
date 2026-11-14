@@ -15,6 +15,8 @@ pusaq-1  | {"time":"2026-11-03T10:00:06Z","level":"WARN","msg":"backend failed, 
 pusaq-1  | {"time":"2026-11-03T10:00:06Z","level":"WARN","msg":"backend failed, trying next","request_id":"a6","backend":"backup","error_code":"upstream_error"}
 pusaq-1  | {"time":"2026-11-03T10:00:07Z","level":"WARN","msg":"backend breaker open, skipping","request_id":"b1","backend":"mock"}
 pusaq-1  | {"time":"2026-11-03T10:00:10Z","level":"WARN","msg":"rate limiter store unavailable, failing open","request_id":"b4","tenant":"tenant-b","error_code":"internal"}
+pusaq-2  | {"time":"2026-11-03T10:00:09.5Z","level":"INFO","msg":"breaker_state","component":"store","from":"closed","to":"open"}
+pusaq-2  | {"time":"2026-11-03T10:45:00Z","level":"INFO","msg":"breaker_state","component":"store","from":"open","to":"half_open"}
 pusaq-1  | {"time":"2026-11-03T11:00:00Z","level":"WARN","msg":"token limiter store unavailable, failing open","request_id":"c1","tenant":"tenant-a","error_code":"internal"}
 pusaq-1  | {"time":"2026-11-03T10:00:01Z","level":"WARN","msg":"spend store unavailable, failing open","request_id":"a1","tenant":"tenant-a","error_code":"internal"}
 pusaq-1  | {"time":"2026-11-03T10:00:07Z","level":"INFO","msg":"cost_event","request_id":"b1","timestamp":"2026-11-03T10:00:07Z","op":"chat.completions","tenant":"tenant-b","outcome":"success","error_code":"","latency_ms":400,"requested_model":"pusaq/best","served_model":"model-y","route_reason":"direct","prompt_tokens":5,"completion_tokens":5,"run_id":"r1","served_provider":"backup","attempts":1,"cost_usd":0.002,"price_table_version":"test-v1"}

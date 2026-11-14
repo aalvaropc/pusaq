@@ -6,6 +6,6 @@ cost: measured $0.006000 (4 events), estimated $0.000500 (1 events), unpriced 5 
 latency (successful, nearest-rank): n=5 p50 300 ms, p95 500 ms, p99 500 ms, max 500 ms
 outcomes: success 5, error/rate_limited 2, error/budget_exceeded 1, error/store_unavailable 1, error/upstream_error 1
 fallback: 40.0% (2/5) served after fallback, 1 upstream errors unserved, 1 breaker transitions
-limits: 429 request 1, 429 token 1, 402 budget 1, 503 fail-closed 1, fail-open rpm 1 / tpm 0 / budget 1
+limits: 429 request 1, 429 token 1, 402 budget 1, 503 fail-closed 1, fail-open rpm 1 / tpm 0 / budget 1, 1 store gate transitions
 shadow cache: predicted hit-rate 50.0% (2/4), false-positive bound 50.0% (1/2) (fingerprint mismatches), τ 0.95
 skipped: 2 non-JSON lines, 2 malformed, 4 other records, 1 duplicate events, 1 records without a cost event
