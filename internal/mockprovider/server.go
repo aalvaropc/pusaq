@@ -217,13 +217,7 @@ func (o Options) SampleLatency(random func() float64) time.Duration {
 }
 
 func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Model         string `json:"model"`
-		Stream        bool   `json:"stream"`
-		StreamOptions struct {
-			IncludeUsage bool `json:"include_usage"`
-		} `json:"stream_options"`
-	}
+	var req completionRequest
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	_ = json.Unmarshal(body, &req) // malformed body → buffered response
 	if req.Model == "" {
@@ -241,8 +235,9 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ans := req.answer()
 	if req.Stream {
-		s.streamCompletion(w, req.Model, req.StreamOptions.IncludeUsage)
+		s.streamCompletion(w, req.Model, req.StreamOptions.IncludeUsage, ans)
 		return
 	}
 
@@ -254,8 +249,8 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 		"model":  req.Model, // echo, like a real upstream serving the request
 		"choices": []map[string]any{{
 			"index":         0,
-			"message":       map[string]string{"role": "assistant", "content": cannedContent},
-			"finish_reason": "stop",
+			"message":       ans.message(),
+			"finish_reason": ans.finishReason(),
 		}},
 		"usage": map[string]int{"prompt_tokens": 12, "completion_tokens": 11, "total_tokens": 23},
 	})
@@ -265,10 +260,9 @@ func (s *Server) handleCompletion(w http.ResponseWriter, r *http.Request) {
 // cannedContent is what the streaming mode splits into word chunks.
 const cannedContent = "This is a canned response from the Pusaq mock provider."
 
-// streamCompletion emits the canned content as OpenAI chat.completion.chunk
-// events, a final usage chunk when the request asked for one, then
-// "data: [DONE]".
-func (s *Server) streamCompletion(w http.ResponseWriter, model string, includeUsage bool) {
+// streamCompletion emits the answer as OpenAI chat.completion.chunk events,
+// a final usage chunk when the request asked for one, then "data: [DONE]".
+func (s *Server) streamCompletion(w http.ResponseWriter, model string, includeUsage bool, ans answer) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
@@ -279,21 +273,28 @@ func (s *Server) streamCompletion(w http.ResponseWriter, model string, includeUs
 		_ = rc.Flush()
 	}
 
-	chunk := func(delta, finish string) string {
+	chunk := func(delta map[string]any, finish string) string {
 		b, _ := json.Marshal(map[string]any{
 			"id":     "mock-cmpl-1",
 			"object": "chat.completion.chunk",
 			"model":  model,
 			"choices": []map[string]any{{
 				"index":         0,
-				"delta":         map[string]string{"content": delta},
+				"delta":         delta,
 				"finish_reason": nilIfEmpty(finish),
 			}},
 		})
 		return string(b)
 	}
 
-	words := strings.Fields(cannedContent)
+	if ans.call != nil {
+		for _, delta := range ans.call.deltas() {
+			writeEvent(chunk(delta, ""))
+			s.sleep(s.opts.StreamChunkDelay)
+		}
+		writeEvent(chunk(map[string]any{}, ans.finishReason()))
+	}
+	words := strings.Fields(ans.content)
 	for i, word := range words {
 		delta := word
 		if i < len(words)-1 {
@@ -301,9 +302,9 @@ func (s *Server) streamCompletion(w http.ResponseWriter, model string, includeUs
 		}
 		finish := ""
 		if i == len(words)-1 {
-			finish = "stop"
+			finish = ans.finishReason()
 		}
-		writeEvent(chunk(delta, finish))
+		writeEvent(chunk(map[string]any{"content": delta}, finish))
 		s.sleep(s.opts.StreamChunkDelay)
 	}
 
