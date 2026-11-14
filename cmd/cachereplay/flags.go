@@ -28,7 +28,7 @@ type options struct {
 	embedPrice   float64
 	outputTokens int
 	latencyP50   time.Duration
-	latencyP99   time.Duration
+	latencyMax   time.Duration
 	indexEntries int
 	indexBytes   int64
 }
@@ -49,7 +49,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Float64Var(&o.embedPrice, "embed-price", 0.02, "embedding price, USD per 1M tokens")
 	fs.IntVar(&o.outputTokens, "output-tokens", 11, "completion tokens of every provider answer")
 	fs.DurationVar(&o.latencyP50, "latency-p50", 200*time.Millisecond, "provider latency p50 of the mock provider's model")
-	fs.DurationVar(&o.latencyP99, "latency-p99", 2*time.Second, "provider latency p99 of the mock provider's model")
+	fs.DurationVar(&o.latencyMax, "latency-max", 2*time.Second, "largest provider latency of the mock provider's model")
 	fs.IntVar(&o.indexEntries, "index-entries", config.DefaultCacheMaxEntries, "shadow index entry cap")
 	fs.Int64Var(&o.indexBytes, "index-bytes", config.DefaultCacheMaxBytes, "shadow index retained-data cap in bytes")
 	return fs
@@ -80,7 +80,7 @@ func (o options) validate() error {
 func price(v float64) bool { return v >= 0 && !math.IsInf(v, 1) }
 
 func (o options) latency() mockprovider.Options {
-	return mockprovider.Options{LatencyP50: o.latencyP50, LatencyP99: o.latencyP99}
+	return mockprovider.Options{LatencyP50: o.latencyP50, LatencyMax: o.latencyMax}
 }
 
 func (o options) taus() []float64 {

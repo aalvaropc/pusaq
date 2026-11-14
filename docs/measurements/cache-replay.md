@@ -25,7 +25,7 @@ and a lexical embedder; they are not a production measurement.
    rank^−s (Zipf, `-zipf`, s = 0 is uniform) and a paraphrase uniformly within
    that answer. Each request also draws a provider latency from the mock
    provider's latency model (`mockprovider.Options.SampleLatency`: 90% uniform
-   in [0.5·p50, 1.5·p50] capped at p99, 10% uniform in [p50, p99]) on a
+   in [0.5·p50, 1.5·p50] capped at the maximum, 10% uniform in [p50, maximum]) on a
    separately seeded stream. Same seed and flags, same sequence.
 3. **Evaluation**, in request order, with the gateway's own code: one
    `semcache.Key` namespace (one tenant, one route, no system prompt,
@@ -111,7 +111,7 @@ number of requests, not by any real traffic pattern.
 | τ | 0.95 (`PUSAQ_CACHE_TAU`'s default); sweep 0.80–0.995 step 0.005 |
 | Prices (USD per 1M tokens) | input 0.10 and output 0.40 (the Compose mock's synthetic prices), embedding 0.02 (illustrative) |
 | Output tokens per answer | 11 (the mock provider's canned answer) |
-| Provider latency | mock model, p50 200 ms, p99 2 s (`make mock`'s settings) |
+| Provider latency | mock model, p50 200 ms, maximum 2 s (`make mock`'s settings) |
 | Index caps | 10,000 entries, 64 MiB (gateway defaults; no eviction at 5000 requests) |
 
 ## Results (2026-11-14)

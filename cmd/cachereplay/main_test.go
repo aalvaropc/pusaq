@@ -56,7 +56,7 @@ func TestFlagValidationRejectsEachInvalidValue(t *testing.T) {
 		{"negative output tokens", func(o *options) { o.outputTokens = -1 }, "-output-tokens"},
 		{"no index entries", func(o *options) { o.indexEntries = 0 }, "-index-entries"},
 		{"no index bytes", func(o *options) { o.indexBytes = 0 }, "-index-bytes"},
-		{"p99 below p50", func(o *options) { o.latencyP99 = time.Millisecond }, "latency-p99"},
+		{"max below p50", func(o *options) { o.latencyMax = time.Millisecond }, "latency-max"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

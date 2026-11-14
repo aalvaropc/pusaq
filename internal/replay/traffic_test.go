@@ -79,7 +79,7 @@ func TestNewZipfRejectsInvalidParameters(t *testing.T) {
 }
 
 func trafficOptions(seed uint64) TrafficOptions {
-	return TrafficOptions{Requests: 2000, Exponent: 1, Seed: seed, Latency: mockprovider.Options{LatencyP50: 200 * time.Millisecond, LatencyP99: 2 * time.Second}}
+	return TrafficOptions{Requests: 2000, Exponent: 1, Seed: seed, Latency: mockprovider.Options{LatencyP50: 200 * time.Millisecond, LatencyMax: 2 * time.Second}}
 }
 
 func prompts(reqs []Request) []int {
@@ -105,7 +105,7 @@ func TestTrafficIsDeterministicPerSeed(t *testing.T) {
 		t.Fatal("different seeds produced the same prompts")
 	}
 	slower := trafficOptions(1)
-	slower.Latency = mockprovider.Options{LatencyP50: time.Second, LatencyP99: 3 * time.Second}
+	slower.Latency = mockprovider.Options{LatencyP50: time.Second, LatencyMax: 3 * time.Second}
 	c2, _ := Traffic(c, slower)
 	if !slices.Equal(prompts(a), prompts(c2)) {
 		t.Fatal("latency parameters changed the request sequence")
@@ -158,7 +158,7 @@ func TestTrafficRejectsInvalidOptions(t *testing.T) {
 	bad := []TrafficOptions{
 		{Requests: 0, Exponent: 1},
 		{Requests: 1, Exponent: -1},
-		{Requests: 1, Exponent: 1, Latency: mockprovider.Options{LatencyP50: time.Second, LatencyP99: time.Millisecond}},
+		{Requests: 1, Exponent: 1, Latency: mockprovider.Options{LatencyP50: time.Second, LatencyMax: time.Millisecond}},
 	}
 	for _, o := range bad {
 		if _, err := Traffic(c, o); err == nil {

@@ -85,7 +85,7 @@ func (res result) writeSummary(w io.Writer) error {
 	line("| τ | %s; sweep %s–%s step %g |", tauText(o.tau), tauText(o.sweepFrom), tauText(o.sweepTo), o.sweepStep)
 	line("| Prices (USD per 1M tokens) | input %g, output %g, embedding %g |", o.inputPrice, o.outputPrice, o.embedPrice)
 	line("| Output tokens per answer | %d |", o.outputTokens)
-	line("| Provider latency | mock provider model, p50 %s, p99 %s |", o.latencyP50, o.latencyP99)
+	line("| Provider latency | mock provider model, p50 %s, max %s |", o.latencyP50, o.latencyMax)
 	line("| Index caps | %d entries, %d bytes |", o.indexEntries, o.indexBytes)
 	line("| Replay wall time | %s |", res.elapsed.Round(time.Millisecond))
 	line("")
