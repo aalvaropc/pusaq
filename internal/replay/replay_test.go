@@ -96,6 +96,9 @@ func TestRunRecordsNeighborsInRequestOrder(t *testing.T) {
 	if e.calls["rate today"] != 0 {
 		t.Fatal("an ineligible prompt was embedded")
 	}
+	if skipped := r.Outcomes[5]; skipped.EmbedUSD != 0 || skipped.ProviderUSD != 24e-6 || skipped.Lookup != 0 {
+		t.Fatalf("ineligible request embed %g provider %g lookup %s, want no toll, its provider cost and no lookup", skipped.EmbedUSD, skipped.ProviderUSD, skipped.Lookup)
+	}
 	if r.Embedder != "fixed" {
 		t.Fatalf("embedder = %q", r.Embedder)
 	}
