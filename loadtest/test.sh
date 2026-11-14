@@ -340,9 +340,15 @@ jq -nc --argjson t0 "$t0" '
   point("open";200;"none";"o5";10.5;300), point("open";200;"none";"o6";11;2), point("open";0;"none";"none";11.5;10000),
   point("budget";200;"none";"b3";12;3), point("closed";200;"none";"c3";12;2)' >"$tmp/base-redis-points.json"
 jq -nc '
+  def replica: {replica: (if ({o2:1,c1:1,o4:1,c2:1,o6:1,c3:1}[.request_id]) then "pusaq-b" else "pusaq-a" end)};
   def event(id; tenant; outcome; code; fo; cost): {msg:"cost_event",run_id:"fixture-hung",request_id:id,tenant:tenant,outcome:outcome,error_code:code}
-    + (if fo == "" then {} else {fail_open:fo} end) + (if cost > 0 then {cost_usd:cost} else {} end);
-  def warn(id; msg): {msg:msg,request_id:id};
+    + (if fo == "" then {} else {fail_open:fo} end) + (if cost > 0 then {cost_usd:cost} else {} end) | . + replica;
+  def warn(id; msg): {msg:msg,request_id:id}
+    + ({o3:"12.5",o4:"13.51",b2:"12.25",c2:"12.25",o5:"20.7"}[id] // null | if . then {time:("2026-10-20T12:00:" + . + "Z")} else {} end) | . + replica;
+  def gate(rep; at; from; to): {time:("2026-10-20T12:00:" + at + "Z"),msg:"breaker_state",component:"store",from:from,to:to,replica:rep};
+  gate("pusaq-a";"12.8";"closed";"open"), gate("pusaq-a";"15";"open";"half_open"), gate("pusaq-a";"15.25";"half_open";"open"),
+  gate("pusaq-a";"20.5";"open";"half_open"), gate("pusaq-a";"20.501";"half_open";"closed"),
+  gate("pusaq-b";"12.4";"closed";"open"), gate("pusaq-b";"20.3";"open";"half_open"), gate("pusaq-b";"20.31";"half_open";"closed"),
   event("o1";"tenant-open";"success";"";"";0), event("o2";"tenant-open";"error";"rate_limited";"";0),
   event("b1";"tenant-budget";"success";"";"";0.034), event("c1";"tenant-closed";"success";"";"";0),
   event("o3";"tenant-open";"success";"";"rpm,tpm";0), event("o4";"tenant-open";"success";"";"rpm,tpm";0),
@@ -377,6 +383,25 @@ logged 'after   open         3      2      0          0         0         1     
 logged 'admitted 2 during the window vs r·W = 10.2 → excess -8.2 (2 fail-open rpm admissions); whole run 5 admitted vs B + r·T = 32'
 logged 'lost increments (warnings) 1, 0.034 USD; store counter 0.068 USD = Σcost − Σlost + 0 applied'
 logged 'during the window 4 failures answered in 250 ms or more (the last sent at +3 s) and 0 faster; 1 failures sent after the restore, the last at +0.3 s; first store decision after the restore at +0.8 s'
+logged 'gate:    pusaq-a opened +2.8 s after the injection (0.55 s after its first logged store failure); 2 probes, 1 reopened; last closed +0.301 s from the restore; window failures 2 deadline-bound / 0 faster; 1 failures sent after the restore, the last at +0.3 s'
+logged 'gate:    pusaq-b opened +2.4 s after the injection (0.15 s after its first logged store failure); 1 probes, 0 reopened; last closed +0.11 s from the restore; window failures 2 deadline-bound / 0 faster; 0 failures sent after the restore$'
+reset_redis
+echo '{"time":"2026-10-20T12:00:05Z","msg":"breaker_state","component":"store","from":"closed","to":"open","replica":"pusaq-a"}' \
+  >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+expect 1 'store gate opened before the injection' redis_verify
+logged 'store gate of pusaq-a changed state 1 times before the injection'
+reset_redis
+redis_events 'select(.msg != "breaker_state" or .replica != "pusaq-b")'
+expect 1 'store gate never opened' redis_verify
+logged 'store gate of pusaq-b never opened during the window although it met 2 store failures'
+reset_redis
+redis_events 'select(.msg != "breaker_state" or .to != "closed" or .replica != "pusaq-a")'
+expect 1 'store gate left open' redis_verify
+logged 'store gate of pusaq-a still half_open at the end of the run'
+reset_redis
+redis_events 'if .msg == "breaker_state" and .to == "half_open" and .replica == "pusaq-b" then .time = "2026-10-20T13:00:20.3+01:00" else . end'
+expect 1 'store gate record outside UTC' redis_verify
+logged 'store gate record of pusaq-b without a UTC time'
 reset_redis
 redis_window '.spend_counter_usd = 0.102'
 expect 0 'late-applied increment within bounds' redis_verify
