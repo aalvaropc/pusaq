@@ -369,6 +369,10 @@ cached answers, so shadow sampling produces no avoided-provider savings.
 `cache_shadow` records include `embed_latency_ms` when a neighbor exists;
 cost events do not price the embedding toll. Different response fingerprints
 identify candidates for review, not a semantic false-positive verdict.
+`make replay` computes the first two terms and that minimum hit-rate on
+labeled synthetic traffic, with the hit-rate next to its false-positive rate;
+the in-process index has no infrastructure cost to subtract
+([report](measurements/cache-replay.md)).
 
 ### 5.5 Routing
 
@@ -493,7 +497,7 @@ framing is capped at 1 MiB, and response fingerprints are hashed incrementally.
 | Cloud Run + global external load balancer | Measurement runtime | Stateless gateway: two regions = two services behind serverless NEGs; **not GKE** — two clusters for a stateless service is paying for control planes without new learning |
 | Redis (Memorystore in the cloud) | Request and token buckets, monthly spend | The limiter needs single-point atomic (Lua) sub-millisecond state; one instance **per region**. Breaker state and the shadow cache live in process memory |
 | Lua scripts | Atomicity | Read-decide-decrement as one operation; races removed by construction |
-| Embedders | Shadow-cache vectors | `local` (character trigrams, $0, deterministic) or any OpenAI-compatible `/embeddings` endpoint; the same code serves the gateway and `cmd/cachecal` |
+| Embedders | Shadow-cache vectors | `local` (character trigrams, $0, deterministic) or any OpenAI-compatible `/embeddings` endpoint; the same code serves the gateway, `cmd/cachecal` and `cmd/cachereplay` |
 | Terraform | IaC | The foundation and the two-region runtime, created and destroyed per measurement run |
 | GitHub Actions + workload identity federation | CI and image publishing | Lint, race tests, Terraform checks, dependency and container scans, CodeQL and workflow analysis feed `ci-gate`; publication uses short-lived credentials only after a successful push to main |
 | k6 | Load and chaos | Concurrency tests and failure injection |
@@ -542,6 +546,7 @@ disappointing numbers included.
 | Regional failover ([report](measurements/regional-failover.md)) | `make chaos-run`: the two-region runtime module, sustained k6 against the global LB, region A's readiness failed at a known instant through the admin endpoint; every request tagged with the run id and answered with its region; per-region readiness probes as an independent timeline | Time until new requests are answered by the other region, longest interval without a success, first-attempt failures / recovered by one retry / failed after retry, streams complete / interrupted / never started / refused, latency before / during / after per region, the split tenant's admissions per region (**counted, not estimated**, cross-checked against the gateways' events) |
 | Content rules ([report](measurements/content-rules.md)) | `go test -v -run TestContentRulesCorpus ./internal/policy`: the policy filter's sensitive-data, injection and temporal rules against a labeled EN/ES corpus with hard negatives | Precision and recall per family against published floors the suite enforces; every miss and false alarm listed |
 | Cache threshold calibration | `make calibrate`: the τ sweep over a labeled pair dataset with the gateway's own embedder | The precision/recall curve with support and lower bounds, and τ*, or an explicit failure when no τ's precision lower bound reaches the floor |
+| Semantic cache replay ([report](measurements/cache-replay.md)) | `make replay`: seeded Zipf traffic over a labeled EN/ES corpus with trap intents, through the shadow's namespace, content rules, embedder, nearest neighbor and insertion | Hit-rate next to the false-positive rate for every τ of a sweep, net savings after the embedding toll with the spend of false hits apart, latency p50/p95 with and without the cache, break-even hit-rate |
 
 The [measurement index](measurements/README.md) also covers lease ownership,
 unattempted-reservation settlement and independent evidence verification.
