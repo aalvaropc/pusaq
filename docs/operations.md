@@ -64,7 +64,7 @@ the default stack does not expose these services to the surrounding network.
 
 ### Gateway from source
 
-Requires Go 1.26.10+ (see [go.mod](../go.mod)). Start only the dependencies
+Requires Go 1.26.11+ (see [go.mod](../go.mod)). Start only the dependencies
 so the containerized gateway does not compete for port 8080:
 
 ```sh
@@ -107,7 +107,7 @@ as described in [configuration](configuration.md#upstreams-and-routing).
 
 ### Development checks
 
-Use Go 1.26.10+ and golangci-lint 2.12.x. The shell measurement fixtures also
+Use Go 1.26.11+ and golangci-lint 2.12.x. The shell measurement fixtures also
 require Bash, jq, bc, awk and GNU date. These checks do not require a cloud
 account:
 
