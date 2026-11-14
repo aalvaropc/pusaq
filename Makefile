@@ -55,7 +55,7 @@ TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
 # measurement run (created before it, destroyed the same day).
 TF_RUNTIME := terraform -chdir=infra/terraform/runtime
 
-.PHONY: help up down run mock test test-loadtest lint lint-docs tidy smoke calibrate dashboard loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
+.PHONY: help up down run mock test test-loadtest lint lint-docs tidy smoke calibrate replay dashboard loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
         infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate \
         runtime-init runtime-plan runtime-apply runtime-destroy
 
@@ -100,6 +100,11 @@ tidy: ## Tidy module files
 calibrate: ## Calibrate the cache threshold on the seed dataset (local embedder); curve in out/
 	mkdir -p out
 	go run ./cmd/cachecal -pairs testdata/calibration/seed-pairs.csv -out out/calibration.csv
+
+REPLAY_FLAGS ?=
+
+replay: ## Replay labeled Zipf traffic through the shadow cache path (local embedder); CSV and summary in out/replay/
+	go run ./cmd/cachereplay -corpus testdata/replay/intents.csv -out out/replay $(REPLAY_FLAGS)
 
 smoke: ## Send a chat completion through the gateway (gateway + mock must be running)
 	curl -sS -X POST localhost:8080/v1/chat/completions \

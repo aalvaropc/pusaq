@@ -204,7 +204,7 @@ input.
 
 ## Measurements and how to run them
 
-The [measurement index](measurements/README.md) identifies all nine reports,
+The [measurement index](measurements/README.md) identifies all ten reports,
 their dates and the commands that exercise each mechanism. Run load tests
 against the local mock stack; their Make targets flush the stack's Redis.
 Commands and reports include:

@@ -146,6 +146,32 @@ func TestLatencyMaxIsTheDistributionMaximum(t *testing.T) {
 	}
 }
 
+func TestOptionsSampleLatencyModel(t *testing.T) {
+	o := Options{LatencyP50: 100 * time.Millisecond, LatencyMax: 300 * time.Millisecond}
+	draw := func(seq ...float64) time.Duration {
+		i := 0
+		return o.SampleLatency(func() float64 { v := seq[i]; i++; return v })
+	}
+	tests := []struct {
+		name string
+		seq  []float64
+		want time.Duration
+	}{
+		{"body at p50", []float64{0.0, 0.5}, 100 * time.Millisecond},
+		{"body low edge", []float64{0.89, 0.0}, 50 * time.Millisecond},
+		{"tail midpoint", []float64{0.95, 0.5}, 200 * time.Millisecond},
+		{"tail start", []float64{0.9, 0.0}, 100 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		if got := draw(tt.seq...); got != tt.want {
+			t.Errorf("%s: latency = %s, want %s", tt.name, got, tt.want)
+		}
+	}
+	if got := (Options{}).SampleLatency(func() float64 { t.Fatal("random drawn for zero latency"); return 0 }); got != 0 {
+		t.Fatalf("zero options latency = %s, want 0", got)
+	}
+}
+
 func TestZeroLatencyConfigSleepsZero(t *testing.T) {
 	s, err := NewServer(discardLogger(), Options{})
 	if err != nil {

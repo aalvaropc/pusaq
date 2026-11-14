@@ -26,6 +26,11 @@ type Neighbor struct {
 	Similarity float64
 }
 
+// Hit reports whether the neighbor would be served at threshold tau.
+func (n *Neighbor) Hit(tau float64) bool {
+	return n != nil && n.Similarity >= tau
+}
+
 // Index is an exact, in-process flat cosine index partitioned by namespace,
 // with a global LRU cap. Per replica by design: each process measures the
 // traffic it serves. Safe for concurrent use.

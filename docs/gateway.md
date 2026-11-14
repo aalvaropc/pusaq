@@ -261,6 +261,29 @@ production traffic. The seed dataset (60 pairs, 30 equivalent) exercises the
 harness and cannot certify a τ; it is not a production corpus, and
 `PUSAQ_CACHE_TAU` only labels the shadow records.
 
+### Replaying labeled traffic
+
+`make replay` answers what the cache would have done on a stream of
+traffic. It samples seeded Zipf traffic over a labeled EN/ES corpus
+(`testdata/replay/intents.csv`: intents with paraphrases, grouped with
+look-alike intents that need different answers) and runs every request
+through the shadow's own code: the namespace derivation, the content rules
+for eligibility, and `Shadow.Evaluate` (embed, nearest neighbor, record,
+insert after the lookup). A request is a predicted hit at τ under the rule
+that labels `shadow_hit`; a hit is false when the neighbor carries a
+different labeled answer, including the same intent in the other language.
+For the configured τ and a sweep it reports the hit-rate over eligible
+requests next to the false-positive rate (false hits over hits), net savings
+(provider cost avoided by correct hits minus the embedding toll on every
+eligible request; the spend that false hits skip is reported apart), latency
+p50/p95 with and without the cache from the mock provider's latency model,
+and the break-even hit-rate. Request count, Zipf exponent, seed, τ, prices,
+answer length and index caps are flags of `cmd/cachereplay`; outputs go to
+the ignored `out/replay/`. The [replay report](measurements/cache-replay.md)
+records a run and its limits: with the lexical local embedder the hit-rate is
+almost entirely exact repeats, and at τ = 0.95 every hit on a text not seen
+before is a trap.
+
 ## Tenant policies
 
 `PUSAQ_TENANT_POLICIES="tenant:key=value,...;tenant2:..."`
