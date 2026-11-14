@@ -179,7 +179,8 @@ as configured by the runtime module.
    still counts. The content rules are measured
    heuristics (regex, checksums, cue words;
    [measurements](measurements/content-rules.md)) that flag personal data and
-   secrets, instruction-override phrasing, and time-dependent questions; the
+   secrets, instruction-override phrasing — tool results included, the
+   channel of indirect injection — and time-dependent questions; the
    kinds matched go on the cost event and a tenant may block on them. The
    filter does not rewrite or mask content and does not scan responses.
    (Deliberately *not* called a "prompt firewall" — regexes cannot promise
@@ -329,11 +330,22 @@ Similarity alone does not establish equivalence. Therefore:
 
 **The implemented shadow namespace:** tenant | the route's physical model |
 the model the provider reported (the route's physical model when it reports
-none) | system prompt | the request's temperature and `max_tokens` (each
-`none` when absent) | the version of the eligibility rules and namespace
-derivation, plus fixed `tools=none` and `format=none` markers — the accepted
-request subset carries neither tools nor a response format. Components are
+none) | system prompt | tools | the request's temperature and `max_tokens`
+(each `none` when absent) | the version of the eligibility rules and
+namespace derivation, plus a fixed `format=none` marker — the accepted
+request subset carries no response format. The tools component hashes the
+canonical tool definitions (declared order, object keys sorted), `tool_choice`
+and `parallel_tool_calls`, or is `none` without tools: two requests that
+offer the model different functions never share answers, and reordering the
+keys of one definition does not split a namespace. Components are
 length-prefixed before hashing, so none can shift bytes into its neighbor.
+
+A single-turn request with tools is eligible. Its answer is often a tool
+call, which depends on the prompt and the tools rather than on when it is
+asked; the time-dependent part, the tool result, arrives in a turn that is
+multi-turn by construction. The response fingerprint covers each tool call's
+function name and arguments, not its call ID, so a would-be hit that calls
+the right function with other arguments shows as differing fingerprints.
 
 The reported model can key the namespace because neighbor search and
 insertion both run after the provider's answer is complete; a lookup that
@@ -358,7 +370,8 @@ budget. Entries larger than the index budget are skipped. These caps account
 for retained data, not allocator overhead or total process RSS.
 
 **What is never offered to the cache:** requests of a tenant that opted out,
-multi-turn conversations (turn N depends on N−1), prompts the content rules
+multi-turn conversations (turn N depends on N−1; an assistant tool call or a
+tool result makes a conversation multi-turn), prompts the content rules
 flag as sensitive, injection-like, or time-dependent ("today's dollar rate"),
 and requests with an explicit temperature above 0.7. The decision is made
 once per request and the single reason is recorded on the cost event as

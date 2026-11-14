@@ -12,10 +12,13 @@ Request and response contracts for the implemented gateway. See
 | Field | Contract |
 |---|---|
 | `model` | Required alias: `pusaq/fast`, `pusaq/best` or `pusaq/auto`. Physical models are configuration. |
-| `messages` | Required nonempty array; message content is a string. |
+| `messages` | Required nonempty array; message content is a string. Tool fields below. |
 | `max_tokens` | Optional positive integer; also determines the output reservation. Each value, and omission, has its own cache namespace. |
 | `temperature` | Optional number forwarded as sent, including explicit zero; omission has its own cache namespace. |
 | `stream` | Optional boolean; `true` selects Server-Sent Events. |
+| `tools` | Optional array of 1–128 function tools, at most 256 KiB as compact JSON: `type` `function`, `function.name` matching `^[a-zA-Z0-9_-]{1,64}$` and unique, optional string `function.description`, optional object `function.parameters` forwarded with its key order. |
+| `tool_choice` | Optional, requires `tools`: `none`, `auto`, `required` or `{"type":"function","function":{"name":…}}` naming a declared tool. |
+| `parallel_tool_calls` | Optional boolean, requires `tools`. |
 | `metadata.feature_tag` | Optional routing label, at most 64 letters, digits, `.`, `_` or `-`. |
 | `metadata.run_id` | Optional string, at most 64 bytes, recorded before RPM admission for measurement filtering. |
 
@@ -28,11 +31,32 @@ The default `pusaq/auto` rules map `classify`/`extract` to `pusaq/fast`,
 `reason`/`code` to `pusaq/best`, and absent or unknown tags to `pusaq/fast`.
 `PUSAQ_ROUTING_RULES` replaces that table.
 
-Tool and function calling, `response_format`, multiple choices, logprobs,
-audio, non-text modalities, prediction, web search and
+### Tool calling
+
+Function calling follows OpenAI's shape. The provider receives the declared
+tools, `tool_choice` reduced to its string or to the function object with
+its name, and `parallel_tool_calls`. A buffered answer passes each choice's
+`message.tool_calls` (`id`, `type`, `function.name`, `function.arguments`)
+and the provider's `finish_reason` (`tool_calls`) through, with `content`
+null when the message has no text; a stream forwards tool-call deltas byte
+for byte. The conversation sent back carries:
+
+| Message | Contract |
+|---|---|
+| assistant with `tool_calls` | Non-empty array; each entry has an `id` unique within the request, `type` `function`, a `function.name` matching the tool-name pattern and string `function.arguments`. `content` may be null or absent. |
+| `tool` | String `content` and a `tool_call_id` naming a call made by an earlier assistant message and not answered before. |
+
+`tool_calls` on another role, `tool_call_id` on another role and the
+`function` role are rejected. Whether every call is answered before the next
+assistant turn is the provider's rule; its 400 maps to `invalid_request`.
+Unknown fields inside a tool are ignored and not forwarded; `strict` other
+than `null` or `false` is rejected.
+
+Legacy `functions`/`function_call`, `response_format`, multiple choices,
+logprobs, audio, non-text modalities, prediction, web search and
 `max_completion_tokens` are rejected with 400 `invalid_request` naming the
-unsupported field. Message tool/function/audio fields and arrays of content
-parts are also rejected. For unsupported fields, `null` or `false` is
+unsupported field. Message `function_call`/`audio` fields and arrays of
+content parts are also rejected. For these fields, `null` or `false` is
 treated as absent; `n: 1` and `modalities: ["text"]` are harmless accepted
 values. Other unrecognized fields are ignored rather than forwarded.
 
@@ -56,8 +80,8 @@ All gateway errors, including unknown paths and unsupported methods, use
 carry `X-Pusaq-Request-Id`. `code` is the precise, stable reason; `type` is
 an OpenAI-style category derived from it. `param` names the offending
 request field of a validation error (`model`, `messages`, `max_tokens`,
-`messages[].content`, `metadata.feature_tag`, an unsupported field, …) and
-is `null` otherwise. Retryable quota and readiness errors also carry
+`messages[].content`, `tools[].function.name`, `messages[].tool_call_id`,
+`metadata.feature_tag`, an unsupported field, …) and is `null` otherwise. Retryable quota and readiness errors also carry
 `retry_after_ms` and a `Retry-After` header; 405 answers carry `Allow`.
 Provider bodies and diagnostic strings are not exposed.
 
@@ -82,8 +106,8 @@ With `stream: true`, responses carry `text/event-stream`. The provider is
 asked for a usage chunk with `stream_options.include_usage`; a successful
 stream ends with `data: [DONE]`.
 
-Each complete SSE event is validated before forwarding. Event framing is
-capped at 1 MiB. A provider error event, premature EOF or oversized event
+Each complete SSE event is validated before forwarding; tool-call deltas
+pass unchanged. Event framing is capped at 1 MiB. A provider error event, premature EOF or oversized event
 terminates the stream with one generic `upstream_error` event and no
 `[DONE]`. An established stream is never retried on another backend.
 Content fingerprints are hashed incrementally without retaining the full
@@ -151,7 +175,9 @@ the same load test.
 
 Alongside RPM, each tenant has an LLM-token bucket.
 After model resolution and tenant policy checks, a request is charged its
-input estimate (message role and content bytes divided by four, rounded up)
+input estimate (bytes of message roles and content, tool-call names and
+arguments, and the compact JSON of the tool definitions, divided by four,
+rounded up)
 plus an output reservation (`max_tokens`, or `PUSAQ_TPM_RESERVE_DEFAULT`);
 when actual usage is known the difference is reconciled back atomically —
 on success, on error, and at stream end. A confirmed reservation is fully
@@ -256,7 +282,7 @@ attempt in the event.
 measurement instrument: eligible completions are evaluated
 asynchronously — embed, nearest-neighbor within a namespace
 (tenant | route's physical model | provider-reported model | system prompt |
-temperature | `max_tokens` | rules version), record, insert — without ever
+tools | temperature | `max_tokens` | rules version), record, insert — without ever
 serving a cached answer. Bounded workers process samples independently of
 the provider response; saturated intake drops and counts samples.
 `cache_shadow` records are emitted when a neighbor exists and carry
@@ -273,11 +299,21 @@ per request and the reason a request was kept out travels on its cost
 event as `cache_skip`: `tenant_off` (policy `cache=off`), `multi_turn`,
 `sensitive`, `injection`, `temporal` (content rules, below), or
 `temperature` (an explicit value above 0.7); an omitted temperature is
-eligible under its own key.
+eligible under its own key. An assistant tool call or a tool result makes a
+request `multi_turn`; a single-turn request with tools is eligible, and its
+answer is often a tool call.
 
 The standalone default is `off`; Compose explicitly enables `shadow`.
-Namespaces also contain fixed `tools=none` and `format=none` markers. The
-reported model is read from the completed answer, buffered body or stream
+The tools component is the SHA-256 of the canonical tool definitions
+(declared order, object keys sorted, numbers as written), `tool_choice` and
+`parallel_tool_calls`, so reordering a definition's keys keeps the
+namespace and any other change splits it; a request without tools keys
+`none`. Namespaces also contain a fixed `format=none` marker, as
+`response_format` is rejected. A response fingerprint covers the answer's
+text and each tool call's function name and arguments, not its call ID, and
+is the same for a buffered answer and for the same answer streamed in any
+fragmentation; a stream with a tool-call index outside 0–127 is not
+evaluated. The reported model is read from the completed answer, buffered body or stream
 chunks; when the provider reports none, the route's physical model takes its
 place. Language is not a namespace field, and a model version change shows
 only when the provider's reported name carries it.
@@ -341,7 +377,8 @@ before is a trap.
 gives a tenant up to seven policies: `models=pusaq/fast|pusaq/best` (the
 concrete aliases it may be served by — `pusaq/auto` is checked against the
 alias it resolves to and denied rather than rerouted), `max_prompt_chars`
-(bytes of message content), `budget_usd` (monthly ceiling; spend is
+(bytes of message content, tool-call names and arguments, and tool
+definitions), `budget_usd` (monthly ceiling; spend is
 counted in Redis from `cost_usd` per completion, estimated ones included,
 read before token reservation and provider invocation, and
 reset at the UTC month boundary — requests already in flight when the
@@ -362,14 +399,27 @@ its reservation — the input estimate plus `max_tokens` or
 
 ### Content rules
 
-Every request's messages are classified by the policy
+Every request's text is classified by the policy
 filter's content rules — personal data and secrets (`pii:email`,
 `pii:phone`, `pii:card` with Luhn, `pii:iban` with mod-97, `secret:*`),
 instruction-override phrasing in English and Spanish (`injection:*`), and
 time-dependence cues (`temporal:*`) — and the kinds matched go on the cost
-event as `policy_flags`, never the content. Sensitive data is scanned in
-every message; injection and temporal rules skip the system prompt, where
-applications legitimately set personas and today's date. A match keeps the
+event as `policy_flags`, never the content. Each family runs where it means
+something:
+
+| Text | Sensitive | Injection | Temporal |
+|---|---|---|---|
+| System messages | yes | no | no |
+| User messages | yes | yes | yes |
+| Assistant content and tool-call arguments | yes | yes | no |
+| Tool results (`tool` messages) | yes | yes | no |
+| Tool definitions (name, description, parameters) | yes | no | no |
+
+The system prompt and the tool definitions are written by the application,
+which legitimately sets personas, today's date and what a tool returns
+"currently" there. Tool results carry text from outside the application (a
+web page, a document, an email), the usual channel for indirect injection,
+so they are classified for injection like user content. A match keeps the
 prompt out of the cache and, when the tenant's policy says `block`, denies
 the request with 403 `policy_denied` naming the kinds. The rules are regex
 and keyword heuristics with stated limits, measured on a labeled corpus
@@ -400,6 +450,7 @@ redirect credentials or request payloads to another destination.
 
 Serving answers from the cache; rewriting or masking flagged content (prompt
 text is never logged and flagged prompts never reach the cache); scanning
-responses for secrets; tool calling and response formats; and a standing
+responses, tool calls included, for secrets; response formats and strict
+function schemas; tool types other than functions; and a standing
 deployment (the two-region runtime
 module exists for measurement runs only and is destroyed after each one).

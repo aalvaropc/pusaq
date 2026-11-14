@@ -4,15 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"hash"
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/aalvaropc/pusaq/internal/breaker"
@@ -69,10 +65,10 @@ type TokenLimiter interface {
 // estimateInputTokens approximates prompt tokens as ceil(chars/4) — crude,
 // but its error is measurable: tokens_charged and actual usage land side by
 // side on every cost event.
-func estimateInputTokens(messages []provider.Message) int {
-	chars := 0
-	for _, m := range messages {
-		chars += len(m.Role) + len(m.Content)
+func estimateInputTokens(cr completionRequest) int {
+	chars := promptChars(cr)
+	for _, m := range cr.Messages {
+		chars += len(m.Role)
 	}
 	return (chars + 3) / 4
 }
@@ -109,7 +105,12 @@ type completionRequest struct {
 	// Metadata is the OpenAI metadata map; feature_tag drives the router.
 	// run_id is read by the transport layer before admission (see
 	// runIDFromPayload) so every event of the request carries it.
-	Metadata map[string]any `json:"metadata"`
+	Metadata          map[string]any  `json:"metadata"`
+	Tools             []provider.Tool `json:"tools"`
+	ToolChoice        json.RawMessage `json:"tool_choice"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls"`
+	toolChoice        *provider.ToolChoice
+	toolsBytes        int
 }
 
 // featureTag extracts metadata.feature_tag: absent means untagged, a
@@ -154,7 +155,12 @@ func parseCompletionRequest(payload []byte) (completionRequest, error) {
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return req, decodeError(err)
 	}
-	if err := rejectUnsupported(payload); err != nil {
+	var raw rawRequest
+	if err := json.Unmarshal(payload, &raw.top); err != nil {
+		return req, core.NewError(core.CodeInvalidRequest, "request body is not valid JSON")
+	}
+	_ = json.Unmarshal(raw.top["messages"], &raw.messages)
+	if err := rejectUnsupported(raw); err != nil {
 		return req, err
 	}
 	if req.Model == "" {
@@ -166,6 +172,10 @@ func parseCompletionRequest(payload []byte) (completionRequest, error) {
 	if req.MaxTokens != nil && *req.MaxTokens < 1 {
 		return req, errMaxTokens
 	}
+	if err := validateTools(&req, raw); err != nil {
+		return req, err
+	}
+	req.toolsBytes = toolsBytes(req.Tools)
 	return req, nil
 }
 
@@ -182,32 +192,27 @@ func decodeError(err error) error {
 	case "messages.content":
 		return core.InvalidField("messages[].content", "message content must be a string; content parts are not supported")
 	}
-	return core.InvalidField(typeErr.Field, "%s has the wrong type", typeErr.Field)
+	param := paramPath(typeErr.Field)
+	return core.InvalidField(param, "%s has the wrong type", param)
 }
 
 var (
 	unsupportedFields = []string{
-		"tools", "tool_choice", "functions", "function_call", "parallel_tool_calls", "response_format",
+		"functions", "function_call", "response_format",
 		"n", "logprobs", "top_logprobs", "audio", "modalities", "prediction", "web_search_options",
 		"max_completion_tokens",
 	}
-	unsupportedMessageFields = []string{"tool_calls", "tool_call_id", "function_call", "audio"}
+	unsupportedMessageFields = []string{"function_call", "audio"}
 	harmlessValues           = map[string]string{"n": "1", "modalities": `["text"]`}
 )
 
-func rejectUnsupported(payload []byte) error {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &top); err != nil {
-		return core.NewError(core.CodeInvalidRequest, "request body is not valid JSON")
-	}
+func rejectUnsupported(raw rawRequest) error {
 	for _, f := range unsupportedFields {
-		if set(top[f], harmlessValues[f]) {
+		if set(raw.top[f], harmlessValues[f]) {
 			return core.InvalidField(f, "%s is not supported", f)
 		}
 	}
-	var messages []map[string]json.RawMessage
-	_ = json.Unmarshal(top["messages"], &messages)
-	for _, m := range messages {
+	for _, m := range raw.messages {
 		for _, f := range unsupportedMessageFields {
 			if set(m[f], "") {
 				return core.InvalidField("messages[]."+f, "messages[].%s is not supported", f)
@@ -272,7 +277,7 @@ func priceOnFinalize(req *core.Request, cr completionRequest, opts CompletionsOp
 				return
 			}
 			usage = core.Usage{
-				PromptTokens:     estimateInputTokens(cr.Messages),
+				PromptTokens:     estimateInputTokens(cr),
 				CompletionTokens: reservation(cr, opts.ReserveDefault),
 			}
 			estimated = true
@@ -302,6 +307,7 @@ func offerShadow(req *core.Request, shape cacheShape, opts CompletionsOptions, c
 		Tenant:       req.Tenant,
 		RouteModel:   req.ServedModel,
 		SystemPrompt: shape.SystemPrompt,
+		Tools:        shape.Tools,
 		Temperature:  shape.Temperature,
 		MaxTokens:    shape.MaxTokens,
 	}
@@ -332,16 +338,16 @@ func upstreamRequest(cr completionRequest, route Route, requestID string) provid
 		key = "pusaq-" + requestID
 	}
 	return provider.ChatRequest{
-		Model:          route.Model,
-		Messages:       cr.Messages,
-		MaxTokens:      maxTokens,
-		Temperature:    cr.Temperature,
-		IdempotencyKey: key,
+		Model:             route.Model,
+		Messages:          cr.Messages,
+		MaxTokens:         maxTokens,
+		Temperature:       cr.Temperature,
+		Tools:             cr.Tools,
+		ToolChoice:        cr.toolChoice,
+		ParallelToolCalls: cr.ParallelToolCalls,
+		IdempotencyKey:    key,
 	}
 }
-
-// always is the completed-gate for buffered successes.
-func always() bool { return true }
 
 // breakerFor resolves the breaker for a backend, tolerating a nil registry.
 func (o CompletionsOptions) breakerFor(backend string) *breaker.Breaker {
@@ -404,11 +410,16 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		}
 		req.Usage = upstream.Usage
 
-		var content strings.Builder
+		var answer semcache.AnswerDigest
+		calls := 0
 		for _, c := range upstream.Choices {
-			content.WriteString(c.Message.Content)
+			answer.Text(c.Message.Content)
+			for _, call := range c.Message.ToolCalls {
+				answer.ToolCall(calls, call.Function.Name, call.Function.Arguments)
+				calls++
+			}
 		}
-		offerShadow(req, shape, opts, always, func() string { return upstream.Model }, func() string { return semcache.Fingerprint(content.String()) })
+		offerShadow(req, shape, opts, answer.Bounded, func() string { return upstream.Model }, answer.Fingerprint)
 
 		created := upstream.Created
 		if created <= 0 {
@@ -447,7 +458,7 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 		return nil
 	}
 	reserve := reservation(cr, opts.ReserveDefault)
-	estimate := estimateInputTokens(cr.Messages)
+	estimate := estimateInputTokens(cr)
 	if need, burst := float64(estimate)+float64(reserve), opts.Tokens.Limits().Burst; need > burst {
 		return core.Errorf(core.CodeInvalidRequest,
 			"request needs %.0f tokens (prompt estimate plus max_tokens), more than the token burst of %.0f", need, burst)
@@ -630,7 +641,7 @@ type usageScanningStream struct {
 	data       []byte
 	hasData    bool
 	eventError bool
-	digest     hash.Hash
+	answer     semcache.AnswerDigest
 	model      string
 	ready      []byte
 	done       bool
@@ -638,17 +649,11 @@ type usageScanningStream struct {
 	err        error
 }
 
-func (u *usageScanningStream) completed() bool { return u.done }
+func (u *usageScanningStream) completed() bool { return u.done && u.answer.Bounded() }
 
 func (u *usageScanningStream) reportedModel() string { return u.model }
 
-func (u *usageScanningStream) contentFingerprint() string {
-	if u.digest == nil {
-		sum := sha256.Sum256(nil)
-		return hex.EncodeToString(sum[:8])
-	}
-	return hex.EncodeToString(u.digest.Sum(nil)[:8])
-}
+func (u *usageScanningStream) contentFingerprint() string { return u.answer.Fingerprint() }
 
 func (u *usageScanningStream) settle(ticket breaker.Ticket) {
 	switch {
@@ -769,7 +774,11 @@ func (u *usageScanningStream) dispatch() error {
 		Usage   *core.Usage     `json:"usage"`
 		Choices []struct {
 			Delta struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Index    int                   `json:"index"`
+					Function provider.FunctionCall `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
 	}
@@ -785,11 +794,11 @@ func (u *usageScanningStream) dispatch() error {
 	if u.model == "" {
 		u.model = chunk.Model
 	}
-	if u.digest == nil {
-		u.digest = sha256.New()
-	}
 	for _, choice := range chunk.Choices {
-		_, _ = u.digest.Write([]byte(choice.Delta.Content))
+		u.answer.Text(choice.Delta.Content)
+		for _, call := range choice.Delta.ToolCalls {
+			u.answer.ToolCall(call.Index, call.Function.Name, call.Function.Arguments)
+		}
 	}
 	return nil
 }

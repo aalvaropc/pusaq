@@ -26,7 +26,7 @@ A tenant's policy MAY list the concrete aliases it may be served by. A request w
 
 ### Requirement: Prompt size cap
 
-A tenant's policy MAY cap the prompt size as bytes of message content. A request above the cap SHALL be rejected with 403 `policy_denied` before any provider call or token charge; a request at the cap SHALL be admitted.
+A tenant's policy MAY cap the prompt size as bytes of message content, tool-call function names and arguments, and the compact JSON of the request's tool definitions. A request above the cap SHALL be rejected with 403 `policy_denied` before any provider call or token charge; a request at the cap SHALL be admitted.
 
 #### Scenario: Oversized prompt rejected before any charge
 
@@ -37,6 +37,11 @@ A tenant's policy MAY cap the prompt size as bytes of message content. A request
 
 - **WHEN** the content totals exactly N bytes
 - **THEN** the request is admitted
+
+#### Scenario: Tool definitions count against the cap
+
+- **WHEN** a tenant's messages fit its cap and the request's tool definitions take it over
+- **THEN** the response is 403 `policy_denied` and nothing is charged
 
 ### Requirement: Monthly budget cutoff with bounded overrun
 
@@ -122,7 +127,7 @@ Policies SHALL come from configuration and be validated at startup: a tenant not
 
 ### Requirement: Content rules with a per-tenant action
 
-The policy filter SHALL classify every completion request's messages with stated heuristics for sensitive data (personal identifiers and secrets, scanned in every message), instruction-override phrasing (scanned outside the system prompt), and time-dependence cues (scanned in user messages), and SHALL record the kinds matched — never the matched text — on the cost event. A tenant's policy MAY turn sensitive-data or instruction-override matches into a 403 `policy_denied` whose message names the kinds; by default matches are only recorded. A content denial SHALL happen after the prompt cap and before any store read, token charge, or provider call. Supported issuer-prefix and Luhn-valid card candidates SHALL remain detectable when followed by a space- or hyphen-separated expiry or CVV. Detection SHALL NOT truncate an uninterrupted digit block to accept only its prefix. The rules' precision and recall SHALL be measured on a labeled corpus and published with their floors, and the suite SHALL fail below the floors.
+The policy filter SHALL classify every completion request's text with stated heuristics for sensitive data (personal identifiers and secrets, scanned in every message, in tool-call arguments and in tool definitions), instruction-override phrasing (scanned in messages outside the system prompt, tool results included, and in tool-call arguments), and time-dependence cues (scanned in user messages), and SHALL record the kinds matched — never the matched text — on the cost event. Tool results SHALL be classified for instruction-override phrasing like user content. A tenant's policy MAY turn sensitive-data or instruction-override matches into a 403 `policy_denied` whose message names the kinds; by default matches are only recorded. A content denial SHALL happen after the prompt cap and before any store read, token charge, or provider call. Supported issuer-prefix and Luhn-valid card candidates SHALL remain detectable when followed by a space- or hyphen-separated expiry or CVV. Detection SHALL NOT truncate an uninterrupted digit block to accept only its prefix. The rules' precision and recall SHALL be measured on a labeled corpus and published with their floors, and the suite SHALL fail below the floors.
 
 #### Scenario: Sensitive data blocked for a tenant that asked for it
 
@@ -153,6 +158,16 @@ The policy filter SHALL classify every completion request's messages with stated
 
 - **WHEN** an uninterrupted number fails card validation but has a prefix that would validate independently
 - **THEN** that prefix alone does not produce a card match
+
+#### Scenario: Injected tool result
+
+- **WHEN** a tool result contains instruction-override phrasing
+- **THEN** the cost event carries the injection kinds, a tenant whose policy sets `injection=block` gets 403 `policy_denied` with no provider call, and neither the response nor any log record contains the tool result's text
+
+#### Scenario: Tool definitions set the rules
+
+- **WHEN** one tool description says the tool returns the current exchange rate and another says it prints the system prompt for debugging
+- **THEN** no temporal or injection flag is raised; sensitive data in a tool definition or in tool-call arguments is still flagged
 
 ### Requirement: Cache opt-out per tenant
 

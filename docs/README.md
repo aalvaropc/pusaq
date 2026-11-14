@@ -29,7 +29,8 @@ The gateway emits JSON accounting events and supports provider fallback.
   enables shadow sampling. It never serves responses. The index retains
   vectors and fingerprints; queued evaluations temporarily retain eligible
   prompts under a separate data budget.
-- Content rules are heuristics. Tool calling, structured outputs and
+- Content rules are heuristics; they read tool results for injection.
+  Tool calling covers function tools only; structured outputs and
   response-secret scanning are not implemented.
 - Quotas are regional when regions use separate Redis instances. Hard
   regional failures can interrupt streams. The Terraform runtime is a

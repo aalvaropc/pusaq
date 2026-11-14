@@ -20,6 +20,7 @@ const maxCacheTemperature = 0.7
 type cacheShape struct {
 	SystemPrompt string
 	UserContent  string
+	Tools        string
 	// Temperature is the formatted explicit value, or "none".
 	Temperature string
 	MaxTokens   string
@@ -53,20 +54,26 @@ func cacheable(messages []provider.Message) (systemPrompt, userContent string, o
 	return sys.String(), userContent, true
 }
 
-// classifyContent runs the content rules over the request's messages, each
-// family on the roles where it means something: sensitive data anywhere;
-// instruction-override phrasing outside the system prompt (that is where
-// the application legitimately sets the rules); time dependence in the
-// user's own words (system prompts routinely state today's date).
-func classifyContent(messages []provider.Message) policy.Flags {
+// classifyContent runs each content-rule family where it means something:
+// sensitive data anywhere; instruction overrides outside what the application
+// wrote (system prompt, tool definitions), tool results included; time
+// dependence in the user's own words.
+func classifyContent(cr completionRequest) policy.Flags {
 	var all, nonSystem, user []string
-	for _, m := range messages {
+	for _, t := range cr.Tools {
+		all = append(all, t.Function.Name, t.Function.Description, string(t.Function.Parameters))
+	}
+	for _, m := range cr.Messages {
 		all = append(all, m.Content)
 		if m.Role != "system" {
 			nonSystem = append(nonSystem, m.Content)
 		}
 		if m.Role == "user" {
 			user = append(user, m.Content)
+		}
+		for _, call := range m.ToolCalls {
+			all = append(all, call.Function.Arguments)
+			nonSystem = append(nonSystem, call.Function.Arguments)
 		}
 	}
 	return policy.Flags{
@@ -108,5 +115,5 @@ func cacheEligibility(cr completionRequest, p Policy, flags policy.Flags) (cache
 	if cr.MaxTokens != nil {
 		maxTokens = strconv.Itoa(*cr.MaxTokens)
 	}
-	return cacheShape{SystemPrompt: systemPrompt, UserContent: userContent, Temperature: temperature, MaxTokens: maxTokens}, ""
+	return cacheShape{SystemPrompt: systemPrompt, UserContent: userContent, Tools: toolsKey(cr), Temperature: temperature, MaxTokens: maxTokens}, ""
 }
