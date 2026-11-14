@@ -1,0 +1,621 @@
+intent,lang,family,kind,text
+capital-peru,en,capital,entity,What is the capital of Peru?
+capital-peru,en,capital,entity,Tell me the capital city of Peru
+capital-peru,en,capital,entity,Which city is the capital of Peru?
+capital-peru,en,capital,entity,What city serves as Peru's capital?
+capital-peru,en,capital,entity,Name the capital of Peru
+capital-peru,es,capital,entity,¿Cuál es la capital de Perú?
+capital-peru,es,capital,entity,Dime la capital de Perú
+capital-peru,es,capital,entity,¿Qué ciudad es la capital de Perú?
+capital-peru,es,capital,entity,¿Cuál es la ciudad capital del Perú?
+capital-peru,es,capital,entity,Nombra la capital de Perú
+capital-bolivia,en,capital,entity,What is the capital of Bolivia?
+capital-bolivia,en,capital,entity,Tell me the capital city of Bolivia
+capital-bolivia,en,capital,entity,Which city is the capital of Bolivia?
+capital-bolivia,en,capital,entity,What city serves as Bolivia's capital?
+capital-bolivia,en,capital,entity,Name the capital of Bolivia
+capital-bolivia,es,capital,entity,¿Cuál es la capital de Bolivia?
+capital-bolivia,es,capital,entity,Dime la capital de Bolivia
+capital-bolivia,es,capital,entity,¿Qué ciudad es la capital de Bolivia?
+capital-bolivia,es,capital,entity,¿Cuál es la ciudad capital de Bolivia?
+capital-bolivia,es,capital,entity,Nombra la capital de Bolivia
+currency-peru,en,capital,entity,What is the currency of Peru?
+currency-peru,en,capital,entity,Tell me the official currency of Peru
+currency-peru,en,capital,entity,Which currency is used in Peru?
+currency-peru,en,capital,entity,What money does Peru use?
+currency-peru,en,capital,entity,Name the currency of Peru
+currency-peru,es,capital,entity,¿Cuál es la moneda de Perú?
+currency-peru,es,capital,entity,Dime la moneda oficial de Perú
+currency-peru,es,capital,entity,¿Qué moneda se usa en Perú?
+currency-peru,es,capital,entity,¿Con qué dinero se paga en Perú?
+currency-peru,es,capital,entity,Nombra la moneda de Perú
+cancel-subscription,en,subscription,action,How do I cancel my subscription?
+cancel-subscription,en,subscription,action,I want to cancel my subscription
+cancel-subscription,en,subscription,action,What are the steps to cancel my subscription?
+cancel-subscription,en,subscription,action,How can I cancel my plan subscription?
+cancel-subscription,en,subscription,action,Help me cancel my subscription
+cancel-subscription,es,subscription,action,¿Cómo cancelo mi suscripción?
+cancel-subscription,es,subscription,action,Quiero cancelar mi suscripción
+cancel-subscription,es,subscription,action,¿Cuáles son los pasos para cancelar mi suscripción?
+cancel-subscription,es,subscription,action,¿Cómo puedo dar de baja mi suscripción?
+cancel-subscription,es,subscription,action,Ayúdame a cancelar mi suscripción
+renew-subscription,en,subscription,action,How do I renew my subscription?
+renew-subscription,en,subscription,action,I want to renew my subscription
+renew-subscription,en,subscription,action,What are the steps to renew my subscription?
+renew-subscription,en,subscription,action,How can I renew my plan subscription?
+renew-subscription,en,subscription,action,Help me renew my subscription
+renew-subscription,es,subscription,action,¿Cómo renuevo mi suscripción?
+renew-subscription,es,subscription,action,Quiero renovar mi suscripción
+renew-subscription,es,subscription,action,¿Cuáles son los pasos para renovar mi suscripción?
+renew-subscription,es,subscription,action,¿Cómo puedo renovar mi suscripción?
+renew-subscription,es,subscription,action,Ayúdame a renovar mi suscripción
+upgrade-subscription,en,subscription,action,How do I upgrade my subscription?
+upgrade-subscription,en,subscription,action,I want to upgrade my subscription
+upgrade-subscription,en,subscription,action,What are the steps to upgrade my subscription?
+upgrade-subscription,en,subscription,action,How can I upgrade my plan subscription?
+upgrade-subscription,en,subscription,action,Help me upgrade my subscription
+upgrade-subscription,es,subscription,action,¿Cómo mejoro mi suscripción?
+upgrade-subscription,es,subscription,action,Quiero mejorar mi suscripción
+upgrade-subscription,es,subscription,action,¿Cuáles son los pasos para mejorar mi suscripción?
+upgrade-subscription,es,subscription,action,¿Cómo puedo subir de nivel mi suscripción?
+upgrade-subscription,es,subscription,action,Ayúdame a mejorar mi suscripción
+enable-2fa,en,two-factor,action,How do I enable two-factor authentication?
+enable-2fa,en,two-factor,action,How can I turn on two-factor authentication?
+enable-2fa,en,two-factor,action,I want to activate two-factor authentication
+enable-2fa,en,two-factor,action,What are the steps to enable two-factor authentication?
+enable-2fa,en,two-factor,action,Help me enable two-factor authentication on my account
+enable-2fa,es,two-factor,action,¿Cómo activo la autenticación de dos factores?
+enable-2fa,es,two-factor,action,¿Cómo puedo encender la autenticación de dos factores?
+enable-2fa,es,two-factor,action,Quiero activar la verificación en dos pasos
+enable-2fa,es,two-factor,action,¿Cuáles son los pasos para activar la autenticación de dos factores?
+enable-2fa,es,two-factor,action,Ayúdame a activar la autenticación de dos factores en mi cuenta
+disable-2fa,en,two-factor,action,How do I disable two-factor authentication?
+disable-2fa,en,two-factor,action,How can I turn off two-factor authentication?
+disable-2fa,en,two-factor,action,I want to deactivate two-factor authentication
+disable-2fa,en,two-factor,action,What are the steps to disable two-factor authentication?
+disable-2fa,en,two-factor,action,Help me disable two-factor authentication on my account
+disable-2fa,es,two-factor,action,¿Cómo desactivo la autenticación de dos factores?
+disable-2fa,es,two-factor,action,¿Cómo puedo apagar la autenticación de dos factores?
+disable-2fa,es,two-factor,action,Quiero desactivar la verificación en dos pasos
+disable-2fa,es,two-factor,action,¿Cuáles son los pasos para desactivar la autenticación de dos factores?
+disable-2fa,es,two-factor,action,Ayúdame a desactivar la autenticación de dos factores en mi cuenta
+premium-price,en,plan-price,entity,How much does the premium plan cost?
+premium-price,en,plan-price,entity,What is the price of the premium plan?
+premium-price,en,plan-price,entity,What does the premium plan cost per month?
+premium-price,en,plan-price,entity,Tell me the premium plan price
+premium-price,en,plan-price,entity,How expensive is the premium plan?
+premium-price,es,plan-price,entity,¿Cuánto cuesta el plan premium?
+premium-price,es,plan-price,entity,¿Cuál es el precio del plan premium?
+premium-price,es,plan-price,entity,¿Cuánto vale el plan premium al mes?
+premium-price,es,plan-price,entity,Dime el precio del plan premium
+premium-price,es,plan-price,entity,¿Qué tan caro es el plan premium?
+basic-price,en,plan-price,entity,How much does the basic plan cost?
+basic-price,en,plan-price,entity,What is the price of the basic plan?
+basic-price,en,plan-price,entity,What does the basic plan cost per month?
+basic-price,en,plan-price,entity,Tell me the basic plan price
+basic-price,en,plan-price,entity,How expensive is the basic plan?
+basic-price,es,plan-price,entity,¿Cuánto cuesta el plan básico?
+basic-price,es,plan-price,entity,¿Cuál es el precio del plan básico?
+basic-price,es,plan-price,entity,¿Cuánto vale el plan básico al mes?
+basic-price,es,plan-price,entity,Dime el precio del plan básico
+basic-price,es,plan-price,entity,¿Qué tan caro es el plan básico?
+invoice-january,en,invoice-total,date,What was the invoice total for January?
+invoice-january,en,invoice-total,date,How much was my January invoice?
+invoice-january,en,invoice-total,date,Show me the total of my invoice for January
+invoice-january,en,invoice-total,date,What did I pay on the January invoice?
+invoice-january,en,invoice-total,date,Tell me my invoice amount for January
+invoice-january,es,invoice-total,date,¿Cuál fue el total de la factura de enero?
+invoice-january,es,invoice-total,date,¿Cuánto fue mi factura de enero?
+invoice-january,es,invoice-total,date,Muéstrame el total de mi factura de enero
+invoice-january,es,invoice-total,date,¿Cuánto pagué en la factura de enero?
+invoice-january,es,invoice-total,date,Dime el monto de mi factura de enero
+invoice-february,en,invoice-total,date,What was the invoice total for February?
+invoice-february,en,invoice-total,date,How much was my February invoice?
+invoice-february,en,invoice-total,date,Show me the total of my invoice for February
+invoice-february,en,invoice-total,date,What did I pay on the February invoice?
+invoice-february,en,invoice-total,date,Tell me my invoice amount for February
+invoice-february,es,invoice-total,date,¿Cuál fue el total de la factura de febrero?
+invoice-february,es,invoice-total,date,¿Cuánto fue mi factura de febrero?
+invoice-february,es,invoice-total,date,Muéstrame el total de mi factura de febrero
+invoice-february,es,invoice-total,date,¿Cuánto pagué en la factura de febrero?
+invoice-february,es,invoice-total,date,Dime el monto de mi factura de febrero
+convert-100-km,en,unit-conversion,quantity,How many miles are 100 kilometers?
+convert-100-km,en,unit-conversion,quantity,Convert 100 kilometers to miles
+convert-100-km,en,unit-conversion,quantity,What is 100 km in miles?
+convert-100-km,en,unit-conversion,quantity,How far is 100 kilometers in miles?
+convert-100-km,en,unit-conversion,quantity,Change 100 kilometers into miles
+convert-100-km,es,unit-conversion,quantity,¿Cuántas millas son 100 kilómetros?
+convert-100-km,es,unit-conversion,quantity,Convierte 100 kilómetros a millas
+convert-100-km,es,unit-conversion,quantity,¿Cuánto es 100 km en millas?
+convert-100-km,es,unit-conversion,quantity,¿A cuántas millas equivalen 100 kilómetros?
+convert-100-km,es,unit-conversion,quantity,Pasa 100 kilómetros a millas
+convert-1000-km,en,unit-conversion,quantity,How many miles are 1000 kilometers?
+convert-1000-km,en,unit-conversion,quantity,Convert 1000 kilometers to miles
+convert-1000-km,en,unit-conversion,quantity,What is 1000 km in miles?
+convert-1000-km,en,unit-conversion,quantity,How far is 1000 kilometers in miles?
+convert-1000-km,en,unit-conversion,quantity,Change 1000 kilometers into miles
+convert-1000-km,es,unit-conversion,quantity,¿Cuántas millas son 1000 kilómetros?
+convert-1000-km,es,unit-conversion,quantity,Convierte 1000 kilómetros a millas
+convert-1000-km,es,unit-conversion,quantity,¿Cuánto es 1000 km en millas?
+convert-1000-km,es,unit-conversion,quantity,¿A cuántas millas equivalen 1000 kilómetros?
+convert-1000-km,es,unit-conversion,quantity,Pasa 1000 kilómetros a millas
+fees-domestic,en,transfer-fees,entity,What are the fees for domestic transfers?
+fees-domestic,en,transfer-fees,entity,How much do domestic transfers cost?
+fees-domestic,en,transfer-fees,entity,What do you charge for a domestic transfer?
+fees-domestic,en,transfer-fees,entity,Are there fees on domestic transfers?
+fees-domestic,en,transfer-fees,entity,Tell me the domestic transfer fees
+fees-domestic,es,transfer-fees,entity,¿Cuáles son las comisiones de transferencias nacionales?
+fees-domestic,es,transfer-fees,entity,¿Cuánto cuestan las transferencias nacionales?
+fees-domestic,es,transfer-fees,entity,¿Qué cobran por una transferencia nacional?
+fees-domestic,es,transfer-fees,entity,¿Hay comisiones en las transferencias nacionales?
+fees-domestic,es,transfer-fees,entity,Dime las comisiones de transferencia nacional
+fees-international,en,transfer-fees,entity,What are the fees for international transfers?
+fees-international,en,transfer-fees,entity,How much do international transfers cost?
+fees-international,en,transfer-fees,entity,What do you charge for an international transfer?
+fees-international,en,transfer-fees,entity,Are there fees on international transfers?
+fees-international,en,transfer-fees,entity,Tell me the international transfer fees
+fees-international,es,transfer-fees,entity,¿Cuáles son las comisiones de transferencias internacionales?
+fees-international,es,transfer-fees,entity,¿Cuánto cuestan las transferencias internacionales?
+fees-international,es,transfer-fees,entity,¿Qué cobran por una transferencia internacional?
+fees-international,es,transfer-fees,entity,¿Hay comisiones en las transferencias internacionales?
+fees-international,es,transfer-fees,entity,Dime las comisiones de transferencia internacional
+send-chile,en,money-chile,action,How do I send money to Chile?
+send-chile,en,money-chile,action,What is the way to send money to Chile?
+send-chile,en,money-chile,action,I need to send money to Chile
+send-chile,en,money-chile,action,Can I send money to someone in Chile?
+send-chile,en,money-chile,action,Explain how to send a transfer to Chile
+send-chile,es,money-chile,action,¿Cómo envío dinero a Chile?
+send-chile,es,money-chile,action,¿Cuál es la forma de enviar dinero a Chile?
+send-chile,es,money-chile,action,Necesito enviar dinero a Chile
+send-chile,es,money-chile,action,¿Puedo enviar dinero a alguien en Chile?
+send-chile,es,money-chile,action,Explícame cómo enviar una transferencia a Chile
+receive-chile,en,money-chile,action,How do I receive money from Chile?
+receive-chile,en,money-chile,action,What is the way to receive money from Chile?
+receive-chile,en,money-chile,action,I need to receive money from Chile
+receive-chile,en,money-chile,action,Can I receive money from someone in Chile?
+receive-chile,en,money-chile,action,Explain how to receive a transfer from Chile
+receive-chile,es,money-chile,action,¿Cómo recibo dinero de Chile?
+receive-chile,es,money-chile,action,¿Cuál es la forma de recibir dinero de Chile?
+receive-chile,es,money-chile,action,Necesito recibir dinero de Chile
+receive-chile,es,money-chile,action,¿Puedo recibir dinero de alguien en Chile?
+receive-chile,es,money-chile,action,Explícame cómo recibir una transferencia de Chile
+deposit-time,en,processing-time,action,How long does a deposit take?
+deposit-time,en,processing-time,action,How much time does a deposit need to arrive?
+deposit-time,en,processing-time,action,When will my deposit be available?
+deposit-time,en,processing-time,action,How many days does a deposit take to process?
+deposit-time,en,processing-time,action,What is the processing time for a deposit?
+deposit-time,es,processing-time,action,¿Cuánto demora un depósito?
+deposit-time,es,processing-time,action,¿Cuánto tiempo tarda en llegar un depósito?
+deposit-time,es,processing-time,action,¿Cuándo estará disponible mi depósito?
+deposit-time,es,processing-time,action,¿Cuántos días tarda en procesarse un depósito?
+deposit-time,es,processing-time,action,¿Cuál es el tiempo de procesamiento de un depósito?
+withdrawal-time,en,processing-time,action,How long does a withdrawal take?
+withdrawal-time,en,processing-time,action,How much time does a withdrawal need to arrive?
+withdrawal-time,en,processing-time,action,When will my withdrawal be available?
+withdrawal-time,en,processing-time,action,How many days does a withdrawal take to process?
+withdrawal-time,en,processing-time,action,What is the processing time for a withdrawal?
+withdrawal-time,es,processing-time,action,¿Cuánto demora un retiro?
+withdrawal-time,es,processing-time,action,¿Cuánto tiempo tarda en llegar un retiro?
+withdrawal-time,es,processing-time,action,¿Cuándo estará disponible mi retiro?
+withdrawal-time,es,processing-time,action,¿Cuántos días tarda en procesarse un retiro?
+withdrawal-time,es,processing-time,action,¿Cuál es el tiempo de procesamiento de un retiro?
+limit-incoming,en,transfer-limit,entity,What is the limit for incoming transfers?
+limit-incoming,en,transfer-limit,entity,How much can I receive in incoming transfers?
+limit-incoming,en,transfer-limit,entity,Is there a maximum for incoming transfers?
+limit-incoming,en,transfer-limit,entity,Tell me the incoming transfer limit
+limit-incoming,en,transfer-limit,entity,What is the cap on incoming transfers?
+limit-incoming,es,transfer-limit,entity,¿Cuál es el límite para transferencias entrantes?
+limit-incoming,es,transfer-limit,entity,¿Cuánto puedo recibir en transferencias entrantes?
+limit-incoming,es,transfer-limit,entity,¿Hay un máximo para las transferencias entrantes?
+limit-incoming,es,transfer-limit,entity,Dime el límite de transferencias entrantes
+limit-incoming,es,transfer-limit,entity,¿Cuál es el tope de las transferencias entrantes?
+limit-outgoing,en,transfer-limit,entity,What is the limit for outgoing transfers?
+limit-outgoing,en,transfer-limit,entity,How much can I send in outgoing transfers?
+limit-outgoing,en,transfer-limit,entity,Is there a maximum for outgoing transfers?
+limit-outgoing,en,transfer-limit,entity,Tell me the outgoing transfer limit
+limit-outgoing,en,transfer-limit,entity,What is the cap on outgoing transfers?
+limit-outgoing,es,transfer-limit,entity,¿Cuál es el límite para transferencias salientes?
+limit-outgoing,es,transfer-limit,entity,¿Cuánto puedo enviar en transferencias salientes?
+limit-outgoing,es,transfer-limit,entity,¿Hay un máximo para las transferencias salientes?
+limit-outgoing,es,transfer-limit,entity,Dime el límite de transferencias salientes
+limit-outgoing,es,transfer-limit,entity,¿Cuál es el tope de las transferencias salientes?
+pay-credit,en,card-payment,entity,Can I pay with a credit card?
+pay-credit,en,card-payment,entity,Do you accept credit cards?
+pay-credit,en,card-payment,entity,Is paying by credit card possible?
+pay-credit,en,card-payment,entity,Can I use my credit card to pay?
+pay-credit,en,card-payment,entity,Are credit card payments accepted?
+pay-credit,es,card-payment,entity,¿Puedo pagar con tarjeta de crédito?
+pay-credit,es,card-payment,entity,¿Aceptan tarjetas de crédito?
+pay-credit,es,card-payment,entity,¿Es posible pagar con tarjeta de crédito?
+pay-credit,es,card-payment,entity,¿Puedo usar mi tarjeta de crédito para pagar?
+pay-credit,es,card-payment,entity,¿Se aceptan pagos con tarjeta de crédito?
+pay-debit,en,card-payment,entity,Can I pay with a debit card?
+pay-debit,en,card-payment,entity,Do you accept debit cards?
+pay-debit,en,card-payment,entity,Is paying by debit card possible?
+pay-debit,en,card-payment,entity,Can I use my debit card to pay?
+pay-debit,en,card-payment,entity,Are debit card payments accepted?
+pay-debit,es,card-payment,entity,¿Puedo pagar con tarjeta de débito?
+pay-debit,es,card-payment,entity,¿Aceptan tarjetas de débito?
+pay-debit,es,card-payment,entity,¿Es posible pagar con tarjeta de débito?
+pay-debit,es,card-payment,entity,¿Puedo usar mi tarjeta de débito para pagar?
+pay-debit,es,card-payment,entity,¿Se aceptan pagos con tarjeta de débito?
+add-user,en,team,action,How do I add a user to my team?
+add-user,en,team,action,How can I invite a new member to my team?
+add-user,en,team,action,I want to add someone to my team
+add-user,en,team,action,What are the steps to add a team member?
+add-user,en,team,action,Help me add a user to my team
+add-user,es,team,action,¿Cómo agrego un usuario a mi equipo?
+add-user,es,team,action,¿Cómo puedo invitar a un nuevo miembro a mi equipo?
+add-user,es,team,action,Quiero agregar a alguien a mi equipo
+add-user,es,team,action,¿Cuáles son los pasos para agregar un miembro al equipo?
+add-user,es,team,action,Ayúdame a agregar un usuario a mi equipo
+remove-user,en,team,action,How do I remove a user from my team?
+remove-user,en,team,action,How can I take a member off my team?
+remove-user,en,team,action,I want to remove someone from my team
+remove-user,en,team,action,What are the steps to remove a team member?
+remove-user,en,team,action,Help me remove a user from my team
+remove-user,es,team,action,¿Cómo quito un usuario de mi equipo?
+remove-user,es,team,action,¿Cómo puedo sacar a un miembro de mi equipo?
+remove-user,es,team,action,Quiero quitar a alguien de mi equipo
+remove-user,es,team,action,¿Cuáles son los pasos para quitar un miembro del equipo?
+remove-user,es,team,action,Ayúdame a quitar un usuario de mi equipo
+reset-password,en,reset,entity,How do I reset my password?
+reset-password,en,reset,entity,"I forgot my password, how can I reset it?"
+reset-password,en,reset,entity,What is the way to reset my password?
+reset-password,en,reset,entity,Help me reset my password
+reset-password,en,reset,entity,How can I recover my password?
+reset-password,es,reset,entity,¿Cómo restablezco mi contraseña?
+reset-password,es,reset,entity,"Olvidé mi contraseña, ¿cómo la restablezco?"
+reset-password,es,reset,entity,¿Cuál es la forma de restablecer mi contraseña?
+reset-password,es,reset,entity,Ayúdame a restablecer mi contraseña
+reset-password,es,reset,entity,¿Cómo puedo recuperar mi contraseña?
+reset-pin,en,reset,entity,How do I reset my card PIN?
+reset-pin,en,reset,entity,"I forgot my card PIN, how can I reset it?"
+reset-pin,en,reset,entity,What is the way to reset my card PIN?
+reset-pin,en,reset,entity,Help me reset my card PIN
+reset-pin,en,reset,entity,How can I recover my card PIN?
+reset-pin,es,reset,entity,¿Cómo restablezco el PIN de mi tarjeta?
+reset-pin,es,reset,entity,"Olvidé el PIN de mi tarjeta, ¿cómo lo restablezco?"
+reset-pin,es,reset,entity,¿Cuál es la forma de restablecer el PIN de mi tarjeta?
+reset-pin,es,reset,entity,Ayúdame a restablecer el PIN de mi tarjeta
+reset-pin,es,reset,entity,¿Cómo puedo recuperar el PIN de mi tarjeta?
+hours-weekdays,en,hours,date,What are your business hours on weekdays?
+hours-weekdays,en,hours,date,When are you open on weekdays?
+hours-weekdays,en,hours,date,What time do you open on weekdays?
+hours-weekdays,en,hours,date,"Are you open on weekdays, and until what time?"
+hours-weekdays,en,hours,date,Tell me your weekday opening hours
+hours-weekdays,es,hours,date,¿Cuál es su horario de atención entre semana?
+hours-weekdays,es,hours,date,¿Cuándo abren entre semana?
+hours-weekdays,es,hours,date,¿A qué hora abren entre semana?
+hours-weekdays,es,hours,date,¿Atienden entre semana y hasta qué hora?
+hours-weekdays,es,hours,date,Dime su horario de apertura entre semana
+hours-sunday,en,hours,date,What are your business hours on Sundays?
+hours-sunday,en,hours,date,When are you open on Sundays?
+hours-sunday,en,hours,date,What time do you open on Sundays?
+hours-sunday,en,hours,date,"Are you open on Sundays, and until what time?"
+hours-sunday,en,hours,date,Tell me your Sunday opening hours
+hours-sunday,es,hours,date,¿Cuál es su horario de atención los domingos?
+hours-sunday,es,hours,date,¿Cuándo abren los domingos?
+hours-sunday,es,hours,date,¿A qué hora abren los domingos?
+hours-sunday,es,hours,date,¿Atienden los domingos y hasta qué hora?
+hours-sunday,es,hours,date,Dime su horario de apertura los domingos
+delivery-lima,en,card-delivery,entity,How long does card delivery take to Lima?
+delivery-lima,en,card-delivery,entity,When will my card arrive if I live in Lima?
+delivery-lima,en,card-delivery,entity,How many days does it take to deliver a card to Lima?
+delivery-lima,en,card-delivery,entity,What is the card delivery time for Lima?
+delivery-lima,en,card-delivery,entity,How long until my card reaches Lima?
+delivery-lima,es,card-delivery,entity,¿Cuánto demora la entrega de la tarjeta a Lima?
+delivery-lima,es,card-delivery,entity,¿Cuándo llega mi tarjeta si vivo en Lima?
+delivery-lima,es,card-delivery,entity,¿Cuántos días tarda en entregarse una tarjeta en Lima?
+delivery-lima,es,card-delivery,entity,¿Cuál es el tiempo de entrega de la tarjeta para Lima?
+delivery-lima,es,card-delivery,entity,¿Cuánto falta para que mi tarjeta llegue a Lima?
+delivery-cusco,en,card-delivery,entity,How long does card delivery take to Cusco?
+delivery-cusco,en,card-delivery,entity,When will my card arrive if I live in Cusco?
+delivery-cusco,en,card-delivery,entity,How many days does it take to deliver a card to Cusco?
+delivery-cusco,en,card-delivery,entity,What is the card delivery time for Cusco?
+delivery-cusco,en,card-delivery,entity,How long until my card reaches Cusco?
+delivery-cusco,es,card-delivery,entity,¿Cuánto demora la entrega de la tarjeta a Cusco?
+delivery-cusco,es,card-delivery,entity,¿Cuándo llega mi tarjeta si vivo en Cusco?
+delivery-cusco,es,card-delivery,entity,¿Cuántos días tarda en entregarse una tarjeta en Cusco?
+delivery-cusco,es,card-delivery,entity,¿Cuál es el tiempo de entrega de la tarjeta para Cusco?
+delivery-cusco,es,card-delivery,entity,¿Cuánto falta para que mi tarjeta llegue a Cusco?
+export-csv,en,export,entity,How do I export my data as CSV?
+export-csv,en,export,entity,Can I download my data in CSV format?
+export-csv,en,export,entity,What is the way to export my data to a CSV file?
+export-csv,en,export,entity,I want to export my data as a CSV
+export-csv,en,export,entity,Help me export my data in CSV
+export-csv,es,export,entity,¿Cómo exporto mis datos en CSV?
+export-csv,es,export,entity,¿Puedo descargar mis datos en formato CSV?
+export-csv,es,export,entity,¿Cuál es la forma de exportar mis datos a un archivo CSV?
+export-csv,es,export,entity,Quiero exportar mis datos en CSV
+export-csv,es,export,entity,Ayúdame a exportar mis datos en CSV
+export-pdf,en,export,entity,How do I export my data as PDF?
+export-pdf,en,export,entity,Can I download my data in PDF format?
+export-pdf,en,export,entity,What is the way to export my data to a PDF file?
+export-pdf,en,export,entity,I want to export my data as a PDF
+export-pdf,en,export,entity,Help me export my data in PDF
+export-pdf,es,export,entity,¿Cómo exporto mis datos en PDF?
+export-pdf,es,export,entity,¿Puedo descargar mis datos en formato PDF?
+export-pdf,es,export,entity,¿Cuál es la forma de exportar mis datos a un archivo PDF?
+export-pdf,es,export,entity,Quiero exportar mis datos en PDF
+export-pdf,es,export,entity,Ayúdame a exportar mis datos en PDF
+delete-account,en,delete,entity,How do I delete my account?
+delete-account,en,delete,entity,I want to permanently delete my account
+delete-account,en,delete,entity,What are the steps to delete my account?
+delete-account,en,delete,entity,How can I remove my account?
+delete-account,en,delete,entity,Help me delete my account
+delete-account,es,delete,entity,¿Cómo elimino mi cuenta?
+delete-account,es,delete,entity,Quiero eliminar mi cuenta permanentemente
+delete-account,es,delete,entity,¿Cuáles son los pasos para eliminar mi cuenta?
+delete-account,es,delete,entity,¿Cómo puedo borrar mi cuenta?
+delete-account,es,delete,entity,Ayúdame a eliminar mi cuenta
+delete-payment-method,en,delete,entity,How do I delete my payment method?
+delete-payment-method,en,delete,entity,I want to permanently delete my payment method
+delete-payment-method,en,delete,entity,What are the steps to delete my payment method?
+delete-payment-method,en,delete,entity,How can I remove my payment method?
+delete-payment-method,en,delete,entity,Help me delete my payment method
+delete-payment-method,es,delete,entity,¿Cómo elimino mi método de pago?
+delete-payment-method,es,delete,entity,Quiero eliminar mi método de pago permanentemente
+delete-payment-method,es,delete,entity,¿Cuáles son los pasos para eliminar mi método de pago?
+delete-payment-method,es,delete,entity,¿Cómo puedo borrar mi método de pago?
+delete-payment-method,es,delete,entity,Ayúdame a eliminar mi método de pago
+tax-2024,en,tax-statement,date,Where can I download my 2024 tax statement?
+tax-2024,en,tax-statement,date,How do I get my tax statement for 2024?
+tax-2024,en,tax-statement,date,I need my 2024 tax statement
+tax-2024,en,tax-statement,date,Where is the tax statement for 2024?
+tax-2024,en,tax-statement,date,Can I download the 2024 tax statement?
+tax-2024,es,tax-statement,date,¿Dónde descargo mi constancia tributaria de 2024?
+tax-2024,es,tax-statement,date,¿Cómo obtengo mi constancia tributaria del 2024?
+tax-2024,es,tax-statement,date,Necesito mi constancia tributaria de 2024
+tax-2024,es,tax-statement,date,¿Dónde está la constancia tributaria de 2024?
+tax-2024,es,tax-statement,date,¿Puedo descargar la constancia tributaria de 2024?
+tax-2025,en,tax-statement,date,Where can I download my 2025 tax statement?
+tax-2025,en,tax-statement,date,How do I get my tax statement for 2025?
+tax-2025,en,tax-statement,date,I need my 2025 tax statement
+tax-2025,en,tax-statement,date,Where is the tax statement for 2025?
+tax-2025,en,tax-statement,date,Can I download the 2025 tax statement?
+tax-2025,es,tax-statement,date,¿Dónde descargo mi constancia tributaria de 2025?
+tax-2025,es,tax-statement,date,¿Cómo obtengo mi constancia tributaria del 2025?
+tax-2025,es,tax-statement,date,Necesito mi constancia tributaria de 2025
+tax-2025,es,tax-statement,date,¿Dónde está la constancia tributaria de 2025?
+tax-2025,es,tax-statement,date,¿Puedo descargar la constancia tributaria de 2025?
+contact-support,en,contact-support,none,How do I contact support?
+contact-support,en,contact-support,none,What is the way to reach customer support?
+contact-support,en,contact-support,none,How can I talk to someone from support?
+contact-support,en,contact-support,none,I need to get in touch with support
+contact-support,en,contact-support,none,Where can I find the support contact?
+contact-support,es,contact-support,none,¿Cómo contacto a soporte?
+contact-support,es,contact-support,none,¿Cómo me comunico con atención al cliente?
+contact-support,es,contact-support,none,¿Cómo puedo hablar con alguien de soporte?
+contact-support,es,contact-support,none,Necesito comunicarme con soporte
+contact-support,es,contact-support,none,¿Dónde encuentro el contacto de soporte?
+free-trial,en,free-trial,none,Is there a free trial available?
+free-trial,en,free-trial,none,Do you offer a free trial?
+free-trial,en,free-trial,none,Can I try the product for free first?
+free-trial,en,free-trial,none,Is a free trial included?
+free-trial,en,free-trial,none,Can I start with a free trial?
+free-trial,es,free-trial,none,¿Hay una prueba gratuita disponible?
+free-trial,es,free-trial,none,¿Ofrecen una prueba gratis?
+free-trial,es,free-trial,none,¿Puedo probar el producto gratis primero?
+free-trial,es,free-trial,none,¿Incluye una prueba gratuita?
+free-trial,es,free-trial,none,¿Puedo empezar con una prueba gratuita?
+rate-6-months,en,deposit-rate,quantity,What is the interest rate for a 6-month deposit?
+rate-6-months,en,deposit-rate,quantity,How much interest does a 6-month deposit pay?
+rate-6-months,en,deposit-rate,quantity,What rate do you offer on a 6-month term deposit?
+rate-6-months,en,deposit-rate,quantity,Tell me the interest on a 6-month deposit
+rate-6-months,en,deposit-rate,quantity,What is the yield of a 6-month deposit?
+rate-6-months,es,deposit-rate,quantity,¿Cuál es la tasa de interés para un depósito a 6 meses?
+rate-6-months,es,deposit-rate,quantity,¿Cuánto interés paga un depósito a 6 meses?
+rate-6-months,es,deposit-rate,quantity,¿Qué tasa ofrecen en un depósito a plazo de 6 meses?
+rate-6-months,es,deposit-rate,quantity,Dime el interés de un depósito a 6 meses
+rate-6-months,es,deposit-rate,quantity,¿Cuál es el rendimiento de un depósito a 6 meses?
+rate-12-months,en,deposit-rate,quantity,What is the interest rate for a 12-month deposit?
+rate-12-months,en,deposit-rate,quantity,How much interest does a 12-month deposit pay?
+rate-12-months,en,deposit-rate,quantity,What rate do you offer on a 12-month term deposit?
+rate-12-months,en,deposit-rate,quantity,Tell me the interest on a 12-month deposit
+rate-12-months,en,deposit-rate,quantity,What is the yield of a 12-month deposit?
+rate-12-months,es,deposit-rate,quantity,¿Cuál es la tasa de interés para un depósito a 12 meses?
+rate-12-months,es,deposit-rate,quantity,¿Cuánto interés paga un depósito a 12 meses?
+rate-12-months,es,deposit-rate,quantity,¿Qué tasa ofrecen en un depósito a plazo de 12 meses?
+rate-12-months,es,deposit-rate,quantity,Dime el interés de un depósito a 12 meses
+rate-12-months,es,deposit-rate,quantity,¿Cuál es el rendimiento de un depósito a 12 meses?
+balance-savings,en,min-balance,entity,What is the minimum balance for a savings account?
+balance-savings,en,min-balance,entity,How much do I need to keep in a savings account?
+balance-savings,en,min-balance,entity,Is there a minimum balance on savings accounts?
+balance-savings,en,min-balance,entity,Tell me the minimum balance for savings accounts
+balance-savings,en,min-balance,entity,What balance must a savings account keep?
+balance-savings,es,min-balance,entity,¿Cuál es el saldo mínimo de una cuenta de ahorros?
+balance-savings,es,min-balance,entity,¿Cuánto debo mantener en una cuenta de ahorros?
+balance-savings,es,min-balance,entity,¿Hay un saldo mínimo en las cuentas de ahorros?
+balance-savings,es,min-balance,entity,Dime el saldo mínimo de las cuentas de ahorros
+balance-savings,es,min-balance,entity,¿Qué saldo debe mantener una cuenta de ahorros?
+balance-checking,en,min-balance,entity,What is the minimum balance for a checking account?
+balance-checking,en,min-balance,entity,How much do I need to keep in a checking account?
+balance-checking,en,min-balance,entity,Is there a minimum balance on checking accounts?
+balance-checking,en,min-balance,entity,Tell me the minimum balance for checking accounts
+balance-checking,en,min-balance,entity,What balance must a checking account keep?
+balance-checking,es,min-balance,entity,¿Cuál es el saldo mínimo de una cuenta corriente?
+balance-checking,es,min-balance,entity,¿Cuánto debo mantener en una cuenta corriente?
+balance-checking,es,min-balance,entity,¿Hay un saldo mínimo en las cuentas corrientes?
+balance-checking,es,min-balance,entity,Dime el saldo mínimo de las cuentas corrientes
+balance-checking,es,min-balance,entity,¿Qué saldo debe mantener una cuenta corriente?
+refund-time,en,reversal-time,entity,How long does a refund take?
+refund-time,en,reversal-time,entity,How many days until I get my refund?
+refund-time,en,reversal-time,entity,When will I receive my refund?
+refund-time,en,reversal-time,entity,How long do refunds take to process?
+refund-time,en,reversal-time,entity,What is the waiting time for a refund?
+refund-time,es,reversal-time,entity,¿Cuánto demora un reembolso?
+refund-time,es,reversal-time,entity,¿Cuántos días faltan para recibir mi reembolso?
+refund-time,es,reversal-time,entity,¿Cuándo recibiré mi reembolso?
+refund-time,es,reversal-time,entity,¿Cuánto tarda en procesarse un reembolso?
+refund-time,es,reversal-time,entity,¿Cuál es el tiempo de espera de un reembolso?
+chargeback-time,en,reversal-time,entity,How long does a chargeback take?
+chargeback-time,en,reversal-time,entity,How many days until I get my chargeback?
+chargeback-time,en,reversal-time,entity,When will I receive my chargeback?
+chargeback-time,en,reversal-time,entity,How long do chargebacks take to process?
+chargeback-time,en,reversal-time,entity,What is the waiting time for a chargeback?
+chargeback-time,es,reversal-time,entity,¿Cuánto demora un contracargo?
+chargeback-time,es,reversal-time,entity,¿Cuántos días faltan para recibir mi contracargo?
+chargeback-time,es,reversal-time,entity,¿Cuándo recibiré mi contracargo?
+chargeback-time,es,reversal-time,entity,¿Cuánto tarda en procesarse un contracargo?
+chargeback-time,es,reversal-time,entity,¿Cuál es el tiempo de espera de un contracargo?
+methods-accepted,en,payment-methods,negation,Which payment methods do you accept?
+methods-accepted,en,payment-methods,negation,What payment methods are accepted?
+methods-accepted,en,payment-methods,negation,Tell me the payment methods you accept
+methods-accepted,en,payment-methods,negation,What ways to pay do you accept?
+methods-accepted,en,payment-methods,negation,Which payment options are accepted?
+methods-accepted,es,payment-methods,negation,¿Qué métodos de pago aceptan?
+methods-accepted,es,payment-methods,negation,¿Qué métodos de pago se aceptan?
+methods-accepted,es,payment-methods,negation,Dime los métodos de pago que aceptan
+methods-accepted,es,payment-methods,negation,¿Qué formas de pago aceptan?
+methods-accepted,es,payment-methods,negation,¿Qué opciones de pago se aceptan?
+methods-not-accepted,en,payment-methods,negation,Which payment methods do you not accept?
+methods-not-accepted,en,payment-methods,negation,What payment methods are not accepted?
+methods-not-accepted,en,payment-methods,negation,Tell me the payment methods you do not accept
+methods-not-accepted,en,payment-methods,negation,What ways to pay do you not accept?
+methods-not-accepted,en,payment-methods,negation,Which payment options are not accepted?
+methods-not-accepted,es,payment-methods,negation,¿Qué métodos de pago no aceptan?
+methods-not-accepted,es,payment-methods,negation,¿Qué métodos de pago no se aceptan?
+methods-not-accepted,es,payment-methods,negation,Dime los métodos de pago que no aceptan
+methods-not-accepted,es,payment-methods,negation,¿Qué formas de pago no aceptan?
+methods-not-accepted,es,payment-methods,negation,¿Qué opciones de pago no se aceptan?
+premium-included,en,premium-includes,negation,What is included in the premium plan?
+premium-included,en,premium-includes,negation,What does the premium plan include?
+premium-included,en,premium-includes,negation,Which features come with the premium plan?
+premium-included,en,premium-includes,negation,Tell me what the premium plan includes
+premium-included,en,premium-includes,negation,What do I get with the premium plan?
+premium-included,es,premium-includes,negation,¿Qué incluye el plan premium?
+premium-included,es,premium-includes,negation,¿Qué está incluido en el plan premium?
+premium-included,es,premium-includes,negation,¿Qué funciones vienen con el plan premium?
+premium-included,es,premium-includes,negation,Dime qué incluye el plan premium
+premium-included,es,premium-includes,negation,¿Qué obtengo con el plan premium?
+premium-not-included,en,premium-includes,negation,What is not included in the premium plan?
+premium-not-included,en,premium-includes,negation,What does the premium plan not include?
+premium-not-included,en,premium-includes,negation,Which features do not come with the premium plan?
+premium-not-included,en,premium-includes,negation,Tell me what the premium plan does not include
+premium-not-included,en,premium-includes,negation,What do I not get with the premium plan?
+premium-not-included,es,premium-includes,negation,¿Qué no incluye el plan premium?
+premium-not-included,es,premium-includes,negation,¿Qué no está incluido en el plan premium?
+premium-not-included,es,premium-includes,negation,¿Qué funciones no vienen con el plan premium?
+premium-not-included,es,premium-includes,negation,Dime qué no incluye el plan premium
+premium-not-included,es,premium-includes,negation,¿Qué no obtengo con el plan premium?
+countries-allowed,en,countries,negation,Which countries can I send money to?
+countries-allowed,en,countries,negation,To which countries can I send money?
+countries-allowed,en,countries,negation,What countries can I transfer money to?
+countries-allowed,en,countries,negation,List the countries I can send money to
+countries-allowed,en,countries,negation,Where can I send money abroad?
+countries-allowed,es,countries,negation,¿A qué países puedo enviar dinero?
+countries-allowed,es,countries,negation,¿A cuáles países puedo enviar dinero?
+countries-allowed,es,countries,negation,¿A qué países puedo transferir dinero?
+countries-allowed,es,countries,negation,Enumera los países a los que puedo enviar dinero
+countries-allowed,es,countries,negation,¿A dónde puedo enviar dinero en el extranjero?
+countries-not-allowed,en,countries,negation,Which countries can I not send money to?
+countries-not-allowed,en,countries,negation,To which countries can I not send money?
+countries-not-allowed,en,countries,negation,What countries can I not transfer money to?
+countries-not-allowed,en,countries,negation,List the countries I cannot send money to
+countries-not-allowed,en,countries,negation,Where can I not send money abroad?
+countries-not-allowed,es,countries,negation,¿A qué países no puedo enviar dinero?
+countries-not-allowed,es,countries,negation,¿A cuáles países no puedo enviar dinero?
+countries-not-allowed,es,countries,negation,¿A qué países no puedo transferir dinero?
+countries-not-allowed,es,countries,negation,Enumera los países a los que no puedo enviar dinero
+countries-not-allowed,es,countries,negation,¿A dónde no puedo enviar dinero en el extranjero?
+exchange-rate,en,exchange-rate,none,What is the current dollar exchange rate?
+exchange-rate,en,exchange-rate,none,What is the dollar exchange rate today?
+exchange-rate,en,exchange-rate,none,How much is the dollar right now?
+exchange-rate,en,exchange-rate,none,Tell me the latest exchange rate for the dollar
+exchange-rate,en,exchange-rate,none,What's the exchange rate of the dollar at the moment?
+exchange-rate,es,exchange-rate,none,¿Cuál es el tipo de cambio actual del dólar?
+exchange-rate,es,exchange-rate,none,¿Cuál es el tipo de cambio del dólar hoy?
+exchange-rate,es,exchange-rate,none,¿A cuánto está el dólar ahora mismo?
+exchange-rate,es,exchange-rate,none,Dime la última cotización del dólar
+exchange-rate,es,exchange-rate,none,¿Cuál es la cotización del dólar en este momento?
+late-5-days,en,late-payment,quantity,What happens if I pay my bill 5 days late?
+late-5-days,en,late-payment,quantity,Is there a penalty for paying 5 days late?
+late-5-days,en,late-payment,quantity,What is the late fee if I pay 5 days after the due date?
+late-5-days,en,late-payment,quantity,What if my payment is 5 days late?
+late-5-days,en,late-payment,quantity,How much extra do I owe for paying 5 days late?
+late-5-days,es,late-payment,quantity,¿Qué pasa si pago mi factura con 5 días de retraso?
+late-5-days,es,late-payment,quantity,¿Hay una penalidad por pagar con 5 días de retraso?
+late-5-days,es,late-payment,quantity,¿Cuál es el recargo si pago 5 días después del vencimiento?
+late-5-days,es,late-payment,quantity,¿Qué pasa si mi pago llega con 5 días de retraso?
+late-5-days,es,late-payment,quantity,¿Cuánto debo de más por pagar con 5 días de retraso?
+late-30-days,en,late-payment,quantity,What happens if I pay my bill 30 days late?
+late-30-days,en,late-payment,quantity,Is there a penalty for paying 30 days late?
+late-30-days,en,late-payment,quantity,What is the late fee if I pay 30 days after the due date?
+late-30-days,en,late-payment,quantity,What if my payment is 30 days late?
+late-30-days,en,late-payment,quantity,How much extra do I owe for paying 30 days late?
+late-30-days,es,late-payment,quantity,¿Qué pasa si pago mi factura con 30 días de retraso?
+late-30-days,es,late-payment,quantity,¿Hay una penalidad por pagar con 30 días de retraso?
+late-30-days,es,late-payment,quantity,¿Cuál es el recargo si pago 30 días después del vencimiento?
+late-30-days,es,late-payment,quantity,¿Qué pasa si mi pago llega con 30 días de retraso?
+late-30-days,es,late-payment,quantity,¿Cuánto debo de más por pagar con 30 días de retraso?
+billing-address,en,billing-address,none,How do I update my billing address?
+billing-address,en,billing-address,none,I need to change my billing address
+billing-address,en,billing-address,none,What is the way to edit my billing address?
+billing-address,en,billing-address,none,Can I modify the billing address on my account?
+billing-address,en,billing-address,none,Help me update my billing address
+billing-address,es,billing-address,none,¿Cómo actualizo mi dirección de facturación?
+billing-address,es,billing-address,none,Necesito cambiar mi dirección de facturación
+billing-address,es,billing-address,none,¿Cuál es la forma de editar mi dirección de facturación?
+billing-address,es,billing-address,none,¿Puedo modificar la dirección de facturación de mi cuenta?
+billing-address,es,billing-address,none,Ayúdame a actualizar mi dirección de facturación
+fee-100,en,transfer-amount,quantity,What is the fee for a transfer of 100 dollars?
+fee-100,en,transfer-amount,quantity,How much does it cost to transfer 100 dollars?
+fee-100,en,transfer-amount,quantity,What do you charge to send 100 dollars?
+fee-100,en,transfer-amount,quantity,Is there a fee to transfer 100 dollars?
+fee-100,en,transfer-amount,quantity,Tell me the fee for sending 100 dollars
+fee-100,es,transfer-amount,quantity,¿Cuál es la comisión por una transferencia de 100 dólares?
+fee-100,es,transfer-amount,quantity,¿Cuánto cuesta transferir 100 dólares?
+fee-100,es,transfer-amount,quantity,¿Qué cobran por enviar 100 dólares?
+fee-100,es,transfer-amount,quantity,¿Hay comisión por transferir 100 dólares?
+fee-100,es,transfer-amount,quantity,Dime la comisión por enviar 100 dólares
+fee-5000,en,transfer-amount,quantity,What is the fee for a transfer of 5000 dollars?
+fee-5000,en,transfer-amount,quantity,How much does it cost to transfer 5000 dollars?
+fee-5000,en,transfer-amount,quantity,What do you charge to send 5000 dollars?
+fee-5000,en,transfer-amount,quantity,Is there a fee to transfer 5000 dollars?
+fee-5000,en,transfer-amount,quantity,Tell me the fee for sending 5000 dollars
+fee-5000,es,transfer-amount,quantity,¿Cuál es la comisión por una transferencia de 5000 dólares?
+fee-5000,es,transfer-amount,quantity,¿Cuánto cuesta transferir 5000 dólares?
+fee-5000,es,transfer-amount,quantity,¿Qué cobran por enviar 5000 dólares?
+fee-5000,es,transfer-amount,quantity,¿Hay comisión por transferir 5000 dólares?
+fee-5000,es,transfer-amount,quantity,Dime la comisión por enviar 5000 dólares
+instant-supported,en,instant-banks,negation,Which banks support instant transfers?
+instant-supported,en,instant-banks,negation,What banks offer instant transfers?
+instant-supported,en,instant-banks,negation,Tell me the banks that support instant transfers
+instant-supported,en,instant-banks,negation,Which banks can receive instant transfers?
+instant-supported,en,instant-banks,negation,List the banks with instant transfers
+instant-supported,es,instant-banks,negation,¿Qué bancos admiten transferencias inmediatas?
+instant-supported,es,instant-banks,negation,¿Qué bancos ofrecen transferencias inmediatas?
+instant-supported,es,instant-banks,negation,Dime los bancos que admiten transferencias inmediatas
+instant-supported,es,instant-banks,negation,¿Qué bancos pueden recibir transferencias inmediatas?
+instant-supported,es,instant-banks,negation,Enumera los bancos con transferencias inmediatas
+instant-not-supported,en,instant-banks,negation,Which banks do not support instant transfers?
+instant-not-supported,en,instant-banks,negation,What banks do not offer instant transfers?
+instant-not-supported,en,instant-banks,negation,Tell me the banks that do not support instant transfers
+instant-not-supported,en,instant-banks,negation,Which banks cannot receive instant transfers?
+instant-not-supported,en,instant-banks,negation,List the banks without instant transfers
+instant-not-supported,es,instant-banks,negation,¿Qué bancos no admiten transferencias inmediatas?
+instant-not-supported,es,instant-banks,negation,¿Qué bancos no ofrecen transferencias inmediatas?
+instant-not-supported,es,instant-banks,negation,Dime los bancos que no admiten transferencias inmediatas
+instant-not-supported,es,instant-banks,negation,¿Qué bancos no pueden recibir transferencias inmediatas?
+instant-not-supported,es,instant-banks,negation,Enumera los bancos sin transferencias inmediatas
+due-march,en,payment-due,date,When is my March payment due?
+due-march,en,payment-due,date,What is the due date of my March payment?
+due-march,en,payment-due,date,By when do I have to pay the March installment?
+due-march,en,payment-due,date,What day is my March payment due?
+due-march,en,payment-due,date,Tell me the due date for my March payment
+due-march,es,payment-due,date,¿Cuándo vence mi pago de marzo?
+due-march,es,payment-due,date,¿Cuál es la fecha de vencimiento de mi pago de marzo?
+due-march,es,payment-due,date,¿Hasta cuándo tengo que pagar la cuota de marzo?
+due-march,es,payment-due,date,¿Qué día vence mi pago de marzo?
+due-march,es,payment-due,date,Dime la fecha de vencimiento de mi pago de marzo
+due-april,en,payment-due,date,When is my April payment due?
+due-april,en,payment-due,date,What is the due date of my April payment?
+due-april,en,payment-due,date,By when do I have to pay the April installment?
+due-april,en,payment-due,date,What day is my April payment due?
+due-april,en,payment-due,date,Tell me the due date for my April payment
+due-april,es,payment-due,date,¿Cuándo vence mi pago de abril?
+due-april,es,payment-due,date,¿Cuál es la fecha de vencimiento de mi pago de abril?
+due-april,es,payment-due,date,¿Hasta cuándo tengo que pagar la cuota de abril?
+due-april,es,payment-due,date,¿Qué día vence mi pago de abril?
+due-april,es,payment-due,date,Dime la fecha de vencimiento de mi pago de abril
