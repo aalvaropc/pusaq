@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/provider"
@@ -103,22 +105,27 @@ func TestCompletionsValidation(t *testing.T) {
 		name    string
 		payload string
 		message string
+		param   string
 	}{
-		{"invalid JSON", `{not json`, "request body is not valid JSON"},
-		{"missing model", `{` + msgs + `}`, "model is required"},
-		{"empty messages", `{"model":"pusaq/fast","messages":[]}`, "messages must not be empty"},
-		{"negative max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":-5}`, "max_tokens must be a positive integer"},
-		{"zero max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":0}`, "max_tokens must be a positive integer"},
-		{"string max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":"32"}`, "max_tokens must be a positive integer"},
-		{"oversized max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":9223372036854775808}`, "max_tokens must be a positive integer"},
-		{"content parts", `{"model":"pusaq/fast","messages":[{"role":"user","content":[{"type":"text","text":"x"}]}]}`, "content parts are not supported"},
-		{"tools", `{"model":"pusaq/fast",` + msgs + `,"tools":[{"type":"function"}]}`, "tools is not supported"},
-		{"tool_choice", `{"model":"pusaq/fast",` + msgs + `,"tool_choice":"auto"}`, "tool_choice is not supported"},
-		{"response_format", `{"model":"pusaq/fast",` + msgs + `,"response_format":{"type":"json_object"}}`, "response_format is not supported"},
-		{"n above one", `{"model":"pusaq/fast",` + msgs + `,"n":2}`, "n is not supported"},
-		{"logprobs", `{"model":"pusaq/fast",` + msgs + `,"logprobs":true}`, "logprobs is not supported"},
-		{"message tool_calls", `{"model":"pusaq/fast","messages":[{"role":"assistant","content":"","tool_calls":[{"id":"c"}]}]}`, "messages[].tool_calls is not supported"},
-		{"message tool_call_id", `{"model":"pusaq/fast","messages":[{"role":"tool","content":"x","tool_call_id":"c"}]}`, "messages[].tool_call_id is not supported"},
+		{"invalid JSON", `{not json`, "request body is not valid JSON", ""},
+		{"missing model", `{` + msgs + `}`, "model is required", "model"},
+		{"empty messages", `{"model":"pusaq/fast","messages":[]}`, "messages must not be empty", "messages"},
+		{"negative max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":-5}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"zero max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":0}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"string max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":"32"}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"oversized max_tokens", `{"model":"pusaq/fast",` + msgs + `,"max_tokens":9223372036854775808}`, "max_tokens must be a positive integer", "max_tokens"},
+		{"content parts", `{"model":"pusaq/fast","messages":[{"role":"user","content":[{"type":"text","text":"x"}]}]}`, "content parts are not supported", "messages[].content"},
+		{"mistyped field", `{"model":"pusaq/fast",` + msgs + `,"temperature":"hot"}`, "temperature has the wrong type", "temperature"},
+		{"tools", `{"model":"pusaq/fast",` + msgs + `,"tools":[{"type":"function"}]}`, "tools is not supported", "tools"},
+		{"tool_choice", `{"model":"pusaq/fast",` + msgs + `,"tool_choice":"auto"}`, "tool_choice is not supported", "tool_choice"},
+		{"response_format", `{"model":"pusaq/fast",` + msgs + `,"response_format":{"type":"json_object"}}`, "response_format is not supported", "response_format"},
+		{"n above one", `{"model":"pusaq/fast",` + msgs + `,"n":2}`, "n is not supported", "n"},
+		{"logprobs", `{"model":"pusaq/fast",` + msgs + `,"logprobs":true}`, "logprobs is not supported", "logprobs"},
+		{"message tool_calls", `{"model":"pusaq/fast","messages":[{"role":"assistant","content":"","tool_calls":[{"id":"c"}]}]}`, "messages[].tool_calls is not supported", "messages[].tool_calls"},
+		{"message tool_call_id", `{"model":"pusaq/fast","messages":[{"role":"tool","content":"x","tool_call_id":"c"}]}`, "messages[].tool_call_id is not supported", "messages[].tool_call_id"},
+		{"unknown model", `{"model":"pusaq/none",` + msgs + `}`, `unknown model "pusaq/none"`, "model"},
+		{"non-string feature tag", `{"model":"pusaq/fast",` + msgs + `,"metadata":{"feature_tag":7}}`, "metadata.feature_tag must be a string", "metadata.feature_tag"},
+		{"malformed feature tag", `{"model":"pusaq/fast",` + msgs + `,"metadata":{"feature_tag":"a b"}}`, "metadata.feature_tag must be at most", "metadata.feature_tag"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,6 +138,9 @@ func TestCompletionsValidation(t *testing.T) {
 			}
 			if !strings.Contains(norm.Message, tt.message) {
 				t.Fatalf("message = %q, want it to contain %q", norm.Message, tt.message)
+			}
+			if norm.Param != tt.param {
+				t.Fatalf("param = %q, want %q", norm.Param, tt.param)
 			}
 			if p.got.Model != "" {
 				t.Fatal("provider was called for an invalid request")
@@ -149,6 +159,57 @@ func TestHarmlessFieldsAreAccepted(t *testing.T) {
 	}
 	if p.got.Model != "mock-model" {
 		t.Fatal("provider was not called for a request with harmless fields")
+	}
+}
+
+func TestCompletionCarriesCreatedAndFingerprint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"cmpl-9","object":"chat.completion","created":1700000000,"model":"mock-model",`+
+			`"system_fingerprint":"fp_test","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],`+
+			`"usage":{"prompt_tokens":3,"completion_tokens":1}}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	tests := []struct {
+		name            string
+		provider        provider.Provider
+		wantCreated     int64
+		wantFingerprint string
+	}{
+		{"provider values pass through", provider.NewHTTP("mock", upstream.URL+"/v1", time.Second, discardLogger()), 1700000000, "fp_test"},
+		{"gateway time without provider values", okProvider(), 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": tt.provider}, CompletionsOptions{Logger: discardLogger()})
+			before := time.Now().Unix()
+			resp, err := h(context.Background(), &core.Request{Payload: validPayload()})
+			after := time.Now().Unix()
+			if err != nil {
+				t.Fatalf("handler error: %v", err)
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(resp.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			var created int64
+			if err := json.Unmarshal(body["created"], &created); err != nil {
+				t.Fatalf("created = %s: %v", body["created"], err)
+			}
+			if tt.wantCreated != 0 && created != tt.wantCreated {
+				t.Fatalf("created = %d, want %d", created, tt.wantCreated)
+			}
+			if tt.wantCreated == 0 && (created < before || created > after) {
+				t.Fatalf("created = %d, want the gateway's time in [%d, %d]", created, before, after)
+			}
+			fingerprint, present := body["system_fingerprint"]
+			if tt.wantFingerprint == "" && present {
+				t.Fatalf("system_fingerprint = %s, want it absent", fingerprint)
+			}
+			if tt.wantFingerprint != "" && string(fingerprint) != `"`+tt.wantFingerprint+`"` {
+				t.Fatalf("system_fingerprint = %s, want %q", fingerprint, tt.wantFingerprint)
+			}
+		})
 	}
 }
 

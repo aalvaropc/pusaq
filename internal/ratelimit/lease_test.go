@@ -156,7 +156,7 @@ func TestLeaseExpiryRefunds(t *testing.T) {
 		t.Fatalf("store remaining = %d while lease is live, want 0", rem)
 	}
 	f.advance(2 * time.Second)
-	l.sweep(context.Background(), false)
+	l.sweep(false)
 	if st := l.Stats(); st.Refunds != 1 || st.RefundFailures != 0 {
 		t.Fatalf("stats = %+v, want one refund", st)
 	}
@@ -206,7 +206,7 @@ func TestLeaseRefundFailureIsCounted(t *testing.T) {
 	allowN(t, l, "team-a", 1)
 	f.mr.Close()
 	f.advance(2 * time.Second)
-	l.sweep(context.Background(), false)
+	l.sweep(false)
 	if st := l.Stats(); st.RefundFailures != 1 || st.TokensLost != 9 {
 		t.Fatalf("stats = %+v, want one failed refund of 9 tokens", st)
 	}

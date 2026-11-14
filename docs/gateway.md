@@ -19,6 +19,11 @@ Request and response contracts for the implemented gateway. See
 | `metadata.feature_tag` | Optional routing label, at most 64 letters, digits, `.`, `_` or `-`. |
 | `metadata.run_id` | Optional string, at most 64 bytes, recorded before RPM admission for measurement filtering. |
 
+A buffered response carries `id`, `object`, `created`, `model`,
+`system_fingerprint`, `choices` and `usage` (with `total_tokens`). `created`
+is the provider's Unix timestamp, or the gateway's when the provider sends
+none; `system_fingerprint` is present only when the provider sends one.
+
 The default `pusaq/auto` rules map `classify`/`extract` to `pusaq/fast`,
 `reason`/`code` to `pusaq/best`, and absent or unknown tags to `pusaq/fast`.
 `PUSAQ_ROUTING_RULES` replaces that table.
@@ -37,7 +42,7 @@ values. Other unrecognized fields are ignored rather than forwarded.
 |---|---|
 | `X-Pusaq-Model` | Route's physical model; also present on errors after resolution. |
 | `X-Pusaq-Route-Reason` | `direct`, `rule:<tag>`, `default:untagged` or `default:unknown_tag`, once resolved. |
-| `X-Pusaq-Request-Id` | Correlation ID for requests that enter the accounting pipeline. |
+| `X-Pusaq-Request-Id` | Correlation ID on every completion response and every error. Only requests that enter the accounting pipeline have a cost event with it. |
 | `X-Pusaq-Region` | Replica label when `PUSAQ_REGION` is configured. |
 
 The response body's `model`, and the `model` of each forwarded stream chunk,
@@ -46,22 +51,30 @@ example a dated version behind an upstream alias.
 
 ### Errors
 
-All gateway errors use `{"error":{"code":"...","message":"..."}}`.
-Retryable quota and readiness errors also carry `retry_after_ms` and a
-`Retry-After` header. Provider bodies and diagnostic strings are not exposed.
+All gateway errors, including unknown paths and unsupported methods, use
+`{"error":{"code":"...","message":"...","type":"...","param":...}}` and
+carry `X-Pusaq-Request-Id`. `code` is the precise, stable reason; `type` is
+an OpenAI-style category derived from it. `param` names the offending
+request field of a validation error (`model`, `messages`, `max_tokens`,
+`messages[].content`, `metadata.feature_tag`, an unsupported field, …) and
+is `null` otherwise. Retryable quota and readiness errors also carry
+`retry_after_ms` and a `Retry-After` header; 405 answers carry `Allow`.
+Provider bodies and diagnostic strings are not exposed.
 
-| Code | HTTP status | Meaning |
-|---|---|---|
-| `invalid_request` | 400 | Invalid payload, unsupported field, oversized body or provider rejection (400/413/422). |
-| `unauthorized` | 401 | Missing or unknown tenant key. |
-| `budget_exceeded` | 402 | Monthly budget exhausted; retry guidance reaches the next UTC month. |
-| `policy_denied` | 403 | Tenant model, prompt-size or content policy rejected the request. |
-| `rate_limited` | 429 | Request or token bucket cannot admit the request. |
-| `client_canceled` | 499 | Client left before a response was established. |
-| `internal` | 500 | Internal failure normalized by the gateway. |
-| `upstream_error` | 502 | Provider transport, timeout, response or stream failure. |
-| `store_unavailable` | 503 | Store unavailable for a tenant configured to fail closed. |
-| `not_ready` | 503 | An injected readiness window refuses new requests before accounting. |
+| Code | HTTP status | `type` | Meaning |
+|---|---|---|---|
+| `invalid_request` | 400 | `invalid_request_error` | Invalid payload, unsupported field, oversized body or provider rejection (400/413/422). |
+| `unauthorized` | 401 | `authentication_error` | Missing or unknown tenant key. |
+| `budget_exceeded` | 402 | `insufficient_quota` | Monthly budget exhausted; retry guidance reaches the next UTC month. |
+| `policy_denied` | 403 | `permission_error` | Tenant model, prompt-size or content policy rejected the request. |
+| `not_found` | 404 | `not_found_error` | Path the gateway does not serve. |
+| `method_not_allowed` | 405 | `invalid_request_error` | Served path requested with another method. |
+| `rate_limited` | 429 | `rate_limit_error` | Request or token bucket cannot admit the request. |
+| `client_canceled` | 499 | `invalid_request_error` | Client left before a response was established. |
+| `internal` | 500 | `server_error` | Internal failure normalized by the gateway. |
+| `upstream_error` | 502 | `server_error` | Provider transport, timeout, response or stream failure. |
+| `store_unavailable` | 503 | `server_error` | Store unavailable for a tenant configured to fail closed. |
+| `not_ready` | 503 | `server_error` | An injected readiness window refuses an authenticated request before its body is read. |
 
 ### Streaming
 
@@ -80,8 +93,9 @@ finalizes accounting; interrupted streams record `stream_interrupted`.
 ## Authentication and I/O limits
 
 Configure tenants with `PUSAQ_API_KEYS="key:tenant,..."`; clients send
-`Authorization: Bearer <key>`. Missing or unknown keys return 401 before the
-body is read, and their accounting events have no payload-derived run ID.
+`Authorization: Bearer <key>`. The scheme is case-insensitive, and spaces or
+tabs may separate it from the key. Missing or unknown keys return 401 before
+the body is read, and their accounting events have no payload-derived run ID.
 
 Authenticated bodies are limited to 1 MiB and read within
 `PUSAQ_BODY_READ_TIMEOUT` (default 10 s). Body failures and malformed run IDs
@@ -106,7 +120,10 @@ bucket in Redis decided by one atomic Lua script shared by every replica —
 read-decide-decrement as a single operation, so the limit stays exact under
 concurrency (proven by test: exactly the bucket capacity admitted out of 200
 concurrent requests across two instances). Denials are 429 `rate_limited`
-with `retry_after_ms` and a `Retry-After` header. If Redis is unreachable
+with `retry_after_ms` and a `Retry-After` header. An idle bucket is
+reclaimed only once its refill would have filled it again, and no sooner
+than one minute after its last update, so reclaiming never admits more than
+the refill allows. If Redis is unreachable
 the gateway **fails open** within a 250 ms budget per store call —
 temporarily inexact limits beat an outage caused by the limiter itself —
 unless the tenant's policy sets `fail_closed`, in which case it answers 503
@@ -119,7 +136,8 @@ Two modes, chosen with `PUSAQ_RATELIMIT_MODE`. **`strict`** (default): one
 atomic store decision per request, exact across replicas. **`lease`**: each
 replica takes up to `PUSAQ_LEASE_SIZE` request tokens per round-trip and
 admits locally; unused tokens return when the lease passes `PUSAQ_LEASE_TTL`
-or the replica drains, and a store denial is cached locally until its retry
+or the replica drains, each return within its own 250 ms store budget, and a
+store denial is cached locally until its retry
 time or the lease TTL, whichever is sooner. Cleanup revalidates entry ownership
 and never waits for a tenant while holding the shared tenant-map mutex.
 With successful store operations, admissions follow the bucket in both modes; in lease

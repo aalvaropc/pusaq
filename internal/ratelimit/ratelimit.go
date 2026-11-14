@@ -30,7 +30,7 @@ tokens = math.min(B, tokens + (now - ts) / 1000 * r)
 
 const persistBucket = `
 redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
-redis.call('EXPIRE', KEYS[1], ttl)
+redis.call('EXPIRE', KEYS[1], math.max(ttl, math.min(1e12, math.ceil((rollback + (B - tokens) / r * 1000) / 1000))))
 `
 
 const script = refillBucket + `
@@ -77,7 +77,7 @@ type Limits struct {
 	Burst float64
 	// Rate is the sustained refill in tokens per second.
 	Rate float64
-	// TTL reclaims idle buckets; an expired bucket starts full again.
+	// TTL floors how long an idle bucket is kept; its refill time extends it.
 	TTL time.Duration
 }
 

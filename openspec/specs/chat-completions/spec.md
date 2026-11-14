@@ -7,12 +7,17 @@ The OpenAI-compatible chat-completions subset — the contract that lets an appl
 
 ### Requirement: OpenAI-compatible chat completions endpoint
 
-The gateway SHALL expose `POST /v1/chat/completions` accepting the OpenAI request subset (`model`, `messages`, optionally `max_tokens`, `temperature`, `stream`, `metadata`) and returning the OpenAI response subset (`id`, `object`, `model`, `choices` with `message` and `finish_reason`, `usage` with token counts). `temperature` SHALL be forwarded to the provider exactly as sent, including an explicit 0, and omitted when the client omitted it. `max_tokens`, when present, SHALL be a positive integer. Fields that would change the response contract and that the gateway does not implement SHALL be rejected as `invalid_request` naming the field: at the top level `tools`, `tool_choice`, `functions`, `function_call`, `parallel_tool_calls`, `response_format`, `n` other than 1, `logprobs`, `top_logprobs`, `audio`, `modalities` other than `["text"]`, `prediction`, `web_search_options`, `max_completion_tokens`; in messages `tool_calls`, `tool_call_id`, `function_call`, `audio`, and content given as an array of parts. A field set to `null` or `false` counts as absent; other fields SHALL be ignored. Requests SHALL traverse the request pipeline like any other operation.
+The gateway SHALL expose `POST /v1/chat/completions` accepting the OpenAI request subset (`model`, `messages`, optionally `max_tokens`, `temperature`, `stream`, `metadata`) and returning the OpenAI response subset (`id`, `object`, `created`, `model`, `system_fingerprint` when the provider reports one, `choices` with `message` and `finish_reason`, `usage` with token counts). `created` SHALL be the provider's Unix timestamp when it reports one and the gateway's Unix time when the response is built otherwise. `temperature` SHALL be forwarded to the provider exactly as sent, including an explicit 0, and omitted when the client omitted it. `max_tokens`, when present, SHALL be a positive integer. Fields that would change the response contract and that the gateway does not implement SHALL be rejected as `invalid_request` naming the field: at the top level `tools`, `tool_choice`, `functions`, `function_call`, `parallel_tool_calls`, `response_format`, `n` other than 1, `logprobs`, `top_logprobs`, `audio`, `modalities` other than `["text"]`, `prediction`, `web_search_options`, `max_completion_tokens`; in messages `tool_calls`, `tool_call_id`, `function_call`, `audio`, and content given as an array of parts. A field set to `null` or `false` counts as absent; other fields SHALL be ignored. Requests SHALL traverse the request pipeline like any other operation.
 
 #### Scenario: Completion round-trip
 
 - **WHEN** a client POSTs a valid chat-completions request with an allowed model
 - **THEN** the response is 200 with an OpenAI-shaped body including choices and usage, and one cost event is emitted for the request
+
+#### Scenario: Creation time and fingerprint
+
+- **WHEN** the provider's completion carries `created` and `system_fingerprint`
+- **THEN** the buffered response carries both values unchanged; when the provider sends neither, `created` is the gateway's current Unix time and `system_fingerprint` is absent
 
 #### Scenario: Malformed request rejected
 
@@ -22,7 +27,7 @@ The gateway SHALL expose `POST /v1/chat/completions` accepting the OpenAI reques
 #### Scenario: Unsupported field rejected
 
 - **WHEN** a request carries `tools`, `response_format`, a message with `tool_calls`, or content given as an array of parts
-- **THEN** the gateway responds 400 `invalid_request` with a message naming the field, without calling any provider
+- **THEN** the gateway responds 400 `invalid_request` with a message and a `param` naming the field, without calling any provider
 
 #### Scenario: Harmless fields are accepted
 
@@ -210,7 +215,7 @@ An upstream backend MAY carry an API key in configuration. When present, the gat
 
 ### Requirement: Responses identify the serving region and requests may declare a run
 
-When the replica is labeled with a region, every response — success, error, readiness — SHALL carry the `X-Pusaq-Region` header with that label. A request MAY declare `metadata.run_id`, a string of at most 64 characters, read before admission so that every cost event of the request — including a rejection by the rate limiter — carries it; any other value SHALL be rejected as `invalid_request` before admission. A request that reaches a replica inside an injected not-ready window SHALL be refused with 503 `not_ready` and a `Retry-After`.
+When the replica is labeled with a region, every response — success, error, readiness — SHALL carry the `X-Pusaq-Region` header with that label. A request MAY declare `metadata.run_id`, a string of at most 64 characters, read before admission so that every cost event of the request — including a rejection by the rate limiter — carries it; any other value SHALL be rejected as `invalid_request` before admission. An authenticated request that reaches a replica inside an injected not-ready window SHALL be refused with 503 `not_ready` and a `Retry-After`.
 
 #### Scenario: Region header on every response
 
@@ -220,7 +225,7 @@ When the replica is labeled with a region, every response — success, error, re
 #### Scenario: Run id validated
 
 - **WHEN** a request declares a non-string or oversized `metadata.run_id`
-- **THEN** the response is 400 `invalid_request` before admission, with no cost event
+- **THEN** the response is 400 `invalid_request` with param `metadata.run_id` before admission, and its one cost event carries no run id
 
 #### Scenario: Run id on an early rejection
 
@@ -229,8 +234,8 @@ When the replica is labeled with a region, every response — success, error, re
 
 #### Scenario: Refused while not ready
 
-- **WHEN** a request arrives during an injected not-ready window
-- **THEN** the response is 503 `not_ready` with a `Retry-After` header and the region header, and no provider is called
+- **WHEN** an authenticated request arrives during an injected not-ready window
+- **THEN** the response is 503 `not_ready` with a `Retry-After` header, the region header and a request ID, and no provider is called
 
 ### Requirement: Upstream URLs are versioned API base URLs
 

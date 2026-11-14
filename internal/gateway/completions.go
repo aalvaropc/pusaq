@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aalvaropc/pusaq/internal/breaker"
 	"github.com/aalvaropc/pusaq/internal/core"
@@ -121,10 +122,10 @@ func featureTag(cr completionRequest) (string, error) {
 	}
 	s, ok := v.(string)
 	if !ok {
-		return "", core.NewError(core.CodeInvalidRequest, "metadata.feature_tag must be a string")
+		return "", core.InvalidField("metadata.feature_tag", "metadata.feature_tag must be a string")
 	}
 	if s != "" && (len(s) > maxLabelLen || !labelChars.MatchString(s)) {
-		return "", core.Errorf(core.CodeInvalidRequest,
+		return "", core.InvalidField("metadata.feature_tag",
 			"metadata.feature_tag must be at most %d letters, digits, '.', '_' or '-'", maxLabelLen)
 	}
 	return s, nil
@@ -132,11 +133,13 @@ func featureTag(cr completionRequest) (string, error) {
 
 // completionResponse is the OpenAI response subset Pusaq returns.
 type completionResponse struct {
-	ID      string            `json:"id"`
-	Object  string            `json:"object"`
-	Model   string            `json:"model"`
-	Choices []provider.Choice `json:"choices"`
-	Usage   usagePayload      `json:"usage"`
+	ID                string            `json:"id"`
+	Object            string            `json:"object"`
+	Created           int64             `json:"created"`
+	Model             string            `json:"model"`
+	SystemFingerprint string            `json:"system_fingerprint,omitempty"`
+	Choices           []provider.Choice `json:"choices"`
+	Usage             usagePayload      `json:"usage"`
 }
 
 // usagePayload renders usage with the total the OpenAI shape includes.
@@ -156,10 +159,10 @@ func parseCompletionRequest(payload []byte) (completionRequest, error) {
 		return req, err
 	}
 	if req.Model == "" {
-		return req, core.NewError(core.CodeInvalidRequest, "model is required")
+		return req, core.InvalidField("model", "model is required")
 	}
 	if len(req.Messages) == 0 {
-		return req, core.NewError(core.CodeInvalidRequest, "messages must not be empty")
+		return req, core.InvalidField("messages", "messages must not be empty")
 	}
 	if req.MaxTokens != nil && *req.MaxTokens < 1 {
 		return req, errMaxTokens
@@ -167,7 +170,7 @@ func parseCompletionRequest(payload []byte) (completionRequest, error) {
 	return req, nil
 }
 
-var errMaxTokens = core.NewError(core.CodeInvalidRequest, "max_tokens must be a positive integer")
+var errMaxTokens = core.InvalidField("max_tokens", "max_tokens must be a positive integer")
 
 func decodeError(err error) error {
 	var typeErr *json.UnmarshalTypeError
@@ -178,9 +181,9 @@ func decodeError(err error) error {
 	case "max_tokens":
 		return errMaxTokens
 	case "messages.content":
-		return core.NewError(core.CodeInvalidRequest, "message content must be a string; content parts are not supported")
+		return core.InvalidField("messages[].content", "message content must be a string; content parts are not supported")
 	}
-	return core.Errorf(core.CodeInvalidRequest, "%s has the wrong type", typeErr.Field)
+	return core.InvalidField(typeErr.Field, "%s has the wrong type", typeErr.Field)
 }
 
 var (
@@ -200,7 +203,7 @@ func rejectUnsupported(payload []byte) error {
 	}
 	for _, f := range unsupportedFields {
 		if set(top[f], harmlessValues[f]) {
-			return core.Errorf(core.CodeInvalidRequest, "%s is not supported", f)
+			return core.InvalidField(f, "%s is not supported", f)
 		}
 	}
 	var messages []map[string]json.RawMessage
@@ -208,7 +211,7 @@ func rejectUnsupported(payload []byte) error {
 	for _, m := range messages {
 		for _, f := range unsupportedMessageFields {
 			if set(m[f], "") {
-				return core.Errorf(core.CodeInvalidRequest, "messages[].%s is not supported", f)
+				return core.InvalidField("messages[]."+f, "messages[].%s is not supported", f)
 			}
 		}
 	}
@@ -362,7 +365,7 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		alias, reason := opts.Rules.resolve(cr.Model, tag)
 		route, ok := routes[alias]
 		if !ok {
-			return nil, core.Errorf(core.CodeInvalidRequest, "unknown model %q", cr.Model)
+			return nil, core.InvalidField("model", "unknown model %q", cr.Model)
 		}
 		req.RequestedModel = cr.Model
 		req.ServedModel = route.Model
@@ -402,11 +405,17 @@ func CompletionsHandler(routes map[string]Route, providers map[string]provider.P
 		}
 		offerShadow(req, shape, opts, always, func() string { return upstream.Model }, func() string { return semcache.Fingerprint(content.String()) })
 
+		created := upstream.Created
+		if created <= 0 {
+			created = time.Now().Unix()
+		}
 		body, err := json.Marshal(completionResponse{
-			ID:      upstream.ID,
-			Object:  "chat.completion",
-			Model:   upstream.Model,
-			Choices: upstream.Choices,
+			ID:                upstream.ID,
+			Object:            "chat.completion",
+			Created:           created,
+			Model:             upstream.Model,
+			SystemFingerprint: upstream.SystemFingerprint,
+			Choices:           upstream.Choices,
 			Usage: usagePayload{
 				PromptTokens:     upstream.Usage.PromptTokens,
 				CompletionTokens: upstream.Usage.CompletionTokens,
@@ -586,7 +595,7 @@ const maxEventBytes = 1 << 20
 
 var errEventTooLarge = errors.New("upstream stream event exceeds 1 MiB")
 
-const streamErrorEvent = "\n\ndata: " + `{"error":{"code":"upstream_error","message":"upstream stream failed"}}` + "\n\n"
+var streamErrorEvent = "\n\ndata: " + string(errorJSON(core.NewError(core.CodeUpstream, "upstream stream failed"))) + "\n\n"
 
 type usageScanningStream struct {
 	inner      io.ReadCloser

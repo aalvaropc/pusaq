@@ -30,7 +30,6 @@ const (
 	DefaultRPMLimit           = 60.0
 	DefaultTPMLimit           = 100000.0
 	DefaultTPMReserve         = 512
-	DefaultBucketTTL          = 10 * time.Minute
 	DefaultCacheTau           = 0.95
 	DefaultCacheMaxEntries    = 10000
 	DefaultCacheMaxBytes      = 64 << 20

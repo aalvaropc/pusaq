@@ -7,7 +7,7 @@ Per-tenant distributed request limits. The limit must hold exactly when any numb
 
 ### Requirement: Per-tenant token bucket limits requests
 
-With rate limiting enabled, the gateway SHALL limit each tenant's requests with a token bucket of configured capacity (burst) and sustained refill rate, keyed by tenant, before any provider work happens. A new tenant's bucket SHALL start full, so its configured burst is immediately usable. Buckets idle beyond a bounded time SHALL be reclaimed and start full again.
+With rate limiting enabled, the gateway SHALL limit each tenant's requests with a token bucket of configured capacity (burst) and sustained refill rate, keyed by tenant, before any provider work happens. A new tenant's bucket SHALL start full, so its configured burst is immediately usable. An idle bucket SHALL be reclaimed and start full again only once its refill would have brought the balance written at its last update back to capacity — including any wait for a store clock behind the bucket's timestamp — and no sooner than one minute after that update, so reclaiming a bucket never admits more than its refill would.
 
 #### Scenario: Burst allowed, then limited
 
@@ -23,6 +23,16 @@ With rate limiting enabled, the gateway SHALL limit each tenant's requests with 
 
 - **WHEN** one tenant exhausts its bucket
 - **THEN** other tenants' requests are unaffected
+
+#### Scenario: Slow refill outlives idleness
+
+- **WHEN** a tenant with capacity 100 and a refill of one token per minute empties its bucket and stays idle for 20 minutes
+- **THEN** its bucket is still stored, 20 requests are admitted and the next is rejected
+
+#### Scenario: Negative balance is kept until repaid
+
+- **WHEN** reconciliation leaves a token bucket below zero
+- **THEN** the bucket is kept at least until its refill would bring it back to capacity
 
 ### Requirement: The limit is exact across replicas
 
@@ -131,7 +141,7 @@ RPM and TPM SHALL be separate buckets per tenant: exhausting one dimension SHALL
 
 ### Requirement: Lease mode trades per-window exactness for fewer store round-trips
 
-With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K request tokens (`PUSAQ_LEASE_SIZE`) from a tenant's bucket in one atomic store operation and admit up to K requests locally without consulting the store. Cumulative admissions from a full bucket SHALL never exceed the bucket capacity plus accrued refill. Within any window, the admitted count MAY fall short of strict accounting by at most `M·K` tokens across M replicas (tokens taken but not yet spent) and SHALL never exceed it. Tokens unused when a lease expires (`PUSAQ_LEASE_TTL`) or when the replica drains SHALL be returned to the shared bucket; a replica that stops without draining loses at most K tokens per tenant, which under-admits and never overruns. A store denial SHALL be cached locally until the smaller of the store-computed retry duration and the lease TTL has elapsed. Cleanup SHALL NOT detach an entry used by an admission or wait for a tenant while holding the shared tenant-map lock. Lease mode SHALL apply to request limits only; token limits SHALL remain strict. The mode SHALL be announced at startup and its configuration validated.
+With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K request tokens (`PUSAQ_LEASE_SIZE`) from a tenant's bucket in one atomic store operation and admit up to K requests locally without consulting the store. Cumulative admissions from a full bucket SHALL never exceed the bucket capacity plus accrued refill. Within any window, the admitted count MAY fall short of strict accounting by at most `M·K` tokens across M replicas (tokens taken but not yet spent) and SHALL never exceed it. Tokens unused when a lease expires (`PUSAQ_LEASE_TTL`) or when the replica drains SHALL be returned to the shared bucket; a replica that stops without draining loses at most K tokens per tenant, which under-admits and never overruns. Each return during cleanup or drain SHALL have its own 250 ms store budget, so a slow return for one tenant does not shorten the budget of another. A store denial SHALL be cached locally until the smaller of the store-computed retry duration and the lease TTL has elapsed. Cleanup SHALL NOT detach an entry used by an admission or wait for a tenant while holding the shared tenant-map lock. Lease mode SHALL apply to request limits only; token limits SHALL remain strict. The mode SHALL be announced at startup and its configuration validated.
 
 #### Scenario: Lease acquired once per K requests
 
@@ -157,6 +167,11 @@ With `PUSAQ_RATELIMIT_MODE=lease`, each gateway replica SHALL take up to K reque
 
 - **WHEN** a replica in lease mode drains
 - **THEN** every token it still holds is returned to the shared bucket before it exits
+
+#### Scenario: Slow return does not starve other tenants
+
+- **WHEN** a sweep or a drain returns tokens for several tenants and each store call takes most of the 250 ms budget
+- **THEN** every return completes and no tokens are recorded as lost
 
 #### Scenario: Bucket with fewer than K tokens grants what it has
 

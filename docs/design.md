@@ -148,9 +148,6 @@ as configured by the runtime module.
 
 ## 4. The path of a request
 
-0. **Readiness injection (HTTP adapter).** An injected not-ready window
-   refuses new completion requests with `not_ready` before the pipeline.
-   These refusals emit no cost event and have no request ID.
 1. **Accounting and request ID.** The outermost stage starts the clock and
    owns the request's single cost event; the next stage assigns the request
    ID. Event production and delivery are distinct: the emitter can drop
@@ -158,7 +155,10 @@ as configured by the runtime module.
 2. **Authentication and payload read.** The API key resolves the tenant
    before any body read. Missing or unknown keys return 401 and generate an
    event without a payload-derived run ID. Explicit development mode assigns
-   the `dev` tenant. Authenticated bodies are capped at 1 MiB, read within
+   the `dev` tenant. During an injected not-ready window, an authenticated
+   request is refused here with 503 `not_ready`, before its body is read and
+   before any limit is charged; its event has no run ID. Authenticated bodies
+   are capped at 1 MiB, read within
    `PUSAQ_BODY_READ_TIMEOUT` and checked for a valid `metadata.run_id`
    before RPM limiting. Read failures, oversized bodies and malformed run
    IDs produce one accounted `invalid_request` error. The tenant's policy (allowed
@@ -237,7 +237,9 @@ elapsed time, decide, decrement, persist with TTL, and return
 verdict + balance + suggested retry, all in a single round-trip. Details that
 matter: the bucket starts **full** (a new tenant can use its burst
 immediately); refill is computed lazily at read time (no background refiller);
-idle buckets expire via TTL; `retry_after` is returned computed.
+an idle bucket expires once its refill would have filled it again (at least a
+minute after its last update), so expiry never grants tokens the refill would
+not; `retry_after` is returned computed.
 
 Every admission, adjustment and lease acquisition reads `TIME` inside its
 Lua operation. Redis is the shared refill clock; gateway wall-clock offsets
@@ -423,7 +425,8 @@ own regions dies. Handled by different pieces:
   when region A's readiness fails (Cloud Run service health over serverless
   NEGs: a region whose instances fail their readiness probe stops receiving
   new requests). What is Pusaq's own job: draining (mark not-ready, keep
-  serving in-flight requests through a grace period), and the injection
+  serving in-flight requests through a grace period; a second termination
+  signal ends the process at once), and the injection
   knob the chaos run uses instead of deleting a service — a token-guarded
   admin endpoint opens a not-ready window during which `/readyz` answers
   503 and new requests are refused with `not_ready` while in-flight streams
@@ -469,8 +472,8 @@ the event stream: `loadtest/verify-*.sh` for measurements, and
 `cmd/eventreport` (`make dashboard`) for a static HTML report of cost,
 latency, outcomes, fallback, limits and the shadow cache.
 
-Authentication runs before body reads. Authenticated body failures are
-accounted; readiness-injection refusals happen outside the pipeline. Logs
+Authentication runs before body reads. Authenticated body failures and
+readiness-injection refusals are accounted. Logs
 omit prompt text, provider response bodies, URL-bearing transport errors and
 panic values. Content-rule events carry rule kinds, not matched content.
 

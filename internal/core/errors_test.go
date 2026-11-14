@@ -57,3 +57,43 @@ func TestErrorUnwrap(t *testing.T) {
 		t.Fatal("errors.Is should reach the wrapped cause")
 	}
 }
+
+func TestErrorTypeMapping(t *testing.T) {
+	tests := []struct {
+		code       Code
+		wantStatus int
+		wantType   string
+	}{
+		{CodeInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+		{CodeUnauthorized, http.StatusUnauthorized, "authentication_error"},
+		{CodeBudgetExceeded, http.StatusPaymentRequired, "insufficient_quota"},
+		{CodePolicyDenied, http.StatusForbidden, "permission_error"},
+		{CodeNotFound, http.StatusNotFound, "not_found_error"},
+		{CodeMethodNotAllowed, http.StatusMethodNotAllowed, "invalid_request_error"},
+		{CodeRateLimited, http.StatusTooManyRequests, "rate_limit_error"},
+		{CodeClientCanceled, 499, "invalid_request_error"},
+		{CodeInternal, http.StatusInternalServerError, "server_error"},
+		{CodeUpstream, http.StatusBadGateway, "server_error"},
+		{CodeStoreUnavailable, http.StatusServiceUnavailable, "server_error"},
+		{CodeNotReady, http.StatusServiceUnavailable, "server_error"},
+		{Code("unregistered"), http.StatusInternalServerError, "server_error"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.code), func(t *testing.T) {
+			e := NewError(tt.code, "m")
+			if got := e.Status(); got != tt.wantStatus {
+				t.Fatalf("Status() = %d, want %d", got, tt.wantStatus)
+			}
+			if got := e.Type(); got != tt.wantType {
+				t.Fatalf("Type() = %q, want %q", got, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInvalidFieldNamesTheParam(t *testing.T) {
+	e := InvalidField("metadata.run_id", "metadata.run_id must be at most %d characters", 64)
+	if e.Code != CodeInvalidRequest || e.Param != "metadata.run_id" || e.Message != "metadata.run_id must be at most 64 characters" {
+		t.Fatalf("InvalidField() = %+v", e)
+	}
+}

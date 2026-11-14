@@ -12,6 +12,7 @@ import (
 
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/provider"
+	"github.com/aalvaropc/pusaq/internal/ratelimit"
 )
 
 const testAdminToken = "chaos-token-for-tests"
@@ -75,11 +76,33 @@ func TestAdminReadinessRejectsWrongToken(t *testing.T) {
 	}
 }
 
+func TestAdminReadinessAcceptsBearerSchemeVariants(t *testing.T) {
+	for _, header := range []string{"bearer " + testAdminToken, "BEARER " + testAdminToken, "Bearer\t" + testAdminToken} {
+		s, _ := newOperableServer(t, WithAdminToken(testAdminToken))
+		req := httptest.NewRequest(http.MethodPost, "/admin/readiness?state=up", nil)
+		req.Header.Set("Authorization", header)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Authorization %q = %d %s, want 200", header, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestAdminReadinessRejectsBadParameters(t *testing.T) {
 	s, _ := newOperableServer(t, WithAdminToken(testAdminToken))
 	for _, q := range []string{"", "state=sideways", "state=down", "state=down&for=0s", "state=down&for=-1s", "state=down&for=nope", "state=down&for=2h"} {
-		if rec := adminReadiness(s, testAdminToken, q); rec.Code != http.StatusBadRequest {
+		rec := adminReadiness(s, testAdminToken, q)
+		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("query %q = %d, want 400", q, rec.Code)
+		}
+		wantParam := "for"
+		if !strings.HasPrefix(q, "state=down") {
+			wantParam = "state"
+		}
+		var body errorBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error.Param == nil || *body.Error.Param != wantParam {
+			t.Fatalf("query %q body = %s, want param %q", q, rec.Body.String(), wantParam)
 		}
 	}
 	if rec := getReadyz(s); rec.Code != http.StatusOK {
@@ -127,8 +150,9 @@ func TestInjectedNotReadyWindowRefusesNewRequestsUntilItEnds(t *testing.T) {
 	if got := rec.Header().Get(RegionHeader); got != "us-east1" {
 		t.Fatalf("%s = %q on the refusal, want us-east1", RegionHeader, got)
 	}
-	if len(*events) != 0 {
-		t.Fatalf("a refused request emitted %d cost events, want 0 (never admitted)", len(*events))
+	id := rec.Header().Get(RequestIDHeader)
+	if len(*events) != 1 || id == "" || (*events)[0].RequestID != id || (*events)[0].ErrorCode != core.CodeNotReady {
+		t.Fatalf("refusal with request ID %q: events = %+v, want one not_ready event with that ID", id, *events)
 	}
 
 	// The window expires on its own.
@@ -139,8 +163,62 @@ func TestInjectedNotReadyWindowRefusesNewRequestsUntilItEnds(t *testing.T) {
 	if rec := postCompletion(s); rec.Code != http.StatusOK {
 		t.Fatalf("completion after the window = %d, want 200", rec.Code)
 	}
-	if len(*events) != 1 {
-		t.Fatalf("events after recovery = %d, want 1", len(*events))
+	if len(*events) != 2 || (*events)[1].Outcome != core.OutcomeSuccess {
+		t.Fatalf("events after recovery = %+v, want the refusal and one success", *events)
+	}
+}
+
+func TestNotReadyRefusalFollowsAuthenticationAndPrecedesLimits(t *testing.T) {
+	var events []core.CostEvent
+	emit := func(e core.CostEvent) { events = append(events, e) }
+	admitter := &fakeAdmitter{decision: ratelimit.Decision{Allowed: true}}
+	tokens := &fakeTokenLimiter{allowed: true}
+	p := okProvider()
+	pipeline := core.Chain(Accounting(emit, discardLogger()), RequestID(), Auth(authKeys()), RateLimit(admitter, nil, discardLogger()))
+	completions := CompletionsHandler(testRoutes(), map[string]provider.Provider{"mock": p}, CompletionsOptions{Tokens: tokens, Logger: discardLogger()})
+	s := NewServer(discardLogger(), pipeline, completions, WithAdminToken(testAdminToken))
+	s.SetReady(true)
+	if rec := adminReadiness(s, testAdminToken, "state=down&for=1m"); rec.Code != http.StatusOK {
+		t.Fatalf("inject = %d", rec.Code)
+	}
+
+	tests := []struct {
+		name       string
+		key        string
+		wantStatus int
+		wantCode   core.Code
+		wantTenant string
+	}{
+		{"missing key", "", http.StatusUnauthorized, core.CodeUnauthorized, ""},
+		{"unknown key", "sk-nope", http.StatusUnauthorized, core.CodeUnauthorized, ""},
+		{"authenticated", "sk-support", http.StatusServiceUnavailable, core.CodeNotReady, "team-support"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events = nil
+			body := &readSentinel{}
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+			if tt.key != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.key)
+			}
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+
+			var eb errorBody
+			if rec.Code != tt.wantStatus || json.Unmarshal(rec.Body.Bytes(), &eb) != nil || eb.Error.Code != tt.wantCode {
+				t.Fatalf("status = %d body = %s, want %d %s", rec.Code, rec.Body.String(), tt.wantStatus, tt.wantCode)
+			}
+			id := rec.Header().Get(RequestIDHeader)
+			if len(events) != 1 || id == "" || events[0].RequestID != id || events[0].ErrorCode != tt.wantCode || events[0].Tenant != tt.wantTenant || events[0].RunID != "" {
+				t.Fatalf("request ID %q, events = %+v", id, events)
+			}
+			if body.reads != 0 {
+				t.Fatalf("body read %d times, want none", body.reads)
+			}
+		})
+	}
+	if len(admitter.sawTenants) != 0 || len(tokens.charges) != 0 || p.got.Model != "" {
+		t.Fatalf("refusals reached limits or provider: rpm %v, tpm %v, provider %q", admitter.sawTenants, tokens.charges, p.got.Model)
 	}
 }
 

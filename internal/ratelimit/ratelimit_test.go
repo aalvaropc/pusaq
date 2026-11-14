@@ -235,6 +235,73 @@ func TestAdjustExtraChargeGoesNegative(t *testing.T) {
 	}
 }
 
+func TestBucketTTLFollowsRefill(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name   string
+		limits Limits
+		ops    func(l *Limiter, advance func(time.Duration)) error
+		want   time.Duration
+	}{
+		{"floor when refill is quick", Limits{Burst: 5, Rate: 1, TTL: time.Minute}, func(l *Limiter, _ func(time.Duration)) error {
+			_, err := l.Allow(ctx, "team-a", 1)
+			return err
+		}, time.Minute},
+		{"drained slow refill", Limits{Burst: 100, Rate: 1.0 / 60, TTL: time.Minute}, func(l *Limiter, _ func(time.Duration)) error {
+			_, err := l.Allow(ctx, "team-a", 100)
+			return err
+		}, 6000 * time.Second},
+		{"negative balance", Limits{Burst: 10, Rate: 0.1, TTL: time.Minute}, func(l *Limiter, _ func(time.Duration)) error {
+			return l.Adjust(ctx, "team-a", -80)
+		}, 800 * time.Second},
+		{"lease take", Limits{Burst: 10, Rate: 0.01, TTL: time.Minute}, func(l *Limiter, _ func(time.Duration)) error {
+			_, err := l.Take(ctx, "team-a", 1, 10)
+			return err
+		}, 1000 * time.Second},
+		{"store clock behind the bucket", Limits{Burst: 10, Rate: 1, TTL: time.Second}, func(l *Limiter, advance func(time.Duration)) error {
+			if _, err := l.Allow(ctx, "team-a", 10); err != nil {
+				return err
+			}
+			advance(-30 * time.Second)
+			return l.Adjust(ctx, "team-a", 0)
+		}, 40 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, mr, advance := newTestLimiter(t, tt.limits)
+			if err := tt.ops(l, advance); err != nil {
+				t.Fatal(err)
+			}
+			if got := mr.TTL("rl:{team-a}:rpm"); got != tt.want {
+				t.Fatalf("bucket TTL = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSlowRefillOutlivesIdleness(t *testing.T) {
+	l, mr, advance := newTestLimiter(t, Limits{Burst: 100, Rate: 1.0 / 60, TTL: time.Minute})
+	ctx := context.Background()
+	if d, err := l.Allow(ctx, "team-a", 100); err != nil || !d.Allowed {
+		t.Fatalf("draining the bucket = %+v, %v", d, err)
+	}
+
+	advance(20 * time.Minute)
+	mr.FastForward(20 * time.Minute)
+	if !mr.Exists("rl:{team-a}:rpm") {
+		t.Fatal("bucket reclaimed before its refill could fill it")
+	}
+	admitted := 0
+	for range 100 {
+		if d, _ := l.Allow(ctx, "team-a", 1); d.Allowed {
+			admitted++
+		}
+	}
+	if admitted != 20 {
+		t.Fatalf("admitted %d after 20 idle minutes at one token per minute, want 20", admitted)
+	}
+}
+
 func TestAdjustOnStoreFailureSurfacesError(t *testing.T) {
 	l, mr, _ := newTestLimiter(t, limits())
 	mr.Close()
