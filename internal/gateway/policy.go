@@ -9,7 +9,6 @@ import (
 
 	"github.com/aalvaropc/pusaq/internal/core"
 	"github.com/aalvaropc/pusaq/internal/policy"
-	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/spend"
 )
 
@@ -19,7 +18,7 @@ type Policy struct {
 	// Models, when non-nil, is the set of concrete aliases the tenant may be
 	// served by; pusaq/auto is checked against the alias it resolves to.
 	Models map[string]bool
-	// MaxPromptChars caps the bytes of message content; zero means no cap.
+	// MaxPromptChars caps promptChars; zero means no cap.
 	MaxPromptChars int
 	// BudgetUSD is the monthly spend ceiling; zero means no budget.
 	BudgetUSD float64
@@ -52,11 +51,14 @@ func (o CompletionsOptions) policyFor(tenant string) Policy {
 	return o.Policies(tenant)
 }
 
-// promptChars is the size of the prompt as bytes of message content.
-func promptChars(messages []provider.Message) int {
-	n := 0
-	for _, m := range messages {
+// promptChars counts message content, tool-call names and arguments, and tool definitions.
+func promptChars(cr completionRequest) int {
+	n := cr.toolsBytes
+	for _, m := range cr.Messages {
 		n += len(m.Content)
+		for _, call := range m.ToolCalls {
+			n += len(call.Function.Name) + len(call.Function.Arguments)
+		}
 	}
 	return n
 }
@@ -79,14 +81,14 @@ func applyPolicy(ctx context.Context, req *core.Request, cr completionRequest, a
 		return policy.Flags{}, core.Errorf(core.CodePolicyDenied, "model %q is not allowed for this tenant", alias)
 	}
 	if p.MaxPromptChars > 0 {
-		if n := promptChars(cr.Messages); n > p.MaxPromptChars {
+		if n := promptChars(cr); n > p.MaxPromptChars {
 			return policy.Flags{}, core.Errorf(core.CodePolicyDenied, "prompt of %d chars exceeds the tenant limit of %d", n, p.MaxPromptChars)
 		}
 	}
 
 	// Content rules: the flags are set before any decision so a denial's
 	// event explains itself; a content denial never touches the store.
-	flags := classifyContent(cr.Messages)
+	flags := classifyContent(cr)
 	req.PolicyFlags = flags.List()
 	if p.BlockSensitive && len(flags.Sensitive) > 0 {
 		return flags, core.Errorf(core.CodePolicyDenied, "prompt contains sensitive data (%s)", strings.Join(flags.Sensitive, ", "))

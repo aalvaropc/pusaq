@@ -197,10 +197,10 @@ func TestTokenLimiterStoreFailureFailsOpen(t *testing.T) {
 
 func TestEstimateInputTokens(t *testing.T) {
 	msgs := []provider.Message{{Role: "user", Content: "hello"}} // 9 chars
-	if got := estimateInputTokens(msgs); got != 3 {
+	if got := estimateInputTokens(completionRequest{Messages: msgs}); got != 3 {
 		t.Fatalf("estimate = %d, want ceil(9/4)=3", got)
 	}
-	if got := estimateInputTokens(nil); got != 0 {
+	if got := estimateInputTokens(completionRequest{}); got != 0 {
 		t.Fatalf("estimate(nil) = %d", got)
 	}
 }
