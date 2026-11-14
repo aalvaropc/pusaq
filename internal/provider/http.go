@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -60,12 +61,36 @@ func NewHTTP(name, baseURL string, timeout time.Duration, logger *slog.Logger, o
 	return h
 }
 
-// authorize attaches the upstream's bearer key when configured.
-func (p *HTTP) authorize(req *http.Request) {
+func (p *HTTP) authorize(req *http.Request, idempotencyKey string) {
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
+	if idempotencyKey != "" {
+		req.Header.Set(IdempotencyKeyHeader, idempotencyKey)
+	}
 }
+
+// IdempotencyKeyHeader carries ChatRequest.IdempotencyKey to the upstream.
+const IdempotencyKeyHeader = "Idempotency-Key"
+
+// RetryableError marks an upstream failure the same backend may answer
+// differently on a retry: a transport failure before any response (Status
+// 0) or status 408, 429, 500, 502, 503 or 504. RetryAfter is the upstream's
+// Retry-After, zero when absent.
+type RetryableError struct {
+	Status     int
+	RetryAfter time.Duration
+	Err        error
+}
+
+func (e *RetryableError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("upstream status %d", e.Status)
+}
+
+func (e *RetryableError) Unwrap() error { return e.Err }
 
 // Name implements Provider.
 func (p *HTTP) Name() string { return p.name }
@@ -85,14 +110,14 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 		return ChatResponse{}, fmt.Errorf("build upstream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	p.authorize(httpReq)
+	p.authorize(httpReq, req.IdempotencyKey)
 
 	httpResp, err := p.client.Do(httpReq)
 	if err != nil {
 		p.logger.Warn("upstream call failed",
 			slog.String("provider", p.name), slog.String("error_code", string(core.CodeUpstream)))
 		return ChatResponse{}, &core.Error{
-			Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: err,
+			Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: &RetryableError{Err: err},
 		}
 	}
 	defer func() { _ = httpResp.Body.Close() }()
@@ -109,7 +134,7 @@ func (p *HTTP) Complete(ctx context.Context, req ChatRequest) (ChatResponse, err
 			slog.String("provider", p.name),
 			slog.Int("status", httpResp.StatusCode),
 		)
-		return ChatResponse{}, statusError(httpResp.StatusCode)
+		return ChatResponse{}, statusError(httpResp)
 	}
 	if len(body) > maxUpstreamBody {
 		return ChatResponse{}, core.NewError(core.CodeUpstream, "upstream response too large")
@@ -159,7 +184,7 @@ func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadClos
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	p.authorize(httpReq)
+	p.authorize(httpReq, req.IdempotencyKey)
 
 	httpResp, err := p.streamClient.Do(httpReq)
 	if err != nil {
@@ -167,7 +192,7 @@ func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadClos
 		p.logger.Warn("upstream stream call failed",
 			slog.String("provider", p.name), slog.String("error_code", string(core.CodeUpstream)))
 		return nil, &core.Error{
-			Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: err,
+			Code: core.CodeUpstream, Message: "upstream provider unavailable", Err: &RetryableError{Err: err},
 		}
 	}
 
@@ -178,17 +203,47 @@ func (p *HTTP) StreamComplete(ctx context.Context, req ChatRequest) (io.ReadClos
 			slog.String("provider", p.name),
 			slog.Int("status", httpResp.StatusCode),
 		)
-		return nil, statusError(httpResp.StatusCode)
+		return nil, statusError(httpResp)
 	}
 	return newIdleTimeoutBody(httpResp.Body, p.idleTimeout, cancel), nil
 }
 
-func statusError(status int) error {
+func statusError(resp *http.Response) error {
+	status := resp.StatusCode
 	switch status {
 	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
 		return core.Errorf(core.CodeInvalidRequest, "upstream rejected the request (status %d)", status)
+	case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusInternalServerError,
+		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return &core.Error{
+			Code:    core.CodeUpstream,
+			Message: fmt.Sprintf("upstream provider returned status %d", status),
+			Err:     &RetryableError{Status: status, RetryAfter: retryAfter(resp.Header.Get("Retry-After"), time.Now())},
+		}
 	}
 	return core.Errorf(core.CodeUpstream, "upstream provider returned status %d", status)
+}
+
+const maxRetryAfter = 24 * time.Hour
+
+func retryAfter(v string, now time.Time) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseInt(v, 10, 64); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		if secs >= int64(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
+		return time.Duration(secs) * time.Second
+	}
+	at, err := http.ParseTime(v)
+	if err != nil {
+		return 0
+	}
+	return min(max(at.Sub(now), 0), maxRetryAfter)
 }
 
 var errStreamIdle = errors.New("upstream stream idle past the timeout")

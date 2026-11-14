@@ -25,7 +25,8 @@ type ChatRequest struct {
 	MaxTokens int       `json:"max_tokens,omitempty"`
 	// Temperature is forwarded as the client sent it; a pointer so an
 	// explicit 0 survives (omitted only when the client omitted it).
-	Temperature *float64 `json:"temperature,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	IdempotencyKey string   `json:"-"`
 }
 
 // Choice is one completion alternative.
