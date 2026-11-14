@@ -232,12 +232,23 @@ func TestNamespaceDerivation(t *testing.T) {
 		{"temperature 1", func(k *Key) { k.Temperature = "1" }},
 		{"max_tokens 32", func(k *Key) { k.MaxTokens = "32" }},
 		{"max_tokens 64", func(k *Key) { k.MaxTokens = "64" }},
+		{"tools", func(k *Key) { k.Tools = "3f1c" }},
 	} {
 		k := baseKey()
 		tt.mutate(&k)
 		if k.Namespace() == base {
 			t.Fatalf("different %s shares a namespace", tt.name)
 		}
+	}
+	none := baseKey()
+	none.Tools = "none"
+	if none.Namespace() != base {
+		t.Fatal("a key without tools does not use the none marker")
+	}
+	a, b := baseKey(), baseKey()
+	a.Tools, b.Tools = "3f1c", "9a0e"
+	if a.Namespace() == b.Namespace() {
+		t.Fatal("different tools share a namespace")
 	}
 	explicit := func(field func(*Key, string)) []string {
 		var out []string

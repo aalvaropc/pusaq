@@ -186,7 +186,7 @@ func (s *Shadow) Evaluate(sample Sample) Evaluation {
 }
 
 // PolicyVersion versions the eligibility rules and the namespace derivation.
-const PolicyVersion = "v2"
+const PolicyVersion = "v3"
 
 // Key is the namespace material of one evaluated request.
 type Key struct {
@@ -194,6 +194,7 @@ type Key struct {
 	RouteModel    string
 	ReportedModel string
 	SystemPrompt  string
+	Tools         string
 	Temperature   string
 	MaxTokens     string
 }
@@ -204,8 +205,12 @@ func (k Key) Namespace() string {
 	if reported == "" {
 		reported = k.RouteModel
 	}
+	tools := k.Tools
+	if tools == "" {
+		tools = "none"
+	}
 	h := sha256.New()
-	for _, part := range []string{k.Tenant, k.RouteModel, reported, k.SystemPrompt, "tools=none", "format=none", "temp=" + k.Temperature, "max_tokens=" + k.MaxTokens, "policy=" + PolicyVersion} {
+	for _, part := range []string{k.Tenant, k.RouteModel, reported, k.SystemPrompt, "tools=" + tools, "format=none", "temp=" + k.Temperature, "max_tokens=" + k.MaxTokens, "policy=" + PolicyVersion} {
 		_, _ = h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(part))))
 		_, _ = h.Write([]byte(part))
 	}
