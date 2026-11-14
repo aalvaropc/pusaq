@@ -14,7 +14,7 @@ settings use Go syntax such as `500ms`, `10s` and `1m`.
 | Variable | Default | What it does |
 |---|---|---|
 | `PUSAQ_ADDR` | `:8080` | Listen address; the standalone default binds all interfaces. Use `127.0.0.1:8080` for a host-only local process. |
-| `PUSAQ_DRAIN_DELAY` | `1s` | On SIGTERM, keep serving this long after turning not-ready so balancer probes see the 503. |
+| `PUSAQ_DRAIN_DELAY` | `1s` | On SIGTERM, keep serving this long after turning not-ready so balancer probes see the 503. A second SIGTERM or SIGINT exits at once. |
 | `PUSAQ_SHUTDOWN_GRACE` | `10s` | How long in-flight requests get to finish after the drain delay. |
 | `PUSAQ_TELEMETRY_BUFFER` | `1024` | Cost-event buffer; overflow drops events and counts them. |
 | `PUSAQ_BODY_READ_TIMEOUT` | `10s` | Positive deadline for reading an authenticated request body. |
@@ -65,7 +65,8 @@ not an environment setting.
 | `PUSAQ_TPM_BURST` | = limit | Token bucket capacity; an empty value also means the default. |
 | `PUSAQ_TPM_RESERVE_DEFAULT` | `512` | Positive output reservation when `max_tokens` is absent, also used to price a request answered without usage; at most `PUSAQ_TPM_BURST` while token limiting is on. A prompt estimate plus output reservation above the burst is rejected with 400. |
 
-Buckets expire after 10 minutes of inactivity. RPM and TPM require
+An idle bucket expires once its refill would have filled it again, and no
+sooner than one minute after its last update. RPM and TPM require
 `PUSAQ_REDIS_ADDR`; no Redis address disables both. A store call has a 250 ms
 context budget. Store errors fail open unless the tenant's policy sets
 `fail_closed=true`; the cost event then names the decision in `fail_open`. See [quota semantics](gateway.md#rate-limiting).

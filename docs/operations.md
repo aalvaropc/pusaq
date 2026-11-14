@@ -11,7 +11,8 @@ Each completion request entering the accounting pipeline produces one
 unknown API keys are accounted before body reads and have no payload-derived
 run ID. Authenticated body failures and malformed run IDs are accounted as
 `invalid_request`; valid run IDs survive RPM rejection. Injected not-ready
-refusals happen before accounting and produce no cost event or request ID.
+refusals happen after authentication and before the body is read: they
+carry a request ID and produce one `not_ready` cost event without a run ID.
 
 Events are offered to a bounded asynchronous emitter that writes JSON lines
 to stdout. Saturation drops events rather than waiting for the sink;
@@ -33,16 +34,18 @@ sensitive. External embedding services receive eligible shadow prompts.
 credentials. Readiness turns 503 during the drain window on SIGTERM. With
 `PUSAQ_ADMIN_TOKEN` set, `POST /admin/readiness?state=down&for=<duration>`
 (bearer token) fails readiness on purpose for that long — `/readyz` answers
-503 and new requests are refused with `not_ready` while in-flight requests
-and streams finish; `state=up` ends it early. It is the failure-injection
-knob chaos runs use instead of deleting a service; each action is one
-`readiness_window` log record.
+503 and new authenticated requests are refused with `not_ready` while
+in-flight requests and streams finish; `state=up` ends it early. It is the
+failure-injection knob chaos runs use instead of deleting a service; each
+action is one `readiness_window` log record.
 
 Shutdown marks the replica not ready, serves during `PUSAQ_DRAIN_DELAY`,
 then gives in-flight requests `PUSAQ_SHUTDOWN_GRACE` to finish. Lease tokens
-are returned, shadow evaluations drained and telemetry flushed. During a
-readiness injection, in-flight work continues; hard process or regional
-failure can interrupt it.
+are returned (each return with its own 250 ms store budget), shadow
+evaluations drained and telemetry flushed. A second SIGTERM or SIGINT during
+the drain terminates the process at once: in-flight requests are cut and
+buffered cost events can be lost. During a readiness injection, in-flight
+work continues; hard process or regional failure can interrupt it.
 
 ## Local environment
 
