@@ -33,10 +33,10 @@ func parse(t *testing.T, text string) *Input {
 func TestParseFixtureCounts(t *testing.T) {
 	in := loadFixture(t)
 	got := []int{in.Lines, in.NonJSON, in.Malformed, in.Other, in.Duplicates,
-		len(in.Events), len(in.Shadow), len(in.Transitions), len(in.Misses), len(in.FailOpens)}
-	want := []int{33, 2, 2, 1, 1, 11, 5, 2, 4, 2}
+		len(in.Events), len(in.Shadow), len(in.Transitions), len(in.Misses)}
+	want := []int{34, 2, 2, 4, 1, 11, 5, 2, 4}
 	if !slices.Equal(got, want) {
-		t.Fatalf("lines, nonJSON, malformed, other, duplicates, events, shadow, transitions, misses, failOpens = %v, want %v", got, want)
+		t.Fatalf("lines, nonJSON, malformed, other, duplicates, events, shadow, transitions, misses = %v, want %v", got, want)
 	}
 	if !slices.Equal(in.Taus, []float64{0.95}) || !slices.Equal(in.Embedders, []string{"local"}) {
 		t.Fatalf("taus %v embedders %v", in.Taus, in.Embedders)
@@ -46,8 +46,11 @@ func TestParseFixtureCounts(t *testing.T) {
 	}
 	a1 := in.Events[0]
 	if a1.RequestID != "a1" || a1.Source != "pusaq-1" || a1.LatencyMS != 100 || !a1.Priced || a1.CostUSD != 0.001 ||
-		a1.ServedProvider != "mock" || a1.Attempts != 1 || a1.PromptTokens != 10 || a1.CompletionTokens != 20 {
+		a1.ServedProvider != "mock" || a1.Attempts != 1 || a1.PromptTokens != 10 || a1.CompletionTokens != 20 || a1.FailOpen != nil {
 		t.Fatalf("first event = %+v", a1)
+	}
+	if b4 := in.Events[9]; b4.RequestID != "b4" || !slices.Equal(b4.FailOpen, []string{"rpm", "budget"}) {
+		t.Fatalf("b4 = %+v", b4)
 	}
 	if tr := in.Transitions[0]; tr.Backend != "mock" || tr.From != "closed" || tr.To != "open" || tr.Source != "pusaq-1" {
 		t.Fatalf("first transition = %+v", tr)

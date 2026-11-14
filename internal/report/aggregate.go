@@ -167,7 +167,7 @@ type TenantLimits struct {
 	FailClosed      int
 	FailOpenRequest int
 	FailOpenToken   int
-	FailOpenSpend   int
+	FailOpenBudget  int
 }
 
 // LimitView is the rate-limiting table.
@@ -179,7 +179,7 @@ type LimitView struct {
 // HasData reports whether any limit denied or failed open.
 func (v LimitView) HasData() bool {
 	t := v.Total
-	return t.RequestLimited+t.TokenLimited+t.BudgetExceeded+t.FailClosed+t.FailOpenRequest+t.FailOpenToken+t.FailOpenSpend > 0
+	return t.RequestLimited+t.TokenLimited+t.BudgetExceeded+t.FailClosed+t.FailOpenRequest+t.FailOpenToken+t.FailOpenBudget > 0
 }
 
 // SweepRow is the predicted hit-rate and its false-positive bound at one τ.
@@ -267,7 +267,7 @@ func Build(in *Input, opts Options) (*Report, error) {
 	r.Latency = latencyView(events)
 	r.Outcomes = outcomeView(events)
 	r.Fallback = fallbackView(events, in, selected, opts.RunID != "")
-	r.Limits = limitView(events, in.FailOpens, selected)
+	r.Limits = limitView(events)
 	r.Shadow = shadowView(events, in, selected)
 	return r, nil
 }
@@ -281,11 +281,6 @@ func orphans(in *Input, known map[string]bool) int {
 	}
 	for _, m := range in.Misses {
 		if !known[m.RequestID] {
-			n++
-		}
-	}
-	for _, f := range in.FailOpens {
-		if !known[f.RequestID] {
 			n++
 		}
 	}
@@ -526,7 +521,7 @@ func fallbackView(events []Event, in *Input, selected map[string]Event, windowed
 	return v
 }
 
-func limitView(events []Event, failOpens []FailOpen, selected map[string]Event) LimitView {
+func limitView(events []Event) LimitView {
 	byTenant := make(map[string]*TenantLimits)
 	tenant := func(name string) *TenantLimits {
 		if byTenant[name] == nil {
@@ -550,21 +545,15 @@ func limitView(events []Event, failOpens []FailOpen, selected map[string]Event) 
 			case core.CodeStoreUnavailable:
 				t.FailClosed++
 			}
-		}
-	}
-	for _, f := range failOpens {
-		e, ok := selected[f.RequestID]
-		if !ok {
-			continue
-		}
-		for _, t := range []*TenantLimits{tenant(e.Tenant), &v.Total} {
-			switch f.Store {
-			case StoreToken:
-				t.FailOpenToken++
-			case StoreSpend:
-				t.FailOpenSpend++
-			default:
-				t.FailOpenRequest++
+			for _, d := range e.FailOpen {
+				switch d {
+				case FailOpenRequest:
+					t.FailOpenRequest++
+				case FailOpenToken:
+					t.FailOpenToken++
+				case FailOpenBudget:
+					t.FailOpenBudget++
+				}
 			}
 		}
 	}

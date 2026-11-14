@@ -93,7 +93,7 @@ func TestBuildFixtureRun(t *testing.T) {
 
 	wantLimits := []TenantLimits{
 		{Tenant: "tenant-a", Requests: 6, RequestLimited: 1, TokenLimited: 1},
-		{Tenant: "tenant-b", Requests: 4, BudgetExceeded: 1, FailClosed: 1, FailOpenRequest: 1},
+		{Tenant: "tenant-b", Requests: 4, BudgetExceeded: 1, FailClosed: 1, FailOpenRequest: 1, FailOpenBudget: 1},
 	}
 	if !slices.Equal(r.Limits.Tenants, wantLimits) || !r.Limits.HasData() {
 		t.Fatalf("limits = %+v", r.Limits.Tenants)
@@ -219,14 +219,31 @@ func TestLimitKindFromRequestedModel(t *testing.T) {
 		eventLine("rpm2", "t", "error", "rate_limited", 0, ""),
 		eventLine("tpm", "t", "error", "rate_limited", 0, `,"requested_model":"pusaq/fast","served_model":"m"`),
 		eventLine("ok", "t", "success", "", 0, `,"requested_model":"pusaq/fast","served_model":"m"`),
-		`{"msg":"token limiter store unavailable, failing open","request_id":"ok"}`,
-		`{"msg":"spend store unavailable, failing open","request_id":"ok"}`,
-		`{"msg":"rate limiter store unavailable, failing open","request_id":"elsewhere"}`,
 	}, "\n"))
 	r := build(t, in, "")
-	want := TenantLimits{Tenant: "t", Requests: 4, RequestLimited: 2, TokenLimited: 1, FailOpenToken: 1, FailOpenSpend: 1}
-	if !slices.Equal(r.Limits.Tenants, []TenantLimits{want}) || r.Skipped.Orphans != 1 {
-		t.Fatalf("limits = %+v orphans %d", r.Limits.Tenants, r.Skipped.Orphans)
+	want := TenantLimits{Tenant: "t", Requests: 4, RequestLimited: 2, TokenLimited: 1}
+	if !slices.Equal(r.Limits.Tenants, []TenantLimits{want}) {
+		t.Fatalf("limits = %+v", r.Limits.Tenants)
+	}
+}
+
+func TestFailOpenFromTheEventField(t *testing.T) {
+	in := parse(t, strings.Join([]string{
+		eventLine("all", "t", "success", "", 0, `,"fail_open":"rpm,budget,tpm"`),
+		eventLine("rpm", "t", "success", "", 0, `,"fail_open":"rpm"`),
+		eventLine("closed", "u", "error", "store_unavailable", 0, ""),
+		eventLine("decided", "u", "success", "", 0, ""),
+		`{"msg":"rate limiter store unavailable, failing open","request_id":"all"}`,
+		`{"msg":"token limiter store unavailable, failing open","request_id":"decided"}`,
+		`{"msg":"spend store unavailable, failing open","request_id":"decided"}`,
+	}, "\n"))
+	r := build(t, in, "")
+	want := []TenantLimits{
+		{Tenant: "t", Requests: 2, FailOpenRequest: 2, FailOpenToken: 1, FailOpenBudget: 1},
+		{Tenant: "u", Requests: 2, FailClosed: 1},
+	}
+	if !slices.Equal(r.Limits.Tenants, want) || r.Skipped.Other != 3 {
+		t.Fatalf("limits = %+v other %d", r.Limits.Tenants, r.Skipped.Other)
 	}
 }
 

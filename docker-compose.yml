@@ -26,7 +26,7 @@ x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_UPSTREAMS: mock=http://mock-lt:9090/v1,backup=http://mock-lt-backup:9090/v1
   PUSAQ_ROUTES: pusaq/fast=mock-exactness,pusaq/best=mock-neighbor
   PUSAQ_ROUTING_RULES: toll=pusaq/best,default=pusaq/fast
-  PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll,chaos-main:tenant-main,chaos-stream:tenant-stream,chaos-split:tenant-split
+  PUSAQ_API_KEYS: lt-a:tenant-a,lt-b:tenant-b,lt-c:tenant-toll,chaos-main:tenant-main,chaos-stream:tenant-stream,chaos-split:tenant-split,redis-open:tenant-open,redis-budget:tenant-budget,redis-closed:tenant-closed
   PUSAQ_ADMIN_TOKEN: ${LOADTEST_ADMIN_TOKEN:-local-chaos-token-0123456789}
   PUSAQ_RPM_LIMIT: ${LOADTEST_RPM:-600}
   PUSAQ_RPM_BURST: ${LOADTEST_BURST:-100}
@@ -35,6 +35,9 @@ x-pusaq-loadtest-env: &pusaq-loadtest-env
   PUSAQ_LEASE_TTL: 1s
   PUSAQ_TPM_LIMIT: ${LOADTEST_TPM_LIMIT:-0}
   PUSAQ_TPM_BURST: ${LOADTEST_TPM_BURST:-}
+  PUSAQ_TENANT_POLICIES: ${LOADTEST_TENANT_POLICIES:-}
+  PUSAQ_PRICES: ${LOADTEST_PRICES:-}
+  PUSAQ_PRICE_TABLE_VERSION: ${LOADTEST_PRICE_TABLE_VERSION:-}
   PUSAQ_CACHE_MODE: "off"
   PUSAQ_TELEMETRY_BUFFER: "65536"
   PUSAQ_DRAIN_DELAY: 0s
@@ -110,12 +113,14 @@ services:
     environment:
       <<: *pusaq-loadtest-env
       PUSAQ_REDIS_ADDR: ""
+      PUSAQ_TENANT_POLICIES: ""
 
   pusaq-nolimit-b:
     <<: *pusaq-loadtest
     environment:
       <<: *pusaq-loadtest-env
       PUSAQ_REDIS_ADDR: ""
+      PUSAQ_TENANT_POLICIES: ""
 
   # Latency is 0 for the limiter and breaker runs; the token-overrun run
   # emulates LLM latency so requests overlap in flight.

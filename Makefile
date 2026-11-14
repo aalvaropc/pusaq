@@ -34,18 +34,35 @@ CHAOS_WARMUP ?= 60s
 CHAOS_FAIL_FOR ?= 60s
 CHAOS_DURATION ?= 300s
 CHAOS_TIMEOUT ?= 10s
+# Redis outage run (docs/measurements/redis-outage.md); durations in whole seconds.
+REDIS_ARMS ?= hung down
+REDIS_WARMUP ?= 30
+REDIS_FAIL_FOR ?= 30
+REDIS_DURATION ?= 90
+REDIS_OPEN_RPS ?= 20
+REDIS_BUDGET_RPS ?= 5
+REDIS_CLOSED_RPS ?= 5
+REDIS_RPM ?= 600
+REDIS_RPM_BURST ?= 20
+REDIS_TPM ?= 600000
+REDIS_TPM_BURST ?= 100000
 # Profile-wide knobs the other runs leave at their defaults.
 LOADTEST_TPM_LIMIT ?= 0
 LOADTEST_TPM_BURST ?=
 LOADTEST_MOCK_LATENCY ?= 0
 LOADTEST_MOCK_CHUNK_DELAY ?= 10ms
 LOADTEST_ADMIN_TOKEN ?= local-chaos-token-0123456789
+LOADTEST_TENANT_POLICIES ?=
+LOADTEST_PRICES ?=
+LOADTEST_PRICE_TABLE_VERSION ?=
 RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 RUN_ID := $(RUN_ID)
 export LOADTEST_RPM LOADTEST_BURST LOADTEST_DURATION LOADTEST_RATE_MULT LOADTEST_TOLL_RPS LOADTEST_TOLL_DURATION LOADTEST_MODE LOADTEST_LEASE_SIZE \
        BREAKER_RPS BREAKER_WARMUP BREAKER_FAIL_FOR BREAKER_DURATION \
        LOADTEST_TPM_LIMIT LOADTEST_TPM_BURST LOADTEST_MOCK_LATENCY LOADTEST_MOCK_CHUNK_DELAY LOADTEST_ADMIN_TOKEN TPM_RPS TPM_DURATION RUN_ID \
-       CHAOS_EXPERIMENT CHAOS_QPS CHAOS_STREAM_QPS CHAOS_SPLIT_QPS CHAOS_WARMUP CHAOS_FAIL_FOR CHAOS_DURATION CHAOS_TIMEOUT
+       CHAOS_EXPERIMENT CHAOS_QPS CHAOS_STREAM_QPS CHAOS_SPLIT_QPS CHAOS_WARMUP CHAOS_FAIL_FOR CHAOS_DURATION CHAOS_TIMEOUT \
+       LOADTEST_TENANT_POLICIES LOADTEST_PRICES LOADTEST_PRICE_TABLE_VERSION \
+       REDIS_WARMUP REDIS_FAIL_FOR REDIS_DURATION REDIS_OPEN_RPS REDIS_BUDGET_RPS REDIS_CLOSED_RPS
 
 # Cloud foundation (Terraform). The state bucket exists already; its name is
 # passed at init time so it is never hardcoded in the configuration.
@@ -55,7 +72,7 @@ TF_FOUNDATION := terraform -chdir=infra/terraform/foundation
 # measurement run (created before it, destroyed the same day).
 TF_RUNTIME := terraform -chdir=infra/terraform/runtime
 
-.PHONY: help up down run mock test test-loadtest lint lint-docs tidy smoke calibrate replay dashboard loadtest loadtest-down breakertest tpmtest chaos-run chaos-local \
+.PHONY: help up down run mock test test-loadtest lint lint-docs tidy smoke calibrate replay dashboard loadtest loadtest-down breakertest tpmtest chaos-run chaos-local chaos-redis \
         infra-init infra-plan infra-apply infra-destroy infra-fmt infra-validate \
         runtime-init runtime-plan runtime-apply runtime-destroy
 
@@ -157,6 +174,16 @@ chaos-local: ## Failover harness against the Compose profile (no balancer health
 	    pusaq-a pusaq-b pusaq-nolimit-a pusaq-nolimit-b mock-lt mock-lt-backup lb
 	docker compose exec -T redis redis-cli FLUSHALL
 	bash loadtest/run-measurement.sh chaos $(RUN_ID)
+
+chaos-redis: LOADTEST_RPM = $(REDIS_RPM)
+chaos-redis: LOADTEST_BURST = $(REDIS_RPM_BURST)
+chaos-redis: LOADTEST_TPM_LIMIT = $(REDIS_TPM)
+chaos-redis: LOADTEST_TPM_BURST = $(REDIS_TPM_BURST)
+chaos-redis: LOADTEST_TENANT_POLICIES = tenant-budget:budget_usd=1000;tenant-closed:fail_closed=true
+chaos-redis: LOADTEST_PRICES = mock-exactness=1000/2000,mock-neighbor=1000/2000
+chaos-redis: LOADTEST_PRICE_TABLE_VERSION = local-redis-outage
+chaos-redis: ## Redis outage run: hung (pause) and down (stop) arms against the Compose profile, verified per request
+	@status=0; for arm in $(REDIS_ARMS); do bash loadtest/redis-outage.sh $(RUN_ID) $$arm || { s=$$?; [ $$status -ne 0 ] || status=$$s; }; done; exit $$status
 
 chaos-run: ## Regional failover run against the runtime module (k6 in Docker from here, events from Cloud Logging)
 	./loadtest/chaos-run.sh $(RUN_ID)

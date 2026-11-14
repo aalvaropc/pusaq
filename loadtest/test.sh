@@ -38,6 +38,13 @@ case "$*" in
   *"logs --no-log-prefix pusaq-b") cat "$FIXTURE_ROOT/b.jsonl" ;;
   *"logs --no-log-prefix mock-lt") cat "$FIXTURE_ROOT/mock-lt.jsonl" ;;
   *"INFO commandstats") echo 'cmdstat_evalsha:calls=3,usec=0' ;;
+  *" up "*) echo "up:${LOADTEST_TENANT_POLICIES:-}" >>"$FIXTURE_ROOT/stages"; exit "${UP_STATUS:-0}" ;;
+  *"redis-cli FLUSHALL") echo flush >>"$FIXTURE_ROOT/stages" ;;
+  *"redis-cli EVAL "*) echo "${SPEND_COUNTER:-0.5}" ;;
+  *" pause redis") echo inject:pause >>"$FIXTURE_ROOT/stages"; exit "${INJECT_STATUS:-0}" ;;
+  *" stop redis") echo inject:stop >>"$FIXTURE_ROOT/stages"; exit "${INJECT_STATUS:-0}" ;;
+  *" unpause redis") echo restore:unpause >>"$FIXTURE_ROOT/stages"; exit "${RESTORE_STATUS:-0}" ;;
+  *" start redis") echo restore:start >>"$FIXTURE_ROOT/stages"; exit "${RESTORE_STATUS:-0}" ;;
   *" run "*) echo "run:$RUN_ID" >>"$FIXTURE_ROOT/stages"; exit "${K6_STATUS:-0}" ;;
   *" stop "*) echo "drain:$RUN_ID" >>"$FIXTURE_ROOT/stages"; exit "${DRAIN_STATUS:-0}" ;;
 esac
@@ -56,6 +63,7 @@ SH
 cat >"$tmp/bin/sleep" <<'SH'
 #!/usr/bin/env bash
 echo "$1" >>"$FIXTURE_ROOT/sleeps"
+[[ "$1" != "${SLEEP_FAIL_ON:-}" ]]
 SH
 chmod +x "$tmp/bin/"*
 
@@ -312,12 +320,170 @@ cp "$tmp/a.jsonl" "$tmp/b.jsonl"
 expect 0 'breaker run counts half-open episodes' bash "$tmp/loadtest/verify-breaker.sh" fixture
 logged 'half_open_episodes=2 reopened=1'
 
+t0=$(jq -n '"2026-10-20T12:00:10Z" | fromdateiso8601 * 1000')
+jq -n --argjson t0 "$t0" '{run_id:"fixture-hung",arm:"hung",commands:{inject:"docker compose pause redis",restore:"docker compose unpause redis"},
+  inject_start_ms:$t0,inject_end_ms:($t0 + 100),restore_start_ms:($t0 + 10000),restore_end_ms:($t0 + 10200),
+  warmup_s:10,fail_for_s:10,duration_s:30,rpm_limit:60,rpm_burst:2,spend_counter_usd:0.068}' >"$tmp/base-redis-window.json"
+jq -n '{summary:{run_id:"fixture-hung",params:{duration_s:30},dropped_iterations:0,thresholds_passed:true,client:{
+  open:{sent:7,ok:5,limited:1,store_unavailable:0,other_5xx:0,transport:1,other:0},
+  budget:{sent:3,ok:3,limited:0,store_unavailable:0,other_5xx:0,transport:0,other:0},
+  closed:{sent:3,ok:2,limited:0,store_unavailable:1,other_5xx:0,transport:0,other:0}}}}' >"$tmp/base-redis.json"
+jq -nc --argjson t0 "$t0" '
+  def point(tenant; status; code; rid; at; ms): {type:"Point",metric:"redis_request",data:{time:"2026-10-20T12:00:30Z",value:ms,
+    tags:{tenant:tenant,status:(status | tostring),code:code,rid:rid,sent_ms:($t0 + at * 1000 | tostring)}}};
+  {type:"Metric",metric:"redis_request",data:{name:"redis_request"}},
+  {type:"Point",metric:"http_req_duration",data:{time:"2026-10-20T12:00:30Z",value:1,tags:{}}},
+  point("open";200;"none";"o1";-5;2), point("open";429;"rate_limited";"o2";-5;1),
+  point("budget";200;"none";"b1";-5;3), point("closed";200;"none";"c1";-5;2),
+  point("open";200;"none";"o3";2;500), point("open";200;"none";"o4";3;510),
+  point("budget";200;"none";"b2";2;1000), point("closed";503;"store_unavailable";"c2";2;250),
+  point("open";200;"none";"o5";10.5;300), point("open";200;"none";"o6";11;2), point("open";0;"none";"none";11.5;10000),
+  point("budget";200;"none";"b3";12;3), point("closed";200;"none";"c3";12;2)' >"$tmp/base-redis-points.json"
+jq -nc '
+  def event(id; tenant; outcome; code; fo; cost): {msg:"cost_event",run_id:"fixture-hung",request_id:id,tenant:tenant,outcome:outcome,error_code:code}
+    + (if fo == "" then {} else {fail_open:fo} end) + (if cost > 0 then {cost_usd:cost} else {} end);
+  def warn(id; msg): {msg:msg,request_id:id};
+  event("o1";"tenant-open";"success";"";"";0), event("o2";"tenant-open";"error";"rate_limited";"";0),
+  event("b1";"tenant-budget";"success";"";"";0.034), event("c1";"tenant-closed";"success";"";"";0),
+  event("o3";"tenant-open";"success";"";"rpm,tpm";0), event("o4";"tenant-open";"success";"";"rpm,tpm";0),
+  event("b2";"tenant-budget";"success";"";"rpm,budget,tpm";0.034), event("c2";"tenant-closed";"error";"store_unavailable";"";0),
+  event("o5";"tenant-open";"success";"";"rpm";0), event("o6";"tenant-open";"success";"";"";0),
+  event("b3";"tenant-budget";"success";"";"";0.034), event("c3";"tenant-closed";"success";"";"";0),
+  (event("other";"tenant-open";"success";"";"rpm";0) | .run_id = "another"),
+  warn("o3";"rate limiter store unavailable, failing open"), warn("o3";"token limiter store unavailable, failing open"),
+  warn("o4";"rate limiter store unavailable, failing open"), warn("o4";"token limiter store unavailable, failing open"),
+  warn("b2";"rate limiter store unavailable, failing open"), warn("b2";"spend store unavailable, failing open"),
+  warn("b2";"token limiter store unavailable, failing open"), warn("b2";"spend counter update failed; spend under-counted"),
+  warn("c2";"rate limiter store unavailable, failing closed"), warn("o5";"rate limiter store unavailable, failing open"),
+  warn("other";"rate limiter store unavailable, failing open")' >"$tmp/base-redis-events.jsonl"
+
+reset_redis() {
+  cp "$tmp/base-redis.json" "$tmp/loadtest/out/fixture-hung-redis.json"
+  cp "$tmp/base-redis-points.json" "$tmp/loadtest/out/fixture-hung-redis-points.json"
+  cp "$tmp/base-redis-window.json" "$tmp/loadtest/out/fixture-hung-redis-window.json"
+  cp "$tmp/base-redis-events.jsonl" "$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+}
+redis_verify() { bash "$tmp/loadtest/verify-redis.sh" fixture-hung; }
+redis_summary() { jq "$1" "$tmp/base-redis.json" >"$tmp/loadtest/out/fixture-hung-redis.json"; }
+redis_window() { jq "$1" "$tmp/base-redis-window.json" >"$tmp/loadtest/out/fixture-hung-redis-window.json"; }
+redis_points() { jq -c "$1" "$tmp/base-redis-points.json" >"$tmp/loadtest/out/fixture-hung-redis-points.json"; }
+redis_events() { jq -c "$1" "$tmp/base-redis-events.jsonl" >"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"; }
+
+reset_redis
+expect 0 'consistent store outage with another run ignored' redis_verify
+logged 'during  open         2      2      0          0         0         0            505/509.5/509.9 2/2/0'
+logged 'during  closed       1      0      0          1         0         0                250/250/250 0/0/0'
+logged 'after   open         3      2      0          0         0         1           151/285.1/297.02 1/0/0'
+logged 'admitted 2 during the window vs r·W = 10.2 → excess -8.2 (2 fail-open rpm admissions); whole run 5 admitted vs B + r·T = 32'
+logged 'lost increments (warnings) 1, 0.034 USD; store counter 0.068 USD = Σcost − Σlost + 0 applied'
+logged 'during the window 4 failures answered in 250 ms or more (the last sent at +3 s) and 0 faster; 1 failures sent after the restore, the last at +0.3 s; first store decision after the restore at +0.8 s'
+reset_redis
+redis_window '.spend_counter_usd = 0.102'
+expect 0 'late-applied increment within bounds' redis_verify
+logged 'Σcost − Σlost + 0.034 applied after the gateway reported them lost'
+reset_redis
+redis_window '.spend_counter_usd = 0.05'
+expect 1 'spend increment lost without a warning' redis_verify
+reset_redis
+redis_window '.spend_counter_usd = 0.2'
+expect 1 'spend counter above the summed cost' redis_verify
+reset_redis
+redis_events 'select(.request_id != "b2" or .msg != "spend counter update failed; spend under-counted")'
+expect 1 'lost increment without its warning' redis_verify
+for id in o1 o2 b1 c2 o5; do
+  reset_redis
+  redis_events "select(.msg != \"cost_event\" or .request_id != \"$id\")"
+  expect 1 "missing store-outage event $id" redis_verify
+  logged "request $id (.*) has no cost event"
+done
+reset_redis
+jq -c 'select(.msg == "cost_event" and .request_id == "o2")' "$tmp/base-redis-events.jsonl" >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+expect 1 'duplicate store-outage event' redis_verify
+logged 'request o2 has 2 cost events'
+reset_redis
+redis_events 'if .request_id == "o1" and .msg == "cost_event" then .tenant = "tenant-budget" else . end'
+expect 1 'event of another tenant' redis_verify
+reset_redis
+redis_events 'if .request_id == "c2" and .msg == "cost_event" then .error_code = "internal" else . end'
+expect 1 'fail-closed refusal reclassified' redis_verify
+reset_redis
+redis_events 'if .request_id == "o2" and .msg == "cost_event" then .outcome = "success" | .error_code = "" else . end'
+expect 1 'limited request recorded as admitted' redis_verify
+reset_redis
+echo '{"msg":"cost_event","run_id":"fixture-hung","request_id":"ghost","tenant":"tenant-open","outcome":"success","error_code":""}' \
+  >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+expect 1 'event without a k6 request' redis_verify
+reset_redis
+redis_summary '.summary.client.closed.store_unavailable = 0'
+expect 1 'fail-closed refusals disagree with points' redis_verify
+reset_redis
+redis_summary '.summary.client.open.transport = 0'
+expect 1 'transport failures disagree with points' redis_verify
+reset_redis
+redis_events 'select(.request_id != "o3" or .msg != "token limiter store unavailable, failing open")'
+expect 1 'fail-open decision without its warning' redis_verify
+reset_redis
+echo '{"msg":"spend store unavailable, failing open","request_id":"o6"}' >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+expect 1 'fail-open warning without the event field' redis_verify
+reset_redis
+redis_events 'select(.msg != "rate limiter store unavailable, failing closed")'
+expect 1 'fail-closed refusal without its warning' redis_verify
+reset_redis
+redis_events 'if .request_id == "c3" and .msg == "cost_event" then .fail_open = "rpm" else . end'
+echo '{"msg":"rate limiter store unavailable, failing open","request_id":"c3"}' >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+expect 1 'fail-closed tenant failed open' redis_verify
+logged 'fail-closed tenant events carry fail_open'
+reset_redis
+redis_summary '.summary.client.open.ok = 4 | .summary.client.open.store_unavailable = 1'
+redis_points 'if .data.tags.rid == "o4" then .data.tags.status = "503" | .data.tags.code = "store_unavailable" else . end'
+redis_events 'select(.msg != "token limiter store unavailable, failing open" or .request_id != "o4")
+  | if .request_id == "o4" and .msg == "cost_event" then .outcome = "error" | .error_code = "store_unavailable" | del(.fail_open)
+    elif .request_id == "o4" then .msg = "rate limiter store unavailable, failing closed" else . end'
+expect 1 'fail-open tenant refused' redis_verify
+logged 'fail-open tenant requests refused with store_unavailable'
+reset_redis
+redis_events 'if .request_id == "o1" and .msg == "cost_event" then .fail_open = "rpm" else . end'
+echo '{"msg":"rate limiter store unavailable, failing open","request_id":"o1"}' >>"$tmp/loadtest/out/fixture-hung-redis-events.jsonl"
+expect 1 'store failure before the injection' redis_verify
+logged '1 store failures before the injection'
+reset_redis
+redis_window '.inject_start_ms += 4000 | .inject_end_ms += 4000'
+expect 1 'injection without effect' redis_verify
+logged 'the injection had no effect'
+reset_redis
+redis_window '.restore_end_ms = .inject_start_ms - 1'
+expect 1 'window boundaries out of order' redis_verify
+reset_redis
+redis_window '.arm = "flaky"'
+expect 1 'unknown arm' redis_verify
+reset_redis
+redis_window '.spend_counter_usd = null'
+expect 1 'spend counter not read' redis_verify
+reset_redis
+redis_points 'if .data.tags.rid == "b1" then .data.tags.rid = "none" else . end'
+redis_events 'select(.request_id != "b1")'
+redis_window '.spend_counter_usd = 0.034'
+expect 1 'gateway answer without a request id' redis_verify
+logged '1 gateway answers (200/429/503 store_unavailable) without a request id'
+reset_redis
+redis_points 'if .data.tags.rid == "c1" then del(.data.tags.sent_ms) else . end'
+expect 1 'point without a send time' redis_verify
+reset_redis
+redis_summary '.summary.thresholds_passed = false | .summary.dropped_iterations = 3'
+expect 1 'store-outage k6 thresholds failed' redis_verify
+reset_redis
+redis_summary 'del(.summary.client.budget)'
+expect 1 'missing tenant counters' redis_verify
+reset_redis
+rm "$tmp/loadtest/out/fixture-hung-redis-window.json"
+expect 1 'missing injection record' redis_verify
+
 cat >"$tmp/loadtest/fetch-events.sh" <<'SH'
 #!/usr/bin/env bash
 echo "fetch:$RUN_ID" >>"$FIXTURE_ROOT/stages"
 exit "${FETCH_STATUS:-0}"
 SH
-for name in verify verify-breaker verify-tpm verify-chaos; do
+for name in verify verify-breaker verify-tpm verify-chaos verify-redis; do
   cat >"$tmp/loadtest/$name.sh" <<'SH'
 #!/usr/bin/env bash
 echo "verify:$RUN_ID" >>"$FIXTURE_ROOT/stages"
@@ -347,6 +513,41 @@ for target in loadtest breakertest tpmtest chaos-local; do
   expect 2 "$target propagates failure after verification" env K6_STATUS=7 make -s -C "$tmp" -f "$here/../Makefile" "$target" RUN_ID=fixture
   grep -q '^verify:fixture$' "$tmp/stages"
 done
+
+outage() { env REDIS_WARMUP=1 REDIS_FAIL_FOR=2 REDIS_DURATION=5 "$@"; }
+injection_record() {
+  jq -e --arg arm "$1" --arg cmd "docker compose $2 redis" '.arm == $arm and .spend_counter_usd == 0.5 and .commands.inject == $cmd
+    and .inject_start_ms <= .inject_end_ms and .inject_end_ms <= .restore_start_ms and .restore_start_ms <= .restore_end_ms' \
+    "$tmp/loadtest/out/fixture-$1-redis-window.json"
+}
+for arm in hung down; do
+  if [[ "$arm" == hung ]]; then inject=pause restore=unpause; else inject=stop restore=start; fi
+  for scenario in '0 0 0 0 0 0' '7 0 0 0 0 7' '0 5 0 0 0 5' '0 0 6 0 0 6' '0 0 0 8 0 8' '0 0 0 0 9 9' '7 5 6 8 9 7' '0 5 6 8 9 5'; do
+    read -r k6_status inject_status restore_status drain_status verify_status expected <<<"$scenario"
+    : >"$tmp/stages"
+    expect "$expected" "redis $arm stage status $scenario" outage K6_STATUS="$k6_status" INJECT_STATUS="$inject_status" \
+      RESTORE_STATUS="$restore_status" DRAIN_STATUS="$drain_status" VERIFY_STATUS="$verify_status" bash "$tmp/loadtest/redis-outage.sh" fixture "$arm"
+    printf 'up:\nflush\ninject:%s\nrestore:%s\ndrain:fixture-%s\nverify:fixture-%s\n' "$inject" "$restore" "$arm" "$arm" >"$tmp/expected-stages"
+    grep -v '^run:' "$tmp/stages" | diff -u "$tmp/expected-stages" -
+    [[ "$(grep -c "^run:fixture-$arm$" "$tmp/stages")" == 1 ]]
+  done
+  expect 0 "redis $arm injection record" injection_record "$arm" "$inject"
+done
+: >"$tmp/stages"
+expect 1 'store restored when the run aborts inside the window' outage SLEEP_FAIL_ON=2 bash "$tmp/loadtest/redis-outage.sh" fixture hung
+grep -v '^run:' "$tmp/stages" | diff -u <(printf 'up:\nflush\ninject:pause\nrestore:unpause\n') -
+: >"$tmp/stages"
+expect 3 'store-outage setup failure stops before injecting' outage UP_STATUS=3 bash "$tmp/loadtest/redis-outage.sh" fixture down
+diff -u <(echo up:) "$tmp/stages"
+expect 2 'unknown store-outage arm' bash "$tmp/loadtest/redis-outage.sh" fixture flaky
+expect 2 'window longer than the run' env REDIS_WARMUP=30 REDIS_FAIL_FOR=30 REDIS_DURATION=60 bash "$tmp/loadtest/redis-outage.sh" fixture hung
+expect 2 'window in a non-integer unit' env REDIS_FAIL_FOR=30s bash "$tmp/loadtest/redis-outage.sh" fixture hung
+: >"$tmp/stages"
+expect 2 'chaos-redis propagates failure after verifying both arms' env K6_STATUS=7 make -s -C "$tmp" -f "$here/../Makefile" chaos-redis RUN_ID=fixture
+grep -q '^verify:fixture-hung$' "$tmp/stages"
+grep -q '^verify:fixture-down$' "$tmp/stages"
+grep -q '^up:tenant-budget:budget_usd=1000;tenant-closed:fail_closed=true$' "$tmp/stages"
+jq -e '.rpm_limit == 600 and .rpm_burst == 20 and .duration_s == 90' "$tmp/loadtest/out/fixture-down-redis-window.json" >/dev/null
 
 cat >"$tmp/bin/date" <<'SH'
 #!/usr/bin/env bash
