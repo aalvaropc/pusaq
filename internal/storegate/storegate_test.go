@@ -323,7 +323,11 @@ func TestStragglerDoesNotDecideTheProbe(t *testing.T) {
 	})
 	done := make(chan error)
 	go func() { done <- slow(context.Background(), redis.NewStatusCmd(context.Background(), "evalsha")) }()
-	<-entered
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("straggler never reached the store: %v", err)
+	}
 	h.store.set(errRefused, false)
 	h.calls(t, MinSamples)
 	h.advance(Cooldown)
