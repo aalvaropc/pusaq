@@ -94,8 +94,8 @@ type Input struct {
 	Other      int
 	Duplicates int
 
-	Events      []Event
-	Shadow      []ShadowRecord
+	Events           []Event
+	Shadow           []ShadowRecord
 	Transitions      []Transition
 	StoreTransitions []Transition
 	Misses           []BackendMiss
@@ -139,8 +139,8 @@ type line struct {
 
 	Backend   string `json:"backend"`
 	Component string `json:"component"`
-	From    string `json:"from"`
-	To      string `json:"to"`
+	From      string `json:"from"`
+	To        string `json:"to"`
 
 	Tau              *float64 `json:"tau"`
 	TelemetryDropped *uint64  `json:"telemetry_dropped"`
