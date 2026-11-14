@@ -12,7 +12,7 @@
 ## 3. Gateway
 
 - [ ] 3.1 Accept `tools`, `tool_choice`, `parallel_tool_calls`, assistant `tool_calls` and `tool` messages with the design's bounds and conversation rules; keep the legacy and structured-output fields rejected; `param` on every rule; validation table.
-- [ ] 3.2 Forward the fields upstream; pass buffered tool calls and `finish_reason` through; tool-call deltas pass the stream scanner untouched.
+- [ ] 3.2 Forward the fields upstream on every attempt, retries included; pass buffered tool calls and `finish_reason` through; tool-call deltas pass the stream scanner untouched.
 - [ ] 3.3 `promptChars` and the input estimate count tool definitions and tool-call names and arguments; prompt cap test.
 - [ ] 3.4 Content rules over tool definitions (sensitive), tool-call arguments and tool results (sensitive, injection); tests for flags, blocking and no logged text; corpus unchanged.
 - [ ] 3.5 Canonical tools hash in the namespace, stable under key order; single-turn requests with tools eligible; fingerprints over tool calls, buffered and streamed.
