@@ -97,7 +97,7 @@ returned, of the last request that met a store failure.
 | Host | Fedora 44, Linux 7.3.3, Intel Core i5-13600K (20 threads), 31 GiB; every container on this host, which other workloads shared during the runs |
 | Docker / Compose | Docker 29.9.3, Compose 5.7.0 |
 | Images | `redis:7-alpine`, `nginx:1.27-alpine`, `grafana/k6:1.4.0`; gateway and mocks built from this branch |
-| Commit | runs 1–2 from the working tree committed as `8141167` (the verifier gained one report line and header comments were shortened before that commit); run 3 from `ebfb050`. All six arms re-verified with the verifier of `ebfb050`. The gateway code is that of `a66bd72` |
+| Commit | gateway built from `a66bd72`, with the store-outage harness of this report; for runs 1–2 the verifier lacked one report line, and all six arms were re-verified with the published verifier. Gateway changes after `a66bd72` (bucket TTLs that follow refill, same-backend retries that are off by default) leave the store-outage path unchanged and were not measured here |
 | Gateway | two replicas behind nginx round-robin; strict request limit 600/min (r = 10/s), burst 20; token limit 600 000/min, burst 100 000 (on, never binding); store client without retries, 250 ms budget per call |
 | Prices | synthetic `mock-exactness` 1 000 / 2 000 USD per 1M input / output tokens: 0.034 USD per completion (12 + 11 tokens) |
 | Upstream | zero-latency mock |
