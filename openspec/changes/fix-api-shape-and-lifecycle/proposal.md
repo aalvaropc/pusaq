@@ -34,7 +34,7 @@ None.
 ### Modified Capabilities
 
 - `request-pipeline`: one error shape with `type` and `param` for every error, including unknown routes and unsupported methods, always with a request ID.
-- `chat-completions`: the buffered response carries `created` and the provider's `system_fingerprint`.
+- `chat-completions`: the buffered response carries `created` and the provider's `system_fingerprint`; the not-ready refusal applies to authenticated requests; the run-id validation scenario states the one cost event such a request already produces.
 - `tenant-auth`: the `Bearer` scheme is case-insensitive and accepts spaces or tabs as separator.
 - `operations`: not-ready refusals happen after authentication with a request ID and a cost event; a second termination signal exits immediately; the admin bearer check follows tenant authentication.
 - `rate-limiting`: bucket expiry follows the refill time; lease refunds are budgeted per store call.

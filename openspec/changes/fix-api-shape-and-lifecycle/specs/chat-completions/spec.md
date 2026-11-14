@@ -33,3 +33,27 @@ The gateway SHALL expose `POST /v1/chat/completions` accepting the OpenAI reques
 
 - **WHEN** a client sets `temperature` to 0, to 1.2, or omits it
 - **THEN** the provider request carries 0, 1.2, or no temperature respectively, for buffered and streamed completions alike
+
+### Requirement: Responses identify the serving region and requests may declare a run
+
+When the replica is labeled with a region, every response — success, error, readiness — SHALL carry the `X-Pusaq-Region` header with that label. A request MAY declare `metadata.run_id`, a string of at most 64 characters, read before admission so that every cost event of the request — including a rejection by the rate limiter — carries it; any other value SHALL be rejected as `invalid_request` before admission. An authenticated request that reaches a replica inside an injected not-ready window SHALL be refused with 503 `not_ready` and a `Retry-After`.
+
+#### Scenario: Region header on every response
+
+- **WHEN** a labeled replica answers a completion, an error, or a readiness probe
+- **THEN** the response carries `X-Pusaq-Region` with the label
+
+#### Scenario: Run id validated
+
+- **WHEN** a request declares a non-string or oversized `metadata.run_id`
+- **THEN** the response is 400 `invalid_request` with param `metadata.run_id` before admission, and its one cost event carries no run id
+
+#### Scenario: Run id on an early rejection
+
+- **WHEN** a request declaring `metadata.run_id` is rejected by the rate limiter
+- **THEN** its cost event carries the run id
+
+#### Scenario: Refused while not ready
+
+- **WHEN** an authenticated request arrives during an injected not-ready window
+- **THEN** the response is 503 `not_ready` with a `Retry-After` header, the region header and a request ID, and no provider is called
