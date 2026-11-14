@@ -50,3 +50,4 @@
 - The budget is per instance: n instances allow n times the reserve and the floor.
 - The budget is a float: a ratio such as 0.2 is not exact in binary, and a million credits of 0.2 sum to 200000 within 4·10⁻⁶.
 - The event report counts a backend's failure once per request (`backend failed, trying next`); retried failures appear in `retries`, not in its per-backend failure counts.
+- Go's HTTP client treats a request carrying `Idempotency-Key` as replayable: when a reused idle connection fails before the first response byte, it resends the request over another connection. Such a resend happens inside one attempt and is not counted in `attempts`.
