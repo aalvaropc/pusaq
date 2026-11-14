@@ -84,8 +84,7 @@ func estimateInputTokens(messages []provider.Message) int {
 type Route struct {
 	Provider string
 	Model    string
-	// Fallbacks are tried in order, at most once each, when the primary
-	// fails with an upstream error or its breaker is open.
+	// Fallbacks are entered in order, at most once each.
 	Fallbacks []string
 }
 
@@ -252,8 +251,9 @@ type CompletionsOptions struct {
 	// Policies resolves per-tenant policies; nil means no policies.
 	Policies PolicyFor
 	// Spend tracks monthly spend for budgeted tenants; nil disables budgets.
-	Spend  SpendCounter
-	Logger *slog.Logger
+	Spend   SpendCounter
+	Retries Retries
+	Logger  *slog.Logger
 }
 
 // priceOnFinalize registers the finalizer that prices the request after a
@@ -322,16 +322,21 @@ func offerShadow(req *core.Request, shape cacheShape, opts CompletionsOptions, c
 
 // upstreamRequest is the one place the client's request becomes the
 // provider's, so the buffered and streaming paths cannot drift apart.
-func upstreamRequest(cr completionRequest, route Route) provider.ChatRequest {
+func upstreamRequest(cr completionRequest, route Route, requestID string) provider.ChatRequest {
 	var maxTokens int
 	if cr.MaxTokens != nil {
 		maxTokens = *cr.MaxTokens
 	}
+	var key string
+	if requestID != "" {
+		key = "pusaq-" + requestID
+	}
 	return provider.ChatRequest{
-		Model:       route.Model,
-		Messages:    cr.Messages,
-		MaxTokens:   maxTokens,
-		Temperature: cr.Temperature,
+		Model:          route.Model,
+		Messages:       cr.Messages,
+		MaxTokens:      maxTokens,
+		Temperature:    cr.Temperature,
+		IdempotencyKey: key,
 	}
 }
 
@@ -501,48 +506,68 @@ func chargeTokens(ctx context.Context, req *core.Request, cr completionRequest, 
 }
 
 // viaChain walks the route's backend chain: skip open breakers without
-// paying an attempt, feed every failed attempt back to the breaker, and
-// return the first success with its breaker ticket, on which the caller
-// records the outcome. A client cancellation stops the chain and feeds
-// nothing; non-upstream errors stop the chain — they are not the backend's
-// fault.
+// paying an attempt, retry a retryable failure on the same backend within
+// opts.Retries, feed every attempt's outcome to its own breaker ticket, and
+// return the first success with its ticket, on which the caller records
+// the outcome. A client cancellation stops the chain and feeds nothing;
+// non-upstream errors stop the chain — they are not the backend's fault.
 func viaChain[T any](ctx context.Context, providers map[string]provider.Provider, req *core.Request, route Route, opts CompletionsOptions, call func(provider.Provider) (T, error)) (T, breaker.Ticket, error) {
 	var zero T
 	var lastErr error
+	retries := opts.Retries.start(req)
 	for _, backend := range route.backends() {
-		if ctx.Err() != nil {
-			return zero, breaker.Ticket{}, errClientCanceled()
-		}
-		p, ok := providers[backend]
-		if !ok {
-			return zero, breaker.Ticket{}, core.Errorf(core.CodeInternal, "no provider registered for route")
-		}
-		var ticket breaker.Ticket
-		if br := opts.breakerFor(backend); br != nil {
-			if ticket, ok = br.Allow(); !ok {
-				opts.Logger.Warn("backend breaker open, skipping",
-					slog.String("request_id", req.ID), slog.String("backend", backend))
-				continue
+		for n := 0; ; n++ {
+			if ctx.Err() != nil {
+				if n > 0 {
+					retries.unspend()
+				}
+				return zero, breaker.Ticket{}, errClientCanceled()
+			}
+			p, ok := providers[backend]
+			if !ok {
+				return zero, breaker.Ticket{}, core.Errorf(core.CodeInternal, "no provider registered for route")
+			}
+			var ticket breaker.Ticket
+			if br := opts.breakerFor(backend); br != nil {
+				if ticket, ok = br.Allow(); !ok {
+					if n > 0 {
+						retries.unspend()
+					}
+					opts.Logger.Warn("backend breaker open, skipping",
+						slog.String("request_id", req.ID), slog.String("backend", backend))
+					break
+				}
+			}
+			retries.attempt(ctx, n > 0)
+			out, err := call(p)
+			if err != nil && ctx.Err() != nil {
+				ticket.Release()
+				return zero, breaker.Ticket{}, errClientCanceled()
+			}
+			if err == nil {
+				req.ServedProvider = backend
+				return out, ticket, nil
+			}
+			upstreamFailure := core.AsError(err).Code == core.CodeUpstream
+			ticket.Record(!upstreamFailure)
+			if !upstreamFailure {
+				return zero, breaker.Ticket{}, err
+			}
+			lastErr = err
+			wait, again := retries.next(err, n)
+			if !again {
+				opts.Logger.Warn("backend failed, trying next",
+					slog.String("request_id", req.ID), slog.String("backend", backend), slog.String("error_code", string(core.AsError(err).Code)))
+				break
+			}
+			opts.Logger.Warn("backend failed, retrying",
+				slog.String("request_id", req.ID), slog.String("backend", backend), slog.String("error_code", string(core.AsError(err).Code)),
+				slog.Int64("wait_ms", wait.Milliseconds()))
+			if retries.sleep(ctx, wait) != nil {
+				retries.unspend()
+				return zero, breaker.Ticket{}, errClientCanceled()
 			}
 		}
-		req.Attempts++
-		out, err := call(p)
-		if err != nil && ctx.Err() != nil {
-			ticket.Release()
-			return zero, breaker.Ticket{}, errClientCanceled()
-		}
-		if err == nil {
-			req.ServedProvider = backend
-			return out, ticket, nil
-		}
-		upstreamFailure := core.AsError(err).Code == core.CodeUpstream
-		ticket.Record(!upstreamFailure)
-		if !upstreamFailure {
-			return zero, breaker.Ticket{}, err
-		}
-		lastErr = err
-		opts.Logger.Warn("backend failed, trying next",
-			slog.String("request_id", req.ID), slog.String("backend", backend), slog.String("error_code", string(core.AsError(err).Code)))
 	}
 	if lastErr != nil {
 		return zero, breaker.Ticket{}, lastErr
@@ -555,7 +580,7 @@ func errClientCanceled() error {
 }
 
 func completeWithFallback(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, route Route, opts CompletionsOptions) (provider.ChatResponse, error) {
-	chatReq := upstreamRequest(cr, route)
+	chatReq := upstreamRequest(cr, route, req.ID)
 	out, ticket, err := viaChain(ctx, providers, req, route, opts, func(p provider.Provider) (provider.ChatResponse, error) {
 		return p.Complete(ctx, chatReq)
 	})
@@ -568,7 +593,7 @@ func completeWithFallback(ctx context.Context, providers map[string]provider.Pro
 // started stream is never restarted, and its outcome reaches the backend's
 // breaker when it ends.
 func streamCompletion(ctx context.Context, providers map[string]provider.Provider, req *core.Request, cr completionRequest, shape cacheShape, route Route, opts CompletionsOptions) (*core.Response, error) {
-	chatReq := upstreamRequest(cr, route)
+	chatReq := upstreamRequest(cr, route, req.ID)
 	upstream, ticket, err := viaChain(ctx, providers, req, route, opts, func(p provider.Provider) (io.ReadCloser, error) {
 		return p.StreamComplete(ctx, chatReq)
 	})

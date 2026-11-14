@@ -298,3 +298,35 @@ func TestLatencyIsMillisecondsInEveryEncoding(t *testing.T) {
 		t.Fatalf("latency_ms json=%v log=%v, want 1500 in both", encoded["latency_ms"], logged["latency_ms"])
 	}
 }
+
+func TestRetriesAndDenialsInEveryEncoding(t *testing.T) {
+	retried := event("r1")
+	retried.Attempts, retried.Retries, retried.RetryDenied = 3, 1, []string{"budget", "deadline"}
+	for _, tc := range []struct {
+		e       core.CostEvent
+		retries float64
+		denied  any
+	}{
+		{retried, 1, "budget,deadline"},
+		{event("r2"), 0, nil},
+	} {
+		logged := sinkLine(t, tc.e)
+		raw, err := json.Marshal(tc.e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var encoded map[string]any
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			t.Fatal(err)
+		}
+		if logged["retries"] != tc.retries || encoded["retries"] != tc.retries {
+			t.Fatalf("retries log=%v json=%v, want %v in both", logged["retries"], encoded["retries"], tc.retries)
+		}
+		if logged["retry_denied"] != tc.denied {
+			t.Fatalf("retry_denied log = %v, want %v", logged["retry_denied"], tc.denied)
+		}
+		if _, ok := encoded["retry_denied"]; ok != (tc.denied != nil) {
+			t.Fatalf("retry_denied json = %v, want present=%t", encoded["retry_denied"], tc.denied != nil)
+		}
+	}
+}

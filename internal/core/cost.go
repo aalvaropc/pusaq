@@ -49,9 +49,11 @@ type CostEvent struct {
 	FailOpen    []string `json:"fail_open,omitempty"`
 	// ServedProvider names the backend that answered (after fallback);
 	// Attempts counts backend attempts, so failover is observable.
-	ServedProvider string `json:"served_provider,omitempty"`
-	Attempts       int    `json:"attempts"`
-	Usage          Usage  `json:"usage,omitzero"`
+	ServedProvider string   `json:"served_provider,omitempty"`
+	Attempts       int      `json:"attempts"`
+	Retries        int      `json:"retries"`
+	RetryDenied    []string `json:"retry_denied,omitempty"`
+	Usage          Usage    `json:"usage,omitzero"`
 	// TokensCharged is the admission charge (input estimate + output
 	// reservation) so reservation error is measurable against Usage.
 	TokensCharged int `json:"tokens_charged,omitempty"`

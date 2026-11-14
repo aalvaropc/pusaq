@@ -22,6 +22,7 @@ import (
 	"github.com/aalvaropc/pusaq/internal/pricing"
 	"github.com/aalvaropc/pusaq/internal/provider"
 	"github.com/aalvaropc/pusaq/internal/ratelimit"
+	"github.com/aalvaropc/pusaq/internal/retry"
 	"github.com/aalvaropc/pusaq/internal/semcache"
 	"github.com/aalvaropc/pusaq/internal/spend"
 	"github.com/aalvaropc/pusaq/internal/telemetry"
@@ -67,6 +68,7 @@ type app struct {
 	index    *semcache.Index
 	shadow   *semcache.Shadow
 	breakers map[string]*breaker.Breaker
+	retries  gateway.Retries
 }
 
 func newApp(cfg config.Config, logger *slog.Logger) (*app, error) {
@@ -103,6 +105,15 @@ func newApp(cfg config.Config, logger *slog.Logger) (*app, error) {
 	}
 
 	providers, fallbacks := a.upstreams()
+	if cfg.RetryMax > 0 {
+		a.retries = gateway.Retries{Max: cfg.RetryMax, Window: cfg.RetryWindow, Budget: retry.NewBudget(cfg.RetryBudgetRatio)}
+	}
+	opts.Retries = a.retries
+	logger.Info("upstream retries configured",
+		slog.Int("max", cfg.RetryMax),
+		slog.Float64("budget_ratio", cfg.RetryBudgetRatio),
+		slog.Duration("window", cfg.RetryWindow),
+	)
 	primary := cfg.Upstreams[0].Name
 	routes := make(map[string]gateway.Route, len(cfg.Routes))
 	for alias, r := range cfg.Routes {
