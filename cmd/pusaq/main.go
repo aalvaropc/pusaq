@@ -373,12 +373,13 @@ const (
 	readHeaderTimeout = 10 * time.Second
 	idleTimeout       = 120 * time.Second
 	bucketTTLFloor    = time.Minute
+	storeDialTimeout  = 250 * time.Millisecond
 )
 
-// redisOptions leaves the time budget to the callers' contexts: no internal
-// retries, and reads and writes end at the context deadline.
+// redisOptions: no internal retries, deadlines from the caller's context, and
+// dial attempts, which run outside that context, bounded by the store budget.
 func redisOptions(addr string) *redis.Options {
-	return &redis.Options{Addr: addr, MaxRetries: -1, ContextTimeoutEnabled: true}
+	return &redis.Options{Addr: addr, MaxRetries: -1, ContextTimeoutEnabled: true, DialTimeout: storeDialTimeout}
 }
 
 func newEmbedder(cfg config.Config) embed.Embedder {

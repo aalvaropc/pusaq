@@ -58,6 +58,31 @@ func TestRedisOptionsHonorContextDeadline(t *testing.T) {
 	}
 }
 
+func TestRedisDialAttemptsEndWithinTheStoreBudget(t *testing.T) {
+	opts := redisOptions("redis.invalid:6379")
+	budgets := make(chan time.Duration, 16)
+	opts.Dialer = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			deadline = time.Now().Add(time.Hour)
+		}
+		budgets <- time.Until(deadline)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	client := redis.NewClient(opts)
+	t.Cleanup(func() { _ = client.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err == nil {
+		t.Fatal("Ping() through a dialer that never connects succeeded")
+	}
+	if got := <-budgets; got <= 0 || got > storeDialTimeout {
+		t.Fatalf("dial attempt budget = %v, want at most %v whatever the caller's deadline", got, storeDialTimeout)
+	}
+}
+
 func TestHTTPServerTimeouts(t *testing.T) {
 	s := newHTTPServer(":0", http.NotFoundHandler())
 	if s.ReadHeaderTimeout != readHeaderTimeout || s.IdleTimeout != idleTimeout {
