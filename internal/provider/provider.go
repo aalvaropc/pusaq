@@ -6,6 +6,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 
 	"github.com/aalvaropc/pusaq/internal/core"
@@ -13,8 +14,73 @@ import (
 
 // Message is one turn of a chat conversation.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+// MarshalJSON renders a tool-call message without text with content null.
+func (m Message) MarshalJSON() ([]byte, error) {
+	content := &m.Content
+	if m.Content == "" && len(m.ToolCalls) > 0 {
+		content = nil
+	}
+	return json.Marshal(struct {
+		Role       string     `json:"role"`
+		Content    *string    `json:"content"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+	}{m.Role, content, m.ToolCalls, m.ToolCallID})
+}
+
+// ToolCall is one function call made by an assistant message.
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function FunctionCall `json:"function"`
+}
+
+// FunctionCall names the called function and carries its arguments.
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// Tool is a function the model may call.
+type Tool struct {
+	Type     string   `json:"type"`
+	Function Function `json:"function"`
+}
+
+// Function declares a tool's name, description and JSON Schema parameters.
+type Function struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// ToolChoiceFunction is the ToolChoice mode that forces one function.
+const ToolChoiceFunction = "function"
+
+// ToolChoice is none, auto, required, or ToolChoiceFunction with a name.
+type ToolChoice struct {
+	Mode     string
+	Function string
+}
+
+// MarshalJSON renders the OpenAI string or function object.
+func (c ToolChoice) MarshalJSON() ([]byte, error) {
+	if c.Mode != ToolChoiceFunction {
+		return json.Marshal(c.Mode)
+	}
+	type name struct {
+		Name string `json:"name"`
+	}
+	return json.Marshal(struct {
+		Type     string `json:"type"`
+		Function name   `json:"function"`
+	}{ToolChoiceFunction, name{c.Function}})
 }
 
 // ChatRequest is the provider-agnostic completion request. Model carries the
@@ -25,8 +91,11 @@ type ChatRequest struct {
 	MaxTokens int       `json:"max_tokens,omitempty"`
 	// Temperature is forwarded as the client sent it; a pointer so an
 	// explicit 0 survives (omitted only when the client omitted it).
-	Temperature    *float64 `json:"temperature,omitempty"`
-	IdempotencyKey string   `json:"-"`
+	Temperature       *float64    `json:"temperature,omitempty"`
+	Tools             []Tool      `json:"tools,omitempty"`
+	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
+	IdempotencyKey    string      `json:"-"`
 }
 
 // Choice is one completion alternative.
